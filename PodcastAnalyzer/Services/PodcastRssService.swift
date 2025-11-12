@@ -5,6 +5,7 @@
 
 import FeedKit
 import Foundation
+internal import XMLKit
 
 public struct PodcastEpisodeInfo: Sendable, Codable {
     public let title: String
@@ -35,7 +36,7 @@ public enum PodcastServiceError: Error, LocalizedError {
     }
 }
 
-public actor PodcastService {
+public actor PodcastRssService {
 
     /// Parses the given RSS URL and returns a clean model.
     /// - Parameter urlString: any RSS/Atom/JSON feed URL
