@@ -22,11 +22,18 @@ struct SettingsView: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .textCase(nil)
+                        .disabled(viewModel.isValidating)
                     
-                    Button("Add Feed") {
-                        viewModel.addRssLink(modelContext: modelContext)
+                    if viewModel.isValidating {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Button("Add Feed") {
+                            viewModel.addRssLink(modelContext: modelContext)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.rssUrlInput.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
                 
                 if !viewModel.successMessage.isEmpty {

@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import Combine
 import SwiftData
+import os.log
 
 @MainActor
 class SettingsViewModel: ObservableObject {
@@ -9,8 +10,11 @@ class SettingsViewModel: ObservableObject {
     @Published var successMessage: String = ""
     @Published var errorMessage: String = ""
     @Published var podcastFeeds: [PodcastFeed] = []
+    @Published var isValidating: Bool = false
     
     private var successMessageTask: Task<Void, Never>?
+    private let service = PodcastRssService()
+    private let logger = Logger(subsystem: "com.podcast.analyzer", category: "SettingsViewModel")
     
     // MARK: - Public Methods
     
@@ -31,29 +35,54 @@ class SettingsViewModel: ObservableObject {
             return
         }
         
-        // Create new podcast feed
-        let newFeed = PodcastFeed(rssUrl: trimmedLink)
+        // Start validation
+        isValidating = true
+        errorMessage = ""
+        successMessage = "Validating RSS feed..."
         
-        do {
-            modelContext.insert(newFeed)
-            try modelContext.save()
-            
-            podcastFeeds.append(newFeed)
-            rssUrlInput = ""
-            errorMessage = ""
-            successMessage = "✅ Feed added successfully!"
-            
-            // Hide success message after 2 seconds
-            successMessageTask?.cancel()
-            successMessageTask = Task {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                if !Task.isCancelled {
-                    self.successMessage = ""
+        Task {
+            do {
+                self.logger.info("Validating RSS feed: \(trimmedLink)")
+                
+                // Try to fetch the podcast to validate the RSS feed
+                let podcastInfo = try await service.fetchPodcast(from: trimmedLink)
+                
+                self.logger.info("✅ RSS feed is valid: \(podcastInfo.title)")
+                
+                // Create new podcast feed
+                let newFeed = PodcastFeed(rssUrl: trimmedLink)
+                newFeed.title = podcastInfo.title
+                newFeed.subtitle = podcastInfo.description
+                
+                // Save to database
+                modelContext.insert(newFeed)
+                try modelContext.save()
+                
+                self.podcastFeeds.append(newFeed)
+                self.rssUrlInput = ""
+                self.errorMessage = ""
+                self.successMessage = "✅ Feed added successfully!"
+                self.logger.info("Feed saved to database: \(podcastInfo.title)")
+                
+                // Hide success message after 2 seconds
+                self.successMessageTask?.cancel()
+                self.successMessageTask = Task {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if !Task.isCancelled {
+                        self.successMessage = ""
+                    }
                 }
+            } catch let error as PodcastServiceError {
+                self.logger.error("RSS validation failed: \(error.localizedDescription)")
+                self.errorMessage = "❌ Invalid RSS feed: \(error.localizedDescription)"
+                self.successMessage = ""
+            } catch {
+                self.logger.error("Unexpected error: \(error.localizedDescription)")
+                self.errorMessage = "❌ Error: \(error.localizedDescription)"
+                self.successMessage = ""
             }
-        } catch {
-            errorMessage = "Failed to save feed: \(error.localizedDescription)"
-            successMessage = ""
+            
+            self.isValidating = false
         }
     }
     
@@ -63,8 +92,10 @@ class SettingsViewModel: ObservableObject {
             try modelContext.save()
             podcastFeeds.removeAll { $0.id == feed.id }
             errorMessage = ""
+            self.logger.info("Feed deleted: \(feed.title ?? feed.rssUrl)")
         } catch {
             errorMessage = "Failed to delete feed: \(error.localizedDescription)"
+            self.logger.error("Failed to delete feed: \(error.localizedDescription)")
         }
     }
     
@@ -76,8 +107,10 @@ class SettingsViewModel: ObservableObject {
         do {
             podcastFeeds = try modelContext.fetch(descriptor)
             errorMessage = ""
+            self.logger.info("Loaded \(self.podcastFeeds.count) feeds")
         } catch {
             errorMessage = "Failed to load feeds: \(error.localizedDescription)"
+            self.logger.error("Failed to load feeds: \(error.localizedDescription)")
         }
     }
     

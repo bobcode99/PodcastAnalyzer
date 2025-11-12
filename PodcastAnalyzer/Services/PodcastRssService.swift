@@ -14,10 +14,20 @@ public struct PodcastEpisodeInfo: Sendable, Codable {
     public let audioURL: String?
 }
 
-public struct PodcastInfo: Sendable {
+public struct PodcastInfo: Sendable, Identifiable {
+    public let id: String  // This will be the rssUrl
     public let title: String
     public let description: String?
     public let episodes: [PodcastEpisodeInfo]
+    public let rssUrl: String
+    
+    init(title: String, description: String?, episodes: [PodcastEpisodeInfo], rssUrl: String) {
+        self.id = rssUrl  // Use RSS URL as unique ID
+        self.title = title
+        self.description = description
+        self.episodes = episodes
+        self.rssUrl = rssUrl
+    }
 }
 
 // MARK: - The service
@@ -66,7 +76,8 @@ public actor PodcastRssService {
         return PodcastInfo(
             title: rssFeed.channel?.title ?? "Untitled Podcast",
             description: rssFeed.channel?.description,
-            episodes: episodes
+            episodes: episodes,
+            rssUrl: urlString
         )
     }
 }

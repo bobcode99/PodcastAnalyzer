@@ -27,9 +27,9 @@ struct HomeView: View {
                             .font(.caption)
                             .foregroundColor(.gray)
                     }
-                } else if viewModel.podcastFeeds.isEmpty {
+                } else if viewModel.podcasts.isEmpty {
                     VStack(spacing: 12) {
-                        Image(systemName: "podcast")
+                        Image(systemName: "apple.podcasts.pages.fill")
                             .font(.system(size: 50))
                             .foregroundColor(.gray)
                         Text("Welcome to Podcast Analyzer")
@@ -39,15 +39,21 @@ struct HomeView: View {
                             .foregroundColor(.gray)
                     }
                 } else {
-                    List(viewModel.podcastFeeds, id: \.id) { feed in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(feed.title ?? "Podcast Feed")
+                    List(viewModel.podcasts, id: \.id) { podcast in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(podcast.title)
                                 .font(.headline)
-                            Text(feed.rssUrl)
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                                .lineLimit(1)
+                            if let description = podcast.description {
+                                Text(description)
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                                    .lineLimit(2)
+                            }
+                            Text("\(podcast.episodes.count) episodes")
+                                .font(.caption2)
+                                .foregroundColor(.blue)
                         }
+                        .padding(.vertical, 4)
                     }
                 }
                 
