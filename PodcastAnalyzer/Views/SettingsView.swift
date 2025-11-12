@@ -54,19 +54,36 @@ struct SettingsView: View {
                     .font(.headline)
                 
                 if viewModel.podcastFeeds.isEmpty {
-                    Text("No feeds added yet")
-                        .foregroundColor(.gray)
-                        .font(.caption)
+                    VStack(alignment: .center, spacing: 8) {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.system(size: 30))
+                            .foregroundColor(.gray)
+                        Text("No feeds added yet")
+                            .foregroundColor(.gray)
+                            .font(.caption)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
                 } else {
-                    List {
-                        ForEach(viewModel.podcastFeeds) { feed in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(feed.title ?? feed.rssUrl)
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(viewModel.podcastFeeds, id: \.id) { feed in
+                            HStack(spacing: 12) {
+                                // Feed icon
+                                Text("🎧")
+                                    .font(.title3)
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(feed.title ?? "Untitled Feed")
                                         .font(.body)
-                                    Text(feed.rssUrl)
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
+                                        .fontWeight(.semibold)
+                                        .lineLimit(1)
+                                    
+                                    if let subtitle = feed.subtitle {
+                                        Text(subtitle)
+                                            .font(.caption2)
+                                            .foregroundColor(.gray)
+                                            .lineLimit(1)
+                                    }
                                 }
                                 
                                 Spacer()
@@ -74,14 +91,24 @@ struct SettingsView: View {
                                 Button(action: {
                                     viewModel.removePodcastFeed(feed, modelContext: modelContext)
                                 }) {
-                                    Image(systemName: "trash")
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 16))
                                         .foregroundColor(.red)
                                 }
                                 .buttonStyle(.plain)
+                                .help("Delete feed")
                             }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 12)
+#if os(macOS)
+                            .background(Color(nsColor: NSColor.controlBackgroundColor))
+#else
+                            .background(Color(uiColor: UIColor.secondarySystemBackground))
+#endif
+                            .cornerRadius(6)
                         }
                     }
-                    .frame(maxHeight: 300)
+                    .padding(.vertical, 8)
                 }
             }
             
