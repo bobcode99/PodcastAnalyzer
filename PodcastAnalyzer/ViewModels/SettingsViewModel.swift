@@ -5,45 +5,29 @@ import SwiftData
 
 @MainActor
 class SettingsViewModel: ObservableObject {
-    @Published var rssLink: String = ""
-    @Published var showSuccessMessage: Bool = false
-    @Published var errorMessage: String?
+    @Published var rssUrlInput: String = ""
+    @Published var successMessage: String = ""
+    @Published var errorMessage: String = ""
     @Published var podcastFeeds: [PodcastFeed] = []
     
     private var successMessageTask: Task<Void, Never>?
-    private var modelContext: ModelContext?
-    
-    init(modelContext: ModelContext?) {
-        self.modelContext = modelContext
-        if modelContext != nil {
-            loadPodcastFeeds()
-        }
-    }
-    
-    func setModelContext(_ context: ModelContext) {
-        self.modelContext = context
-        loadPodcastFeeds()
-    }
     
     // MARK: - Public Methods
     
-    func addRssLink() {
-        guard let context = modelContext else {
-            errorMessage = "Database connection error"
-            return
-        }
-        
-        let trimmedLink = rssLink.trimmingCharacters(in: .whitespaces)
+    func addRssLink(modelContext: ModelContext) {
+        let trimmedLink = rssUrlInput.trimmingCharacters(in: .whitespaces)
         
         // Validate URL format
         guard isValidURL(trimmedLink) else {
             errorMessage = "Please enter a valid URL"
+            successMessage = ""
             return
         }
         
         // Check for duplicates
         guard !podcastFeeds.contains(where: { $0.rssUrl == trimmedLink }) else {
             errorMessage = "This feed is already added"
+            successMessage = ""
             return
         }
         
@@ -51,39 +35,49 @@ class SettingsViewModel: ObservableObject {
         let newFeed = PodcastFeed(rssUrl: trimmedLink)
         
         do {
-            context.insert(newFeed)
-            try context.save()
+            modelContext.insert(newFeed)
+            try modelContext.save()
             
             podcastFeeds.append(newFeed)
-            rssLink = ""
-            errorMessage = nil
-            showSuccessMessage = true
+            rssUrlInput = ""
+            errorMessage = ""
+            successMessage = "✅ Feed added successfully!"
             
             // Hide success message after 2 seconds
             successMessageTask?.cancel()
             successMessageTask = Task {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 if !Task.isCancelled {
-                    self.showSuccessMessage = false
+                    self.successMessage = ""
                 }
             }
         } catch {
             errorMessage = "Failed to save feed: \(error.localizedDescription)"
+            successMessage = ""
         }
     }
     
-    func removePodcastFeed(_ feed: PodcastFeed) {
-        guard let context = modelContext else {
-            errorMessage = "Database connection error"
-            return
-        }
-        
+    func removePodcastFeed(_ feed: PodcastFeed, modelContext: ModelContext) {
         do {
-            context.delete(feed)
-            try context.save()
+            modelContext.delete(feed)
+            try modelContext.save()
             podcastFeeds.removeAll { $0.id == feed.id }
+            errorMessage = ""
         } catch {
             errorMessage = "Failed to delete feed: \(error.localizedDescription)"
+        }
+    }
+    
+    func loadFeeds(modelContext: ModelContext) {
+        let descriptor = FetchDescriptor<PodcastFeed>(
+            sortBy: [SortDescriptor(\.dateAdded, order: .reverse)]
+        )
+        
+        do {
+            podcastFeeds = try modelContext.fetch(descriptor)
+            errorMessage = ""
+        } catch {
+            errorMessage = "Failed to load feeds: \(error.localizedDescription)"
         }
     }
     
@@ -92,19 +86,5 @@ class SettingsViewModel: ObservableObject {
     private func isValidURL(_ urlString: String) -> Bool {
         guard let url = URL(string: urlString) else { return false }
         return url.scheme != nil && url.host != nil
-    }
-    
-    private func loadPodcastFeeds() {
-        guard let context = modelContext else { return }
-        
-        let descriptor = FetchDescriptor<PodcastFeed>(
-            sortBy: [SortDescriptor(\.dateAdded, order: .reverse)]
-        )
-        
-        do {
-            podcastFeeds = try context.fetch(descriptor)
-        } catch {
-            errorMessage = "Failed to load feeds: \(error.localizedDescription)"
-        }
     }
 }

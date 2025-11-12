@@ -20,6 +20,7 @@ struct SettingsView: View {
                     TextField("Paste RSS feed URL", text: $viewModel.rssUrlInput)
                         .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
                         .textCase(nil)
                     
                     Button("Add Feed") {
@@ -84,4 +85,8 @@ struct SettingsView: View {
             viewModel.loadFeeds(modelContext: modelContext)
         }
     }
+}
+
+#Preview {
+    SettingsView()
 }
