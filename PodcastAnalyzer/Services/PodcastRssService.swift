@@ -1,8 +1,71 @@
+//
+//  A tiny, async/await wrapper around FeedKit.
+//  Import this file anywhere – no other code needed.
+//
+
 import FeedKit
 import Foundation
 
-class PodcastRssService {
-    func sayHello() {
-        print("Hello from PodcastRssService")
+public struct PodcastEpisodeInfo: Sendable, Codable {
+    public let title: String
+    public let description: String?
+    public let pubDate: Date?
+    public let audioURL: String?
+}
+
+public struct PodcastInfo: Sendable {
+    public let title: String
+    public let description: String?
+    public let episodes: [PodcastEpisodeInfo]
+}
+
+// MARK: - The service
+
+public enum PodcastServiceError: Error, LocalizedError {
+    case invalidURL
+    case notRSS
+    case parsingFailed(Error)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidURL: return "The URL is malformed."
+        case .notRSS: return "The feed is not an RSS feed."
+        case .parsingFailed(let e): return "Parsing failed: \(e.localizedDescription)"
+        }
+    }
+}
+
+public actor PodcastService {
+
+    /// Parses the given RSS URL and returns a clean model.
+    /// - Parameter urlString: any RSS/Atom/JSON feed URL
+    /// - Returns: `PodcastInfo` (only RSS data is kept)
+    public func fetchPodcast(from urlString: String) async throws -> PodcastInfo {
+        guard let url = URL(string: urlString) else {
+            throw PodcastServiceError.invalidURL
+        }
+
+        // FeedKit auto-detects the format
+        let feed = try await Feed(url: url)
+
+        guard case .rss(let rssFeed) = feed else {
+            throw PodcastServiceError.notRSS
+        }
+
+        let episodes = (rssFeed.channel?.items ?? []).compactMap { item -> PodcastEpisodeInfo? in
+            guard let title = item.title else { return nil }
+            return PodcastEpisodeInfo(
+                title: title,
+                description: item.description,
+                pubDate: item.pubDate,
+                audioURL: item.enclosure?.attributes?.url
+            )
+        }
+
+        return PodcastInfo(
+            title: rssFeed.channel?.title ?? "Untitled Podcast",
+            description: rssFeed.channel?.description,
+            episodes: episodes
+        )
     }
 }
