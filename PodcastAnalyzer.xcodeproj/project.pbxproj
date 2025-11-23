@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		158240912ED303EC000ABA90 /* FeedKit in Frameworks */ = {isa = PBXBuildFile; productRef = 158240902ED303EC000ABA90 /* FeedKit */; };
+		158240932ED303EC000ABA90 /* XMLKit in Frameworks */ = {isa = PBXBuildFile; productRef = 158240922ED303EC000ABA90 /* XMLKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		15ED5EFD2EC44BC9001B6CD7 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +57,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				158240912ED303EC000ABA90 /* FeedKit in Frameworks */,
+				158240932ED303EC000ABA90 /* XMLKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +119,8 @@
 			);
 			name = PodcastAnalyzer;
 			packageProductDependencies = (
+				158240902ED303EC000ABA90 /* FeedKit */,
+				158240922ED303EC000ABA90 /* XMLKit */,
 			);
 			productName = PodcastAnalyzer;
 			productReference = 15ED5EED2EC44BC6001B6CD7 /* PodcastAnalyzer.app */;
@@ -195,6 +204,9 @@
 			);
 			mainGroup = 15ED5EE42EC44BC6001B6CD7;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1582408F2ED303EC000ABA90 /* XCRemoteSwiftPackageReference "FeedKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 15ED5EEE2EC44BC6001B6CD7 /* Products */;
 			projectDirPath = "";
@@ -390,6 +402,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2S6SA3LUZR;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -432,6 +445,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2S6SA3LUZR;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -605,6 +619,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1582408F2ED303EC000ABA90 /* XCRemoteSwiftPackageReference "FeedKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/nmdias/FeedKit";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 10.1.3;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		158240902ED303EC000ABA90 /* FeedKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1582408F2ED303EC000ABA90 /* XCRemoteSwiftPackageReference "FeedKit" */;
+			productName = FeedKit;
+		};
+		158240922ED303EC000ABA90 /* XMLKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1582408F2ED303EC000ABA90 /* XCRemoteSwiftPackageReference "FeedKit" */;
+			productName = XMLKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 15ED5EE52EC44BC6001B6CD7 /* Project object */;
 }

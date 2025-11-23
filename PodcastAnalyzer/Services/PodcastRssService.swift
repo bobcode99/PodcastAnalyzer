@@ -12,6 +12,7 @@ public struct PodcastEpisodeInfo: Sendable, Codable {
     public let description: String?
     public let pubDate: Date?
     public let audioURL: String?
+    public let imageURL: String?
 }
 
 public struct PodcastInfo: Sendable, Identifiable {
@@ -20,13 +21,15 @@ public struct PodcastInfo: Sendable, Identifiable {
     public let description: String?
     public let episodes: [PodcastEpisodeInfo]
     public let rssUrl: String
+    public let imageURL: String
     
-    init(title: String, description: String?, episodes: [PodcastEpisodeInfo], rssUrl: String) {
+    init(title: String, description: String?, episodes: [PodcastEpisodeInfo], rssUrl: String, imageURL: String) {
         self.id = rssUrl  // Use RSS URL as unique ID
         self.title = title
         self.description = description
         self.episodes = episodes
         self.rssUrl = rssUrl
+        self.imageURL = imageURL
     }
 }
 
@@ -69,15 +72,17 @@ public actor PodcastRssService {
                 title: title,
                 description: item.description,
                 pubDate: item.pubDate,
-                audioURL: item.enclosure?.attributes?.url
+                audioURL: item.enclosure?.attributes?.url,
+                imageURL: item.iTunes?.image?.attributes?.href
             )
         }
 
-        return PodcastInfo(
+        return await PodcastInfo(
             title: rssFeed.channel?.title ?? "Untitled Podcast",
             description: rssFeed.channel?.description,
             episodes: episodes,
-            rssUrl: urlString
+            rssUrl: urlString,
+            imageURL: rssFeed.channel?.iTunes?.image?.attributes?.href ?? ""
         )
     }
 }

@@ -9,7 +9,7 @@ class SettingsViewModel: ObservableObject {
     @Published var rssUrlInput: String = ""
     @Published var successMessage: String = ""
     @Published var errorMessage: String = ""
-    @Published var podcastFeeds: [PodcastFeed] = []
+    @Published var podcastFeeds: [PodcastInfoModel] = []
     @Published var isValidating: Bool = false
     
     private var successMessageTask: Task<Void, Never>?
@@ -46,19 +46,17 @@ class SettingsViewModel: ObservableObject {
                 
                 // Try to fetch the podcast to validate the RSS feed
                 let podcastInfo = try await service.fetchPodcast(from: trimmedLink)
-                
                 self.logger.info("✅ RSS feed is valid: \(podcastInfo.title)")
-                
+                self.logger.debug("image url: \(podcastInfo.imageURL)")
+
                 // Create new podcast feed
-                let newFeed = PodcastFeed(rssUrl: trimmedLink)
-                newFeed.title = podcastInfo.title
-                newFeed.subtitle = podcastInfo.description
+                let podcastInfoModel = PodcastInfoModel(rssUrl: trimmedLink, title: podcastInfo.title, imageUrl: podcastInfo.imageURL, podcastDescription: podcastInfo.description)
                 
                 // Save to database
-                modelContext.insert(newFeed)
+                modelContext.insert(podcastInfoModel)
                 try modelContext.save()
                 
-                self.podcastFeeds.append(newFeed)
+                self.podcastFeeds.append(podcastInfoModel)
                 self.rssUrlInput = ""
                 self.errorMessage = ""
                 self.successMessage = "✅ Feed added successfully!"
@@ -86,13 +84,13 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
-    func removePodcastFeed(_ feed: PodcastFeed, modelContext: ModelContext) {
+    func removePodcastFeed(_ podcastInfoModel: PodcastInfoModel, modelContext: ModelContext) {
         do {
-            modelContext.delete(feed)
+            modelContext.delete(podcastInfoModel)
             try modelContext.save()
-            podcastFeeds.removeAll { $0.id == feed.id }
+            podcastFeeds.removeAll { $0.id == podcastInfoModel.id }
             errorMessage = ""
-            self.logger.info("Feed deleted: \(feed.title ?? feed.rssUrl)")
+            self.logger.info("Feed deleted: \(podcastInfoModel.title ?? podcastInfoModel.rssUrl)")
         } catch {
             errorMessage = "Failed to delete feed: \(error.localizedDescription)"
             self.logger.error("Failed to delete feed: \(error.localizedDescription)")
@@ -100,7 +98,7 @@ class SettingsViewModel: ObservableObject {
     }
     
     func loadFeeds(modelContext: ModelContext) {
-        let descriptor = FetchDescriptor<PodcastFeed>(
+        let descriptor = FetchDescriptor<PodcastInfoModel>(
             sortBy: [SortDescriptor(\.dateAdded, order: .reverse)]
         )
         

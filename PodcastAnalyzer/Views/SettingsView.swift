@@ -68,22 +68,54 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(viewModel.podcastFeeds, id: \.id) { feed in
                             HStack(spacing: 12) {
-                                // Feed icon
-                                Text("🎧")
-                                    .font(.title3)
-                                
+                                if let urlString = feed.imageUrl, let url = URL(string: urlString), !urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    AsyncImage(url: url) { phase in
+                                        switch phase {
+                                        case .empty:
+                                            // Placeholder while loading
+                                            ZStack {
+                                                Color.clear
+                                                ProgressView()
+                                            }
+                                            .frame(width: 48, height: 48)
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        case .success(let image):
+                                            image
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 48, height: 48)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        case .failure:
+                                            Image(systemName: "apple.podcasts.pages.fill")
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(width: 48, height: 48)
+                                                .foregroundColor(.purple)
+                                        @unknown default:
+                                            Image(systemName: "apple.podcasts.pages.fill")
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(width: 48, height: 48)
+                                                .foregroundColor(.purple)
+                                        }
+                                    }.onAppear {
+                                        print("Image loading from URL: \(urlString)")
+                                    }
+                                } else {
+                                    // No URL available: show fallback immediately
+                                    Image(systemName: "apple.podcasts.pages.fill")
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 48, height: 48)
+                                        .foregroundColor(.purple)
+                                }
+                                                               
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(feed.title ?? "Untitled Feed")
                                         .font(.body)
                                         .fontWeight(.semibold)
                                         .lineLimit(1)
-                                    
-                                    if let subtitle = feed.subtitle {
-                                        Text(subtitle)
-                                            .font(.caption2)
-                                            .foregroundColor(.gray)
-                                            .lineLimit(1)
-                                    }
+                    
                                 }
                                 
                                 Spacer()

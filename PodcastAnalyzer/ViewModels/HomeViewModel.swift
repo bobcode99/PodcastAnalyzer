@@ -8,7 +8,7 @@ import os.log
 @MainActor
 class HomeViewModel: ObservableObject {
     @Published var podcasts: [PodcastInfo] = []
-    @Published var podcastFeeds: [PodcastFeed] = []
+    @Published var podcastFeeds: [PodcastInfoModel] = []
     @Published var isLoading = false
     @Published var error: String?
     
@@ -43,10 +43,10 @@ class HomeViewModel: ObservableObject {
                     
                     self.logger.info("✅ Successfully fetched: \(podcastInfo.title)")
                     self.logger.debug("Episodes count: \(podcastInfo.episodes.count)")
+                    self.logger.debug("image url: \(podcastInfo.imageURL)")
                     
                     // Update feed with fetched data
                     feed.title = podcastInfo.title
-                    feed.subtitle = podcastInfo.description
                     feed.lastUpdated = Date()
                     
                     // Add to podcasts list (no duplicates because ID is rssUrl)
@@ -80,7 +80,7 @@ class HomeViewModel: ObservableObject {
             return
         }
         
-        let descriptor = FetchDescriptor<PodcastFeed>(
+        let descriptor = FetchDescriptor<PodcastInfoModel>(
             sortBy: [SortDescriptor(\.dateAdded, order: .reverse)]
         )
         
