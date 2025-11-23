@@ -14,9 +14,12 @@ struct ContentView: View {
             Tab(Constants.homeString, systemImage: Constants.homeIconName) {
                 HomeView()
             }
-               Tab(Constants.settingsString, systemImage: Constants.settingsIconName) {
+           Tab(Constants.settingsString, systemImage: Constants.settingsIconName) {
                 SettingsView()
             }
+            Tab(Constants.searchString, systemImage: Constants.searchIconName) {
+                 SearchView()
+             }
         }
     }
 }

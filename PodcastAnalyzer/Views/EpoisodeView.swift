@@ -85,3 +85,8 @@ struct EpisodeListView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 }
+
+
+//#Preview {
+//    EpisodeListView(podcastModel: new PodcastInfoModel)
+//}

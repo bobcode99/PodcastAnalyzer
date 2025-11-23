@@ -9,7 +9,9 @@ struct Constants {
 
     static let homeString = "Home"
     static let settingsString = "Settings"
+    static let searchString = "Search"
 
     static let homeIconName = "house.fill"
     static let settingsIconName = "gearshape.fill"
+    static let searchIconName = "magnifyingglass.circle.fill"
 }
