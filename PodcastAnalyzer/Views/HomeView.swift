@@ -27,7 +27,7 @@ struct HomeView: View {
                             .font(.caption)
                             .foregroundColor(.gray)
                     }
-                } else if viewModel.podcasts.isEmpty {
+                } else if viewModel.podcastInfoModelList.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "apple.podcasts.pages.fill")
                             .font(.system(size: 50))
@@ -39,17 +39,17 @@ struct HomeView: View {
                             .foregroundColor(.gray)
                     }
                 } else {
-                    List(viewModel.podcasts, id: \.id) { podcast in
+                    List(viewModel.podcastInfoModelList) { model in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(podcast.title)
+                            Text(model.podcastInfo.title)
                                 .font(.headline)
-                            if let description = podcast.description {
+                            if let description = model.podcastInfo.podcastInfoDescription {
                                 Text(description)
                                     .font(.caption)
                                     .foregroundColor(.gray)
                                     .lineLimit(2)
                             }
-                            Text("\(podcast.episodes.count) episodes")
+                            Text("\(model.podcastInfo.episodes.count) episodes")
                                 .font(.caption2)
                                 .foregroundColor(.blue)
                         }

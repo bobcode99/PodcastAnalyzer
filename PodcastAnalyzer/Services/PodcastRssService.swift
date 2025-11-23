@@ -9,16 +9,16 @@ internal import XMLKit
 
 public struct PodcastEpisodeInfo: Sendable, Codable {
     public let title: String
-    public let description: String?
+    public let podcastEpisodeDescription: String?
     public let pubDate: Date?
     public let audioURL: String?
     public let imageURL: String?
 }
 
-public struct PodcastInfo: Sendable, Identifiable {
+public struct PodcastInfo: Sendable, Identifiable, Codable {
     public let id: String  // This will be the rssUrl
     public let title: String
-    public let description: String?
+    public let podcastInfoDescription: String?
     public let episodes: [PodcastEpisodeInfo]
     public let rssUrl: String
     public let imageURL: String
@@ -26,7 +26,7 @@ public struct PodcastInfo: Sendable, Identifiable {
     init(title: String, description: String?, episodes: [PodcastEpisodeInfo], rssUrl: String, imageURL: String) {
         self.id = rssUrl  // Use RSS URL as unique ID
         self.title = title
-        self.description = description
+        self.podcastInfoDescription = description
         self.episodes = episodes
         self.rssUrl = rssUrl
         self.imageURL = imageURL
@@ -70,7 +70,7 @@ public actor PodcastRssService {
             guard let title = item.title else { return nil }
             return PodcastEpisodeInfo(
                 title: title,
-                description: item.description,
+                podcastEpisodeDescription: item.description,
                 pubDate: item.pubDate,
                 audioURL: item.enclosure?.attributes?.url,
                 imageURL: item.iTunes?.image?.attributes?.href

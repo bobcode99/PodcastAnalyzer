@@ -1,7 +1,6 @@
 import SwiftUI
 import SwiftData
 
-
 struct SettingsView: View {
     @StateObject private var viewModel = SettingsViewModel()
     @Environment(\.modelContext) var modelContext
@@ -12,6 +11,7 @@ struct SettingsView: View {
                 .font(.title2)
                 .fontWeight(.bold)
             
+            // MARK: - Add Feed Section
             VStack(alignment: .leading, spacing: 10) {
                 Text("Add RSS Feed")
                     .font(.headline)
@@ -21,7 +21,6 @@ struct SettingsView: View {
                         .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
-                        .textCase(nil)
                         .disabled(viewModel.isValidating)
                     
                     if viewModel.isValidating {
@@ -49,11 +48,12 @@ struct SettingsView: View {
                 }
             }
             
+            // MARK: - List Feeds Section
             VStack(alignment: .leading, spacing: 10) {
                 Text("Your RSS Feeds")
                     .font(.headline)
                 
-                if viewModel.podcastFeeds.isEmpty {
+                if viewModel.podcastInfoModelList.isEmpty {
                     VStack(alignment: .center, spacing: 8) {
                         Image(systemName: "doc.text.magnifyingglass")
                             .font(.system(size: 30))
@@ -65,82 +65,14 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
                 } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(viewModel.podcastFeeds, id: \.id) { feed in
-                            HStack(spacing: 12) {
-                                if let urlString = feed.imageUrl, let url = URL(string: urlString), !urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    AsyncImage(url: url) { phase in
-                                        switch phase {
-                                        case .empty:
-                                            // Placeholder while loading
-                                            ZStack {
-                                                Color.clear
-                                                ProgressView()
-                                            }
-                                            .frame(width: 48, height: 48)
-                                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        case .success(let image):
-                                            image
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 48, height: 48)
-                                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        case .failure:
-                                            Image(systemName: "apple.podcasts.pages.fill")
-                                                .resizable()
-                                                .scaledToFit()
-                                                .frame(width: 48, height: 48)
-                                                .foregroundColor(.purple)
-                                        @unknown default:
-                                            Image(systemName: "apple.podcasts.pages.fill")
-                                                .resizable()
-                                                .scaledToFit()
-                                                .frame(width: 48, height: 48)
-                                                .foregroundColor(.purple)
-                                        }
-                                    }.onAppear {
-                                        print("Image loading from URL: \(urlString)")
-                                    }
-                                } else {
-                                    // No URL available: show fallback immediately
-                                    Image(systemName: "apple.podcasts.pages.fill")
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(width: 48, height: 48)
-                                        .foregroundColor(.purple)
-                                }
-                                                               
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(feed.title ?? "Untitled Feed")
-                                        .font(.body)
-                                        .fontWeight(.semibold)
-                                        .lineLimit(1)
-                    
-                                }
-                                
-                                Spacer()
-                                
-                                Button(action: {
-                                    viewModel.removePodcastFeed(feed, modelContext: modelContext)
-                                }) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 16))
-                                        .foregroundColor(.red)
-                                }
-                                .buttonStyle(.plain)
-                                .help("Delete feed")
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            // 1. FIXED: Removed 'id: \.self'
+                            ForEach(viewModel.podcastInfoModelList) { feed in
+                                FeedRowView(feed: feed, viewModel: viewModel, modelContext: modelContext)
                             }
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 12)
-#if os(macOS)
-                            .background(Color(nsColor: NSColor.controlBackgroundColor))
-#else
-                            .background(Color(uiColor: UIColor.secondarySystemBackground))
-#endif
-                            .cornerRadius(6)
                         }
                     }
-                    .padding(.vertical, 8)
                 }
             }
             
@@ -150,6 +82,79 @@ struct SettingsView: View {
         .onAppear {
             viewModel.loadFeeds(modelContext: modelContext)
         }
+    }
+}
+
+// MARK: - Subview for cleaner code
+// Extracting this view fixes type inference issues and makes debugging easier
+struct FeedRowView: View {
+    let feed: PodcastInfoModel
+    @ObservedObject var viewModel: SettingsViewModel
+    var modelContext: ModelContext
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // 2. FIXED: Accessing 'feed.podcastInfo.imageURL'
+            if let urlString = feed.podcastInfo.imageURL.isEmpty ? nil : feed.podcastInfo.imageURL,
+               let url = URL(string: urlString) {
+                
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        ZStack {
+                            Color.gray.opacity(0.2)
+                            ProgressView().scaleEffect(0.5)
+                        }
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        Image(systemName: "apple.podcasts.pages.fill")
+                            .resizable().foregroundColor(.purple)
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+                .frame(width: 48, height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                
+            } else {
+                // Fallback Image
+                Image(systemName: "apple.podcasts.pages.fill")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 48, height: 48)
+                    .foregroundColor(.purple)
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                // 3. FIXED: Accessing 'feed.podcastInfo.title'
+                Text(feed.podcastInfo.title)
+                    .font(.body)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                
+                // 4. FIXED: Accessing 'feed.podcastInfo.rssUrl'
+                Text(feed.podcastInfo.rssUrl)
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+            }
+            
+            Spacer()
+            
+            Button(action: {
+                viewModel.removePodcastFeed(feed, modelContext: modelContext)
+            }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(.red)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(6)
     }
 }
 

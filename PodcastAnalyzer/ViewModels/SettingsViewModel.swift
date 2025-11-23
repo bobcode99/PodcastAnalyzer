@@ -9,7 +9,7 @@ class SettingsViewModel: ObservableObject {
     @Published var rssUrlInput: String = ""
     @Published var successMessage: String = ""
     @Published var errorMessage: String = ""
-    @Published var podcastFeeds: [PodcastInfoModel] = []
+    @Published var podcastInfoModelList: [PodcastInfoModel] = []
     @Published var isValidating: Bool = false
     
     private var successMessageTask: Task<Void, Never>?
@@ -29,7 +29,7 @@ class SettingsViewModel: ObservableObject {
         }
         
         // Check for duplicates
-        guard !podcastFeeds.contains(where: { $0.rssUrl == trimmedLink }) else {
+        guard !podcastInfoModelList.contains(where: { $0.podcastInfo.rssUrl == trimmedLink }) else {
             errorMessage = "This feed is already added"
             successMessage = ""
             return
@@ -50,13 +50,13 @@ class SettingsViewModel: ObservableObject {
                 self.logger.debug("image url: \(podcastInfo.imageURL)")
 
                 // Create new podcast feed
-                let podcastInfoModel = PodcastInfoModel(rssUrl: trimmedLink, title: podcastInfo.title, imageUrl: podcastInfo.imageURL, podcastDescription: podcastInfo.description)
+                let podcastInfoModel = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date.now)
                 
                 // Save to database
                 modelContext.insert(podcastInfoModel)
                 try modelContext.save()
                 
-                self.podcastFeeds.append(podcastInfoModel)
+                self.podcastInfoModelList.append(podcastInfoModel)
                 self.rssUrlInput = ""
                 self.errorMessage = ""
                 self.successMessage = "✅ Feed added successfully!"
@@ -88,9 +88,9 @@ class SettingsViewModel: ObservableObject {
         do {
             modelContext.delete(podcastInfoModel)
             try modelContext.save()
-            podcastFeeds.removeAll { $0.id == podcastInfoModel.id }
+            podcastInfoModelList.removeAll { $0.id == podcastInfoModel.id }
             errorMessage = ""
-            self.logger.info("Feed deleted: \(podcastInfoModel.title ?? podcastInfoModel.rssUrl)")
+            self.logger.info("Feed deleted: \(podcastInfoModel.podcastInfo.title)")
         } catch {
             errorMessage = "Failed to delete feed: \(error.localizedDescription)"
             self.logger.error("Failed to delete feed: \(error.localizedDescription)")
@@ -103,9 +103,9 @@ class SettingsViewModel: ObservableObject {
         )
         
         do {
-            podcastFeeds = try modelContext.fetch(descriptor)
+            podcastInfoModelList = try modelContext.fetch(descriptor)
             errorMessage = ""
-            self.logger.info("Loaded \(self.podcastFeeds.count) feeds")
+            self.logger.info("Loaded \(self.podcastInfoModelList.count) feeds")
         } catch {
             errorMessage = "Failed to load feeds: \(error.localizedDescription)"
             self.logger.error("Failed to load feeds: \(error.localizedDescription)")

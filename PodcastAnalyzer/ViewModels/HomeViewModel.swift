@@ -7,8 +7,7 @@ import os.log
 
 @MainActor
 class HomeViewModel: ObservableObject {
-    @Published var podcasts: [PodcastInfo] = []
-    @Published var podcastFeeds: [PodcastInfoModel] = []
+    @Published var podcastInfoModelList: [PodcastInfoModel] = []
     @Published var isLoading = false
     @Published var error: String?
     
@@ -31,40 +30,15 @@ class HomeViewModel: ObservableObject {
     func loadPodcasts() {
         isLoading = true
         error = nil
-        podcasts = []  // Clear previous podcasts to avoid duplicates
         
-        logger.info("Starting to load podcasts from \(self.podcastFeeds.count) feeds")
+        logger.info("Starting to load podcasts from \(self.podcastInfoModelList.count) feeds")
         
         Task {
-            for feed in podcastFeeds {
-                do {
-                    self.logger.info("Fetching podcast from URL: \(feed.rssUrl)")
-                    let podcastInfo = try await service.fetchPodcast(from: feed.rssUrl)
-                    
-                    self.logger.info("✅ Successfully fetched: \(podcastInfo.title)")
-                    self.logger.debug("Episodes count: \(podcastInfo.episodes.count)")
-                    self.logger.debug("image url: \(podcastInfo.imageURL)")
-                    
+            for podcastInfoModel in podcastInfoModelList {
+                    self.logger.info("Fetching podcast from URL: \(podcastInfoModel.podcastInfo.rssUrl)")
+                                        
                     // Update feed with fetched data
-                    feed.title = podcastInfo.title
-                    feed.lastUpdated = Date()
-                    
-                    // Add to podcasts list (no duplicates because ID is rssUrl)
-                    self.podcasts.append(podcastInfo)
-                    
-                    // Save to SwiftData
-                    if let context = self.modelContext {
-                        try context.save()
-                        self.logger.debug("Feed saved to database")
-                    }
-                    
-                } catch let error as PodcastServiceError {
-                    self.logger.error("PodcastServiceError for \(feed.rssUrl): \(error.localizedDescription)")
-                    self.error = "Failed to fetch \(feed.title ?? "podcast"): \(error.localizedDescription)"
-                } catch {
-                    self.logger.error("Unknown error for \(feed.rssUrl): \(error.localizedDescription)")
-                    self.error = "An unexpected error occurred: \(error.localizedDescription)"
-                }
+               
             }
             
             self.isLoading = false
@@ -85,8 +59,8 @@ class HomeViewModel: ObservableObject {
         )
         
         do {
-            podcastFeeds = try context.fetch(descriptor)
-            logger.info("Loaded \(self.podcastFeeds.count) podcast feeds from database")
+            podcastInfoModelList = try context.fetch(descriptor)
+            logger.info("Loaded \(self.podcastInfoModelList.count) podcast feeds from database")
         } catch {
             self.error = "Failed to load feeds: \(error.localizedDescription)"
             logger.error("Failed to load feeds: \(error.localizedDescription)")
