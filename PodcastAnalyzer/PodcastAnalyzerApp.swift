@@ -12,7 +12,6 @@ import SwiftData
 struct PodcastAnalyzerApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
             PodcastInfoModel.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)

@@ -40,20 +40,23 @@ struct HomeView: View {
                     }
                 } else {
                     List(viewModel.podcastInfoModelList) { model in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(model.podcastInfo.title)
-                                .font(.headline)
-                            if let description = model.podcastInfo.podcastInfoDescription {
-                                Text(description)
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                                    .lineLimit(2)
+                        NavigationLink(destination: PodcastDetailView(podcastModel: model)) {
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(model.podcastInfo.title)
+                                    .font(.headline)
+                                if let description = model.podcastInfo.podcastInfoDescription {
+                                    Text(description)
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                        .lineLimit(2)
+                                }
+                                Text("\(model.podcastInfo.episodes.count) episodes")
+                                    .font(.caption2)
+                                    .foregroundColor(.blue)
                             }
-                            Text("\(model.podcastInfo.episodes.count) episodes")
-                                .font(.caption2)
-                                .foregroundColor(.blue)
+                            .padding(.vertical, 4)
                         }
-                        .padding(.vertical, 4)
                     }
                 }
                 
@@ -69,6 +72,7 @@ struct HomeView: View {
                     }
                 }
             }
+            
         }
         .onAppear {
             viewModel.setModelContext(modelContext)

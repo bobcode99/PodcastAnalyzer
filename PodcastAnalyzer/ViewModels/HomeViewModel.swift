@@ -38,6 +38,11 @@ class HomeViewModel: ObservableObject {
                     self.logger.info("Fetching podcast from URL: \(podcastInfoModel.podcastInfo.rssUrl)")
                                         
                     // Update feed with fetched data
+                
+//                podcastInfoModel.podcastInfo.episodes.forEach { episode in
+//                 
+//                    self.logger.info("All:  \(episode.title)")
+//                }
                
             }
             
