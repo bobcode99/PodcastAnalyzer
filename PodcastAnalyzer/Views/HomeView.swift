@@ -40,7 +40,7 @@ struct HomeView: View {
                     }
                 } else {
                     List(viewModel.podcastInfoModelList) { model in
-                        NavigationLink(destination: PodcastDetailView(podcastModel: model)) {
+                        NavigationLink(destination: EpisodeListView(podcastModel: model)) {
                             
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(model.podcastInfo.title)

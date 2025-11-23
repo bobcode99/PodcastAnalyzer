@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-struct PodcastDetailView: View {
+struct EpisodeListView: View {
     let podcastModel: PodcastInfoModel
 
     var body: some View {
@@ -55,6 +55,8 @@ struct PodcastDetailView: View {
                 // Note: We use id: \.title because PodcastEpisodeInfo isn't strictly Identifiable yet.
                 // ideally, use a unique ID if available.
                 ForEach(podcastModel.podcastInfo.episodes, id: \.title) { episode in
+                    
+                    
                     VStack(alignment: .leading, spacing: 6) {
                         Text(episode.title)
                             .font(.body)
@@ -66,9 +68,15 @@ struct PodcastDetailView: View {
                                 .foregroundColor(.gray)
                         }
                         
+                        if let audioURL = episode.audioURL {
+                            Text(audioURL)
+                        }
+                        
+                        
                         // Example: Add a Play button visual here later
                     }
                     .padding(.vertical, 4)
+                   
                 }
             }
         }
