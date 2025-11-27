@@ -55,28 +55,31 @@ struct EpisodeListView: View {
                 // Note: We use id: \.title because PodcastEpisodeInfo isn't strictly Identifiable yet.
                 // ideally, use a unique ID if available.
                 ForEach(podcastModel.podcastInfo.episodes, id: \.title) { episode in
-                    
-                    
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(episode.title)
-                            .font(.body)
-                            .fontWeight(.medium)
-                        
-                        if let date = episode.pubDate {
-                            Text(date.formatted(date: .abbreviated, time: .shortened))
-                                .font(.caption2)
-                                .foregroundColor(.gray)
+                
+                    NavigationLink(destination: EpisodeDetailView(
+                                episode: episode,
+                                fallbackImageURL: podcastModel.podcastInfo.imageURL
+                    )) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(episode.title)
+                                .font(.body)
+                                .fontWeight(.medium)
+                            
+                            if let date = episode.pubDate {
+                                Text(date.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption2)
+                                    .foregroundColor(.gray)
+                            }
+                            
+                            if let audioURL = episode.audioURL {
+                                Text(audioURL)
+                            }
+                            
+                            
+                            // Example: Add a Play button visual here later
                         }
-                        
-                        if let audioURL = episode.audioURL {
-                            Text(audioURL)
-                        }
-                        
-                        
-                        // Example: Add a Play button visual here later
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
-                   
                 }
             }
         }

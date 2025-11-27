@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		155164762ED374440015567A /* ZMarkupParser in Frameworks */ = {isa = PBXBuildFile; productRef = 155164752ED374440015567A /* ZMarkupParser */; };
 		158240912ED303EC000ABA90 /* FeedKit in Frameworks */ = {isa = PBXBuildFile; productRef = 158240902ED303EC000ABA90 /* FeedKit */; };
 		158240932ED303EC000ABA90 /* XMLKit in Frameworks */ = {isa = PBXBuildFile; productRef = 158240922ED303EC000ABA90 /* XMLKit */; };
 /* End PBXBuildFile section */
@@ -57,6 +58,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				155164762ED374440015567A /* ZMarkupParser in Frameworks */,
 				158240912ED303EC000ABA90 /* FeedKit in Frameworks */,
 				158240932ED303EC000ABA90 /* XMLKit in Frameworks */,
 			);
@@ -79,12 +81,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		155164742ED374440015567A /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		15ED5EE42EC44BC6001B6CD7 = {
 			isa = PBXGroup;
 			children = (
 				15ED5EEF2EC44BC6001B6CD7 /* PodcastAnalyzer */,
 				15ED5EFF2EC44BC9001B6CD7 /* PodcastAnalyzerTests */,
 				15ED5F092EC44BC9001B6CD7 /* PodcastAnalyzerUITests */,
+				155164742ED374440015567A /* Frameworks */,
 				15ED5EEE2EC44BC6001B6CD7 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -121,6 +131,7 @@
 			packageProductDependencies = (
 				158240902ED303EC000ABA90 /* FeedKit */,
 				158240922ED303EC000ABA90 /* XMLKit */,
+				155164752ED374440015567A /* ZMarkupParser */,
 			);
 			productName = PodcastAnalyzer;
 			productReference = 15ED5EED2EC44BC6001B6CD7 /* PodcastAnalyzer.app */;
@@ -206,6 +217,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				1582408F2ED303EC000ABA90 /* XCRemoteSwiftPackageReference "FeedKit" */,
+				155164712ED371680015567A /* XCRemoteSwiftPackageReference "ZMarkupParser" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 15ED5EEE2EC44BC6001B6CD7 /* Products */;
@@ -621,6 +633,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		155164712ED371680015567A /* XCRemoteSwiftPackageReference "ZMarkupParser" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ZhgChgLi/ZMarkupParser.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
 		1582408F2ED303EC000ABA90 /* XCRemoteSwiftPackageReference "FeedKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/nmdias/FeedKit";
@@ -632,6 +652,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		155164752ED374440015567A /* ZMarkupParser */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 155164712ED371680015567A /* XCRemoteSwiftPackageReference "ZMarkupParser" */;
+			productName = ZMarkupParser;
+		};
 		158240902ED303EC000ABA90 /* FeedKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 1582408F2ED303EC000ABA90 /* XCRemoteSwiftPackageReference "FeedKit" */;
