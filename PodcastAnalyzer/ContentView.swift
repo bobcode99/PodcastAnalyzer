@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  PodcastAnalyzer
 //
-//  Created by Bob on 2025/11/12.
+//  Main app view with mini player overlay
 //
 
 import SwiftUI
@@ -10,16 +10,24 @@ import SwiftData
 
 struct ContentView: View {
     var body: some View {
-        TabView {
-            Tab(Constants.homeString, systemImage: Constants.homeIconName) {
-                HomeView()
+        ZStack(alignment: .bottom) {
+            // Main tab view
+            TabView {
+                Tab(Constants.homeString, systemImage: Constants.homeIconName) {
+                    HomeView()
+                }
+                
+                Tab(Constants.settingsString, systemImage: Constants.settingsIconName) {
+                    SettingsView()
+                }
+                
+                Tab(Constants.searchString, systemImage: Constants.searchIconName) {
+                    SearchView()
+                }
             }
-           Tab(Constants.settingsString, systemImage: Constants.settingsIconName) {
-                SettingsView()
-            }
-            Tab(Constants.searchString, systemImage: Constants.searchIconName) {
-                 SearchView()
-             }
+            
+            // Mini player overlay (appears when playing)
+            MiniPlayerBar()
         }
     }
 }

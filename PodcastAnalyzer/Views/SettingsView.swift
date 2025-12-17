@@ -20,7 +20,7 @@ struct SettingsView: View {
                     TextField("Paste RSS feed URL", text: $viewModel.rssUrlInput)
                         .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                        .disableAutocapitalization()
                         .disabled(viewModel.isValidating)
                     
                     if viewModel.isValidating {

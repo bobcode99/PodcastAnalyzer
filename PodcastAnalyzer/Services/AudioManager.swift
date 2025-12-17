@@ -5,9 +5,12 @@
 //  Created by Bob on 2025/11/28.
 //
 
-
 import Foundation
 import AVFoundation
+
+#if os(iOS)
+import UIKit
+#endif
 
 @Observable
 class AudioManager {
@@ -18,9 +21,15 @@ class AudioManager {
     var currentUrlString: String? = nil
     
     private init() {
-        // Configure audio session to play even if switch is on silent
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-        try? AVAudioSession.sharedInstance().setActive(true)
+        // 👇 FIX: Only run this configuration on iOS
+        #if os(iOS)
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("Failed to configure AVAudioSession: \(error)")
+        }
+        #endif
     }
     
     func play(urlString: String) {

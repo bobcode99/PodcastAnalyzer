@@ -7,47 +7,6 @@ import FeedKit
 import Foundation
 internal import XMLKit
 
-public struct PodcastEpisodeInfo: Sendable, Codable {
-    public let title: String
-    public let podcastEpisodeDescription: String?
-    public let pubDate: Date?
-    public let audioURL: String?
-    public let imageURL: String?
-}
-
-public struct PodcastInfo: Sendable, Identifiable, Codable {
-    public let id: String  // This will be the rssUrl
-    public let title: String
-    public let podcastInfoDescription: String?
-    public let episodes: [PodcastEpisodeInfo]
-    public let rssUrl: String
-    public let imageURL: String
-    
-    init(title: String, description: String?, episodes: [PodcastEpisodeInfo], rssUrl: String, imageURL: String) {
-        self.id = rssUrl  // Use RSS URL as unique ID
-        self.title = title
-        self.podcastInfoDescription = description
-        self.episodes = episodes
-        self.rssUrl = rssUrl
-        self.imageURL = imageURL
-    }
-}
-
-// MARK: - The service
-
-public enum PodcastServiceError: Error, LocalizedError {
-    case invalidURL
-    case notRSS
-    case parsingFailed(Error)
-
-    public var errorDescription: String? {
-        switch self {
-        case .invalidURL: return "The URL is malformed."
-        case .notRSS: return "The feed is not an RSS feed."
-        case .parsingFailed(let e): return "Parsing failed: \(e.localizedDescription)"
-        }
-    }
-}
 
 public actor PodcastRssService {
 
@@ -58,7 +17,7 @@ public actor PodcastRssService {
         guard let url = URL(string: urlString) else {
             throw PodcastServiceError.invalidURL
         }
-
+    
         // FeedKit auto-detects the format
         let feed = try await Feed(url: url)
 

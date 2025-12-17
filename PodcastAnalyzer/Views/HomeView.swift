@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 
+import Combine
 
 struct HomeView: View {
     @StateObject private var viewModel: HomeViewModel

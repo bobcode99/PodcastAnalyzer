@@ -58,6 +58,7 @@ struct EpisodeListView: View {
                 
                     NavigationLink(destination: EpisodeDetailView(
                                 episode: episode,
+                                podcastTitle: podcastModel.podcastInfo.title,
                                 fallbackImageURL: podcastModel.podcastInfo.imageURL
                     )) {
                         VStack(alignment: .leading, spacing: 6) {
@@ -71,12 +72,6 @@ struct EpisodeListView: View {
                                     .foregroundColor(.gray)
                             }
                             
-                            if let audioURL = episode.audioURL {
-                                Text(audioURL)
-                            }
-                            
-                            
-                            // Example: Add a Play button visual here later
                         }
                         .padding(.vertical, 4)
                     }
@@ -85,7 +80,7 @@ struct EpisodeListView: View {
         }
         .listStyle(.plain)
         .navigationTitle(podcastModel.podcastInfo.title)
-        .navigationBarTitleDisplayMode(.inline)
+        .iosNavigationBarTitleDisplayModeInline()
     }
 }
 
