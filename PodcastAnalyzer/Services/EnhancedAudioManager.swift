@@ -19,6 +19,19 @@ import Combine
 import MediaPlayer
 import os.log
 
+// MARK: - Playback State Notification
+
+extension Notification.Name {
+    static let playbackPositionDidUpdate = Notification.Name("playbackPositionDidUpdate")
+}
+
+struct PlaybackPositionUpdate {
+    let episodeTitle: String
+    let podcastTitle: String
+    let position: TimeInterval
+    let duration: TimeInterval
+}
+
 @Observable
 class EnhancedAudioManager: NSObject {
     static let shared = EnhancedAudioManager()
@@ -178,6 +191,7 @@ class EnhancedAudioManager: NSObject {
         isPlaying = false
         updateNowPlayingPlaybackRate()
         savePlaybackState()
+        postPlaybackPositionUpdate()  // Save position when pausing
         logger.info("Playback paused")
     }
     
@@ -207,6 +221,7 @@ class EnhancedAudioManager: NSObject {
         player?.seek(to: cmTime) { [weak self] _ in
             self?.updateNowPlayingCurrentTime()
             self?.savePlaybackState()
+            self?.postPlaybackPositionUpdate()  // Save position after seeking
         }
     }
     
@@ -360,7 +375,25 @@ class EnhancedAudioManager: NSObject {
     }
     
     // MARK: - State Persistence
-    
+
+    /// Posts a notification with current playback position for SwiftData persistence
+    private func postPlaybackPositionUpdate() {
+        guard let episode = currentEpisode, duration > 0 else { return }
+
+        let update = PlaybackPositionUpdate(
+            episodeTitle: episode.title,
+            podcastTitle: episode.podcastTitle,
+            position: currentTime,
+            duration: duration
+        )
+
+        NotificationCenter.default.post(
+            name: .playbackPositionDidUpdate,
+            object: nil,
+            userInfo: ["update": update]
+        )
+    }
+
     private func savePlaybackState(imageURL: String? = nil) {
         guard let episode = currentEpisode else { return }
         
@@ -425,15 +458,16 @@ class EnhancedAudioManager: NSObject {
             
             // Update current caption
             self.updateCurrentCaption()
-            
+
             // Update Now Playing time every second
             if Int(self.currentTime * 10) % 10 == 0 {
                 self.updateNowPlayingCurrentTime()
             }
-            
-            // Auto-save every 5 seconds
+
+            // Auto-save every 5 seconds and post notification for SwiftData persistence
             if Int(self.currentTime) % 5 == 0 {
                 self.savePlaybackState()
+                self.postPlaybackPositionUpdate()
             }
         }
     }

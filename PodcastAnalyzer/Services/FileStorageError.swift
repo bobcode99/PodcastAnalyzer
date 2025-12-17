@@ -94,20 +94,41 @@ actor FileStorageManager {
     // MARK: - Audio File Management
     
     /// Generates a unique filename for an episode's audio file
-    func audioFileName(for episodeTitle: String, podcastTitle: String) -> String {
+    /// Note: Extension will be added when saving based on the actual file type
+    func audioFileName(for episodeTitle: String, podcastTitle: String, extension: String = "m4a") -> String {
         let sanitized = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
-        return "\(sanitized).m4a"
+        return "\(sanitized).\(`extension`)"
     }
     
-    /// Gets the full path for an audio file
+    /// Gets the full path for an audio file (returns actual file if it exists)
     func audioFilePath(for episodeTitle: String, podcastTitle: String) -> URL {
-        audioDirectory.appendingPathComponent(audioFileName(for: episodeTitle, podcastTitle: podcastTitle))
+        let baseFileName = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
+        let possibleExtensions = ["mp3", "m4a", "aac", "wav", "flac"]
+
+        // Find the actual file
+        for ext in possibleExtensions {
+            let path = self.audioDirectory.appendingPathComponent("\(baseFileName).\(ext)")
+            if fileManager.fileExists(atPath: path.path) {
+                return path
+            }
+        }
+
+        // Default to m4a if not found
+        return audioDirectory.appendingPathComponent(audioFileName(for: episodeTitle, podcastTitle: podcastTitle))
     }
     
-    /// Checks if audio file exists
+    /// Checks if audio file exists (checks multiple extensions)
     func audioFileExists(for episodeTitle: String, podcastTitle: String) -> Bool {
-        let path = audioFilePath(for: episodeTitle, podcastTitle: podcastTitle)
-        return fileManager.fileExists(atPath: path.path)
+        let baseFileName = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
+        let possibleExtensions = ["mp3", "m4a", "aac", "wav", "flac"]
+
+        for ext in possibleExtensions {
+            let path = self.audioDirectory.appendingPathComponent("\(baseFileName).\(ext)")
+            if fileManager.fileExists(atPath: path.path) {
+                return true
+            }
+        }
+        return false
     }
     
     /// Saves downloaded audio file
@@ -123,16 +144,24 @@ actor FileStorageManager {
             }
         }
 
-        let destinationURL = audioFilePath(for: episodeTitle, podcastTitle: podcastTitle)
+        // Detect file extension from source file
+        let fileExtension = sourceURL.pathExtension.isEmpty ? "m4a" : sourceURL.pathExtension
+        let fileName = audioFileName(for: episodeTitle, podcastTitle: podcastTitle, extension: fileExtension)
+        let destinationURL = self.audioDirectory.appendingPathComponent(fileName)
 
-        // Remove existing file if present
-        if fileManager.fileExists(atPath: destinationURL.path) {
-            try? fileManager.removeItem(at: destinationURL)
+        // Remove existing files with different extensions
+        let baseFileName = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
+        let possibleExtensions = ["mp3", "m4a", "aac", "wav", "flac"]
+        for ext in possibleExtensions {
+            let possiblePath = self.audioDirectory.appendingPathComponent("\(baseFileName).\(ext)")
+            if fileManager.fileExists(atPath: possiblePath.path) {
+                try? fileManager.removeItem(at: possiblePath)
+            }
         }
 
         do {
             try fileManager.moveItem(at: sourceURL, to: destinationURL)
-            logger.info("Saved audio file: \(destinationURL.lastPathComponent)")
+            logger.info("Saved audio file: \(destinationURL.lastPathComponent) with extension: \(fileExtension)")
             return destinationURL
         } catch {
             logger.error("Failed to save audio: \(error.localizedDescription)")
@@ -140,20 +169,28 @@ actor FileStorageManager {
         }
     }
     
-    /// Deletes audio file
+    /// Deletes audio file (checks all possible extensions)
     func deleteAudioFile(for episodeTitle: String, podcastTitle: String) throws {
-        let path = audioFilePath(for: episodeTitle, podcastTitle: podcastTitle)
-        
-        guard fileManager.fileExists(atPath: path.path) else {
-            throw FileStorageError.fileNotFound
+        let baseFileName = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
+        let possibleExtensions = ["mp3", "m4a", "aac", "wav", "flac"]
+        var deleted = false
+
+        for ext in possibleExtensions {
+            let path = self.audioDirectory.appendingPathComponent("\(baseFileName).\(ext)")
+            if fileManager.fileExists(atPath: path.path) {
+                do {
+                    try fileManager.removeItem(at: path)
+                    logger.info("Deleted audio file: \(path.lastPathComponent)")
+                    deleted = true
+                } catch {
+                    logger.error("Failed to delete audio: \(error.localizedDescription)")
+                    throw FileStorageError.deleteFailed(error)
+                }
+            }
         }
-        
-        do {
-            try fileManager.removeItem(at: path)
-            logger.info("Deleted audio file: \(path.lastPathComponent)")
-        } catch {
-            logger.error("Failed to delete audio: \(error.localizedDescription)")
-            throw FileStorageError.deleteFailed(error)
+
+        if !deleted {
+            throw FileStorageError.fileNotFound
         }
     }
     

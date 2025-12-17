@@ -10,9 +10,10 @@ import SwiftData
 
 @main
 struct PodcastAnalyzerApp: App {
-    var sharedModelContainer: ModelContainer = {
+    let sharedModelContainer: ModelContainer = {
         let schema = Schema([
             PodcastInfoModel.self,
+            EpisodeDownloadModel.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -26,6 +27,14 @@ struct PodcastAnalyzerApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onAppear {
+                    // Initialize playback state coordinator on first appear
+                    Task { @MainActor in
+                        if PlaybackStateCoordinator.shared == nil {
+                            _ = PlaybackStateCoordinator(modelContext: sharedModelContainer.mainContext)
+                        }
+                    }
+                }
         }
         .modelContainer(sharedModelContainer)
     }
