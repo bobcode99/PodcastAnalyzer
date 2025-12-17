@@ -2,14 +2,6 @@
 //  MiniPlayerBar.swift
 //  PodcastAnalyzer
 //
-//  Created by Bob on 2025/12/17.
-//
-
-
-//
-//  MiniPlayerBar.swift
-//  PodcastAnalyzer
-//
 //  Mini player bar at bottom (like Apple Podcasts)
 //
 
@@ -54,7 +46,7 @@ struct MiniPlayerBar: View {
                             }
                         }
                         .frame(width: 50, height: 50)
-                        .cornerRadius(8)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     } else {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(Color.gray.opacity(0.3))
@@ -92,12 +84,15 @@ struct MiniPlayerBar: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Color(uiColor: .systemBackground))
+                .background(
+                    Color(uiColor: .systemBackground)
+                        .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: -2)
+                )
                 .onTapGesture {
                     showFullPlayer = true
                 }
             }
-            .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: -2)
+            .frame(height: 70) // Fixed height
             .fullScreenCover(isPresented: $showFullPlayer) {
                 if let episode = viewModel.currentEpisode {
                     PlayerView(
@@ -119,6 +114,7 @@ struct MiniPlayerBar: View {
 }
 
 // MARK: - Mini Player ViewModel
+
 class MiniPlayerViewModel: ObservableObject {
     @Published var isVisible: Bool = false
     @Published var isPlaying: Bool = false
@@ -127,6 +123,7 @@ class MiniPlayerViewModel: ObservableObject {
     @Published var imageURL: URL?
     @Published var progress: Double = 0
     @Published var currentEpisode: PlaybackEpisode?
+    
     private let audioManager = EnhancedAudioManager.shared
     private var updateTimer: Timer?
     

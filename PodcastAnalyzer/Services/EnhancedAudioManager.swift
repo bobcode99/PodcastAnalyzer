@@ -316,31 +316,35 @@ class EnhancedAudioManager: NSObject {
     
     private func updateNowPlayingInfo(imageURL: String? = nil) {
         guard let episode = currentEpisode else { return }
-        
+
         var nowPlayingInfo = [String: Any]()
         nowPlayingInfo[MPMediaItemPropertyTitle] = episode.title
         nowPlayingInfo[MPMediaItemPropertyArtist] = episode.podcastTitle
         nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
         nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? playbackRate : 0.0
-        
-        // Load artwork asynchronously
+
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+
+        // Load artwork asynchronously using URLSession (not Data(contentsOf:))
         if let imageURLString = imageURL ?? episode.imageURL,
            let url = URL(string: imageURLString) {
-            Task {
-                if let data = try? Data(contentsOf: url),
-                   let image = UIImage(data: data) {
-                    let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-                    await MainActor.run {
-                        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-                        info[MPMediaItemPropertyArtwork] = artwork
-                        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            Task.detached { [weak self] in
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    if let image = UIImage(data: data) {
+                        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                        await MainActor.run {
+                            var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+                            info[MPMediaItemPropertyArtwork] = artwork
+                            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+                        }
                     }
+                } catch {
+                    self?.logger.error("Failed to load artwork: \(error.localizedDescription)")
                 }
             }
         }
-        
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
     
     private func updateNowPlayingCurrentTime() {

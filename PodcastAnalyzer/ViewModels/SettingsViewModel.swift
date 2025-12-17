@@ -39,48 +39,60 @@ class SettingsViewModel: ObservableObject {
         isValidating = true
         errorMessage = ""
         successMessage = "Validating RSS feed..."
-        
-        Task {
-            do {
-                self.logger.info("Validating RSS feed: \(trimmedLink)")
-                
-                // Try to fetch the podcast to validate the RSS feed
-                let podcastInfo = try await service.fetchPodcast(from: trimmedLink)
-                self.logger.info("✅ RSS feed is valid: \(podcastInfo.title)")
-                self.logger.debug("image url: \(podcastInfo.imageURL)")
 
-                // Create new podcast feed
-                let podcastInfoModel = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date.now)
-                
-                // Save to database
-                modelContext.insert(podcastInfoModel)
-                try modelContext.save()
-                
-                self.podcastInfoModelList.append(podcastInfoModel)
-                self.rssUrlInput = ""
-                self.errorMessage = ""
-                self.successMessage = "✅ Feed added successfully!"
-                self.logger.info("Feed saved to database: \(podcastInfo.title)")
-                
-                // Hide success message after 2 seconds
-                self.successMessageTask?.cancel()
-                self.successMessageTask = Task {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    if !Task.isCancelled {
-                        self.successMessage = ""
+        // Use Task.detached to avoid blocking main thread
+        Task.detached { [weak self] in
+            guard let self else { return }
+
+            do {
+                await self.logger.info("Validating RSS feed: \(trimmedLink)")
+
+                // Fetch happens on background thread
+                let podcastInfo = try await self.service.fetchPodcast(from: trimmedLink)
+                await self.logger.info("✅ RSS feed is valid: \(podcastInfo.title)")
+                await self.logger.debug("image url: \(podcastInfo.imageURL)")
+
+                // Switch to main actor for UI updates and database operations
+                await MainActor.run {
+                    // Create new podcast feed
+                    let podcastInfoModel = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date.now)
+
+                    // Save to database
+                    modelContext.insert(podcastInfoModel)
+                    try? modelContext.save()
+
+                    self.podcastInfoModelList.append(podcastInfoModel)
+                    self.rssUrlInput = ""
+                    self.errorMessage = ""
+                    self.successMessage = "✅ Feed added successfully!"
+                    self.logger.info("Feed saved to database: \(podcastInfo.title)")
+
+                    // Hide success message after 2 seconds
+                    self.successMessageTask?.cancel()
+                    self.successMessageTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        if !Task.isCancelled {
+                            self.successMessage = ""
+                        }
                     }
+
+                    self.isValidating = false
                 }
             } catch let error as PodcastServiceError {
-                self.logger.error("RSS validation failed: \(error.localizedDescription)")
-                self.errorMessage = "❌ Invalid RSS feed: \(error.localizedDescription)"
-                self.successMessage = ""
+                await MainActor.run {
+                    self.logger.error("RSS validation failed: \(error.localizedDescription)")
+                    self.errorMessage = "❌ Invalid RSS feed: \(error.localizedDescription)"
+                    self.successMessage = ""
+                    self.isValidating = false
+                }
             } catch {
-                self.logger.error("Unexpected error: \(error.localizedDescription)")
-                self.errorMessage = "❌ Error: \(error.localizedDescription)"
-                self.successMessage = ""
+                await MainActor.run {
+                    self.logger.error("Unexpected error: \(error.localizedDescription)")
+                    self.errorMessage = "❌ Error: \(error.localizedDescription)"
+                    self.successMessage = ""
+                    self.isValidating = false
+                }
             }
-            
-            self.isValidating = false
         }
     }
     

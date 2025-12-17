@@ -259,38 +259,55 @@ class TranscriptGenerationViewModel: ObservableObject {
             state = .error("No local audio file available. Please download the episode first.")
             return
         }
-        
+
         Task {
             do {
                 let audioURL = URL(fileURLWithPath: audioPath)
                 let transcriptService = TranscriptService()
-                
-                // Check if we need to download the model
-                if !(await transcriptService.isModelReady()) {
+
+                // Always initialize transcriber/analyzer (even if model is already downloaded)
+                let modelReady = await transcriptService.isModelReady()
+
+                if !modelReady {
+                    // Need to download model first
                     state = .downloadingModel(progress: 0)
-                    
+
                     // Setup and download model with progress
                     for await progress in await transcriptService.setupAndInstallAssets() {
                         state = .downloadingModel(progress: progress)
                     }
+                } else {
+                    // Model is ready, but we still need to initialize transcriber/analyzer
+                    // Run setupAndInstallAssets silently (it will see model is installed and just initialize)
+                    for await _ in await transcriptService.setupAndInstallAssets() {
+                        // Silently consume progress
+                    }
                 }
-                
+
+                // Verify initialization
+                guard await transcriptService.isInitialized() else {
+                    throw NSError(
+                        domain: "TranscriptService", code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Failed to initialize transcription service"]
+                    )
+                }
+
                 // Start transcription
                 state = .transcribing(progress: 0)
-                
+
                 let srtContent = try await transcriptService.audioToSRT(inputFile: audioURL)
-                
+
                 // Save to file
                 let captionURL = try await fileStorage.saveCaptionFile(
                     content: srtContent,
                     episodeTitle: episode.title,
                     podcastTitle: podcastTitle
                 )
-                
+
                 self.captionFileURL = captionURL
                 self.transcriptText = srtContent
                 self.state = .completed
-                
+
             } catch {
                 state = .error(error.localizedDescription)
             }

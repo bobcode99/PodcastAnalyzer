@@ -45,6 +45,30 @@ class DownloadManager: NSObject, ObservableObject {
     
     override private init() {
         super.init()
+        // Note: We can't restore state here because FileStorageManager is an actor
+        // State will be checked lazily when getDownloadState is called
+    }
+
+    // MARK: - State Restoration
+
+    /// Checks if a file exists on disk and updates state accordingly
+    private func checkAndRestoreState(episodeTitle: String, podcastTitle: String) {
+        let episodeKey = makeKey(episode: episodeTitle, podcast: podcastTitle)
+
+        // Only check if we don't already have a state
+        guard downloadStates[episodeKey] == nil || downloadStates[episodeKey] == .notDownloaded else {
+            return
+        }
+
+        Task {
+            let exists = await fileStorage.audioFileExists(for: episodeTitle, podcastTitle: podcastTitle)
+            if exists {
+                let path = await fileStorage.audioFilePath(for: episodeTitle, podcastTitle: podcastTitle)
+                await MainActor.run {
+                    downloadStates[episodeKey] = .downloaded(localPath: path.path)
+                }
+            }
+        }
     }
     
     // MARK: - Download Control
@@ -128,6 +152,12 @@ class DownloadManager: NSObject, ObservableObject {
     
     func getDownloadState(episodeTitle: String, podcastTitle: String) -> DownloadState {
         let episodeKey = makeKey(episode: episodeTitle, podcast: podcastTitle)
+
+        // If we don't have a state, check disk to restore it
+        if downloadStates[episodeKey] == nil {
+            checkAndRestoreState(episodeTitle: episodeTitle, podcastTitle: podcastTitle)
+        }
+
         return downloadStates[episodeKey] ?? .notDownloaded
     }
     
@@ -152,36 +182,61 @@ extension DownloadManager: URLSessionDownloadDelegate {
     
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard let originalURL = downloadTask.originalRequest?.url else { return }
-        
+
         // Find which episode this belongs to
         let episodeKey = activeDownloads.first(where: { $0.value == downloadTask })?.key
         guard let episodeKey = episodeKey else { return }
-        
+
         let components = episodeKey.split(separator: "|")
         guard components.count == 2 else { return }
-        
+
         let podcastTitle = String(components[0])
         let episodeTitle = String(components[1])
-        
-        Task {
-            do {
-                let destinationURL = try await fileStorage.saveAudioFile(
-                    from: location,
-                    episodeTitle: episodeTitle,
-                    podcastTitle: podcastTitle
-                )
-                
-                await MainActor.run {
-                    downloadStates[episodeKey] = .downloaded(localPath: destinationURL.path)
-                    activeDownloads.removeValue(forKey: episodeKey)
-                    logger.info("Download completed: \(episodeTitle)")
+
+        // CRITICAL: URLSession will delete the temp file as soon as this method returns!
+        // We must copy it synchronously to our own location first
+        let tempDirectory = FileManager.default.temporaryDirectory
+        let ourTempFile = tempDirectory.appendingPathComponent(UUID().uuidString + ".tmp")
+
+        do {
+            // Copy the file synchronously before delegate returns
+            try FileManager.default.copyItem(at: location, to: ourTempFile)
+            logger.info("Copied download to temp location: \(ourTempFile.lastPathComponent)")
+
+            // Now move it to final destination asynchronously
+            Task {
+                do {
+                    let destinationURL = try await fileStorage.saveAudioFile(
+                        from: ourTempFile,
+                        episodeTitle: episodeTitle,
+                        podcastTitle: podcastTitle
+                    )
+
+                    // Clean up our temp file
+                    try? FileManager.default.removeItem(at: ourTempFile)
+
+                    await MainActor.run {
+                        downloadStates[episodeKey] = .downloaded(localPath: destinationURL.path)
+                        activeDownloads.removeValue(forKey: episodeKey)
+                        logger.info("Download completed: \(episodeTitle)")
+                    }
+                } catch {
+                    // Clean up our temp file on error
+                    try? FileManager.default.removeItem(at: ourTempFile)
+
+                    await MainActor.run {
+                        downloadStates[episodeKey] = .failed(error: error.localizedDescription)
+                        activeDownloads.removeValue(forKey: episodeKey)
+                        logger.error("Download save failed: \(error.localizedDescription)")
+                    }
                 }
-            } catch {
-                await MainActor.run {
-                    downloadStates[episodeKey] = .failed(error: error.localizedDescription)
-                    activeDownloads.removeValue(forKey: episodeKey)
-                    logger.error("Download save failed: \(error.localizedDescription)")
-                }
+            }
+        } catch {
+            // Failed to copy to our temp location
+            logger.error("Failed to copy download to temp: \(error.localizedDescription)")
+            Task { @MainActor in
+                downloadStates[episodeKey] = .failed(error: "Failed to copy temp file: \(error.localizedDescription)")
+                activeDownloads.removeValue(forKey: episodeKey)
             }
         }
     }

@@ -112,13 +112,24 @@ actor FileStorageManager {
     
     /// Saves downloaded audio file
     func saveAudioFile(from sourceURL: URL, episodeTitle: String, podcastTitle: String) throws -> URL {
+        // Ensure audio directory exists
+        if !fileManager.fileExists(atPath: self.audioDirectory.path) {
+            do {
+                try fileManager.createDirectory(at: self.audioDirectory, withIntermediateDirectories: true)
+                logger.info("Created audio directory: \(self.audioDirectory.path)")
+            } catch {
+                logger.error("Failed to create audio directory: \(error.localizedDescription)")
+                throw FileStorageError.directoryCreationFailed(error)
+            }
+        }
+
         let destinationURL = audioFilePath(for: episodeTitle, podcastTitle: podcastTitle)
-        
+
         // Remove existing file if present
         if fileManager.fileExists(atPath: destinationURL.path) {
             try? fileManager.removeItem(at: destinationURL)
         }
-        
+
         do {
             try fileManager.moveItem(at: sourceURL, to: destinationURL)
             logger.info("Saved audio file: \(destinationURL.lastPathComponent)")
@@ -167,8 +178,19 @@ actor FileStorageManager {
     
     /// Saves caption/SRT file
     func saveCaptionFile(content: String, episodeTitle: String, podcastTitle: String) throws -> URL {
+        // Ensure captions directory exists
+        if !fileManager.fileExists(atPath: self.captionsDirectory.path) {
+            do {
+                try fileManager.createDirectory(at: self.captionsDirectory, withIntermediateDirectories: true)
+                logger.info("Created captions directory: \(self.captionsDirectory.path)")
+            } catch {
+                logger.error("Failed to create captions directory: \(error.localizedDescription)")
+                throw FileStorageError.directoryCreationFailed(error)
+            }
+        }
+
         let destinationURL = captionFilePath(for: episodeTitle, podcastTitle: podcastTitle)
-        
+
         do {
             try content.write(to: destinationURL, atomically: true, encoding: .utf8)
             logger.info("Saved caption file: \(destinationURL.lastPathComponent)")

@@ -2,14 +2,6 @@
 //  PlayerView.swift
 //  PodcastAnalyzer
 //
-//  Created by Bob on 2025/12/17.
-//
-
-
-//
-//  PlayerView.swift
-//  PodcastAnalyzer
-//
 //  Full-screen player like Apple Podcasts
 //
 
@@ -131,7 +123,8 @@ struct PlayerView: View {
                     case .success(let image):
                         image
                             .resizable()
-                            .aspectRatio(contentMode: .fill)
+                            .aspectRatio(contentMode: .fit) // Changed from .fill to .fit
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
                     case .failure:
                         placeholderArtwork
                     case .empty:
@@ -146,7 +139,6 @@ struct PlayerView: View {
             }
         }
         .frame(width: 300, height: 300)
-        .cornerRadius(16)
         .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
     }
     

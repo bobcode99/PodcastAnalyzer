@@ -7,8 +7,11 @@
 
 import SwiftUI
 import SwiftData
+import Combine
 
 struct ContentView: View {
+    @StateObject private var miniPlayerViewModel = MiniPlayerViewModel()
+    
     var body: some View {
         ZStack(alignment: .bottom) {
             // Main tab view
@@ -23,6 +26,12 @@ struct ContentView: View {
                 
                 Tab(Constants.searchString, systemImage: Constants.searchIconName) {
                     SearchView()
+                }
+            }
+            // Add padding to prevent mini player from covering tab bar
+            .safeAreaInset(edge: .bottom) {
+                if miniPlayerViewModel.isVisible {
+                    Color.clear.frame(height: 70) // Reserve space for mini player
                 }
             }
             
