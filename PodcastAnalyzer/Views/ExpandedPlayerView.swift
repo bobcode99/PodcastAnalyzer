@@ -11,12 +11,13 @@ struct ExpandedPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel = ExpandedPlayerViewModel()
     @State private var showEpisodeDetail = false
+    @State private var showSpeedPicker = false
+
+    private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Drag indicator (handled by sheet presentation)
-
                 // Episode artwork and info
                 HStack(spacing: 16) {
                     // Artwork
@@ -144,24 +145,13 @@ struct ExpandedPlayerView: View {
 
                 // Bottom actions
                 HStack {
-                    // Playback speed
-                    Menu {
-                        ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { speed in
-                            Button(action: {
-                                viewModel.setPlaybackSpeed(Float(speed))
-                            }) {
-                                HStack {
-                                    Text("\(speed, specifier: "%.2f")x")
-                                    if abs(viewModel.playbackSpeed - Float(speed)) < 0.01 {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
+                    // Playback speed - using button + confirmationDialog instead of Menu
+                    Button(action: {
+                        showSpeedPicker = true
+                    }) {
                         HStack(spacing: 4) {
                             Image(systemName: "gauge.with.dots.needle.33percent")
-                            Text("\(viewModel.playbackSpeed, specifier: "%.2f")x")
+                            Text("\(viewModel.playbackSpeed, specifier: "%.2g")x")
                         }
                         .font(.subheadline)
                         .foregroundColor(.blue)
@@ -183,6 +173,20 @@ struct ExpandedPlayerView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
+            }
+            .confirmationDialog("Playback Speed", isPresented: $showSpeedPicker, titleVisibility: .visible) {
+                ForEach(playbackSpeeds, id: \.self) { speed in
+                    Button(action: {
+                        viewModel.setPlaybackSpeed(speed)
+                    }) {
+                        if abs(viewModel.playbackSpeed - speed) < 0.01 {
+                            Text("\(speed, specifier: "%.2g")x ✓")
+                        } else {
+                            Text("\(speed, specifier: "%.2g")x")
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
             }
             .navigationDestination(isPresented: $showEpisodeDetail) {
                 if let episode = viewModel.currentEpisode {
