@@ -46,24 +46,33 @@ class PlaybackStateCoordinator: ObservableObject {
         do {
             let results = try context.fetch(descriptor)
 
-            if let model = results.first {
+            let model: EpisodeDownloadModel
+            if let existingModel = results.first {
                 // Update existing model
-                model.lastPlaybackPosition = update.position
-                model.lastPlayedDate = Date()
-
-                // Mark as completed if within 30 seconds of end
-                if update.duration > 0 && (update.duration - update.position) < 30 {
-                    model.isCompleted = true
-                }
+                model = existingModel
+                logger.debug("Updating existing episode model: \(update.episodeTitle)")
             } else {
-                // Create new model - we need the audioURL but don't have it in the update
-                // For now, skip creation if model doesn't exist
-                logger.debug("No existing episode model found for: \(update.episodeTitle)")
-                return
+                // Create new model automatically
+                logger.info("Creating new episode model for: \(update.episodeTitle)")
+                model = EpisodeDownloadModel(
+                    episodeTitle: update.episodeTitle,
+                    podcastTitle: update.podcastTitle,
+                    audioURL: update.audioURL
+                )
+                context.insert(model)
+            }
+
+            // Update playback state
+            model.lastPlaybackPosition = update.position
+            model.lastPlayedDate = Date()
+
+            // Mark as completed if within 30 seconds of end
+            if update.duration > 0 && (update.duration - update.position) < 30 {
+                model.isCompleted = true
             }
 
             try context.save()
-            logger.debug("Saved playback position: \(update.episodeTitle) at \(update.position)s")
+            logger.info("✅ Saved playback: \(update.episodeTitle) at \(Int(update.position))s / \(Int(update.duration))s")
 
         } catch {
             logger.error("Failed to save playback position: \(error.localizedDescription)")

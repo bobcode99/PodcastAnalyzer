@@ -144,19 +144,30 @@ actor FileStorageManager {
             }
         }
 
-        // Detect file extension from source file
-        let fileExtension = sourceURL.pathExtension.isEmpty ? "m4a" : sourceURL.pathExtension
+        // Detect file extension from source file, filtering out temp extensions
+        var fileExtension = sourceURL.pathExtension.lowercased()
+        let validExtensions = ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"]
+        if fileExtension.isEmpty || !validExtensions.contains(fileExtension) {
+            fileExtension = "mp3"  // Default to mp3 if unknown
+        }
+
         let fileName = audioFileName(for: episodeTitle, podcastTitle: podcastTitle, extension: fileExtension)
         let destinationURL = self.audioDirectory.appendingPathComponent(fileName)
 
-        // Remove existing files with different extensions
+        // Remove existing files with ALL extensions (including destination)
         let baseFileName = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
-        let possibleExtensions = ["mp3", "m4a", "aac", "wav", "flac"]
+        let possibleExtensions = ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "tmp"]
         for ext in possibleExtensions {
             let possiblePath = self.audioDirectory.appendingPathComponent("\(baseFileName).\(ext)")
             if fileManager.fileExists(atPath: possiblePath.path) {
                 try? fileManager.removeItem(at: possiblePath)
+                logger.info("Removed existing file: \(possiblePath.lastPathComponent)")
             }
+        }
+
+        // Also remove destination if it still exists
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try? fileManager.removeItem(at: destinationURL)
         }
 
         do {

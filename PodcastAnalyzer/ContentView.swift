@@ -11,32 +11,26 @@ import Combine
 
 struct ContentView: View {
     @StateObject private var miniPlayerViewModel = MiniPlayerViewModel()
-    
+
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Main tab view
-            TabView {
-                Tab(Constants.homeString, systemImage: Constants.homeIconName) {
-                    HomeView()
-                }
-                
-                Tab(Constants.settingsString, systemImage: Constants.settingsIconName) {
-                    SettingsView()
-                }
-                
-                Tab(Constants.searchString, systemImage: Constants.searchIconName) {
-                    SearchView()
-                }
+        TabView {
+            Tab(Constants.homeString, systemImage: Constants.homeIconName) {
+                HomeView()
             }
-            // Add padding to prevent mini player from covering tab bar
-            .safeAreaInset(edge: .bottom) {
-                if miniPlayerViewModel.isVisible {
-                    Color.clear.frame(height: 70) // Reserve space for mini player
-                }
+
+            Tab(Constants.settingsString, systemImage: Constants.settingsIconName) {
+                SettingsView()
             }
-            
-            // Mini player overlay (appears when playing)
-            MiniPlayerBar()
+
+            Tab(Constants.searchString, systemImage: Constants.searchIconName) {
+                SearchView()
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // Mini player appears above tab bar, respecting safe area
+            if miniPlayerViewModel.isVisible {
+                MiniPlayerBar()
+            }
         }
     }
 }

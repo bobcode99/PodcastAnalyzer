@@ -26,12 +26,15 @@ enum DownloadState: Codable, Equatable {
 
 class DownloadManager: NSObject, ObservableObject {
     static let shared = DownloadManager()
-    
+
     // ✅ Use @Published instead
     @Published var downloadStates: [String: DownloadState] = [:]
-    
+
     private var activeDownloads: [String: URLSessionDownloadTask] = [:]
-    
+
+    // Store original URLs to get proper file extensions
+    private var originalURLs: [String: URL] = [:]
+
     // ✅ Make it a lazy stored property
     private lazy var urlSession: URLSession = {
         let config = URLSessionConfiguration.background(withIdentifier: "com.podcast.analyzer.downloads")
@@ -39,10 +42,10 @@ class DownloadManager: NSObject, ObservableObject {
         config.sessionSendsLaunchEvents = true
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }()
-    
+
     private let logger = Logger(subsystem: "com.podcast.analyzer", category: "DownloadManager")
     private let fileStorage = FileStorageManager.shared
-    
+
     override private init() {
         super.init()
         // Note: We can't restore state here because FileStorageManager is an actor
@@ -50,6 +53,31 @@ class DownloadManager: NSObject, ObservableObject {
     }
 
     // MARK: - State Restoration
+
+    /// Synchronously checks if audio file exists on disk
+    /// Returns the path if found, nil otherwise
+    private func checkAudioFileExistsSynchronously(episodeTitle: String, podcastTitle: String) -> String? {
+        let fm = FileManager.default
+        let libraryDir = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+        let audioDir = libraryDir.appendingPathComponent("Audio", isDirectory: true)
+
+        // Sanitize filename same way as FileStorageManager
+        let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
+        let baseFileName = "\(podcastTitle)_\(episodeTitle)"
+            .components(separatedBy: invalidCharacters)
+            .joined(separator: "_")
+            .trimmingCharacters(in: .whitespaces)
+
+        let possibleExtensions = ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"]
+
+        for ext in possibleExtensions {
+            let path = audioDir.appendingPathComponent("\(baseFileName).\(ext)")
+            if fm.fileExists(atPath: path.path) {
+                return path.path
+            }
+        }
+        return nil
+    }
 
     /// Checks if a file exists on disk and updates state accordingly
     private func checkAndRestoreState(episodeTitle: String, podcastTitle: String) {
@@ -60,6 +88,13 @@ class DownloadManager: NSObject, ObservableObject {
             return
         }
 
+        // Try synchronous check first for immediate response
+        if let path = checkAudioFileExistsSynchronously(episodeTitle: episodeTitle, podcastTitle: podcastTitle) {
+            downloadStates[episodeKey] = .downloaded(localPath: path)
+            return
+        }
+
+        // Fallback to async check
         Task {
             let exists = await fileStorage.audioFileExists(for: episodeTitle, podcastTitle: podcastTitle)
             if exists {
@@ -103,16 +138,17 @@ class DownloadManager: NSObject, ObservableObject {
     
     private func startDownload(url: URL, episodeTitle: String, podcastTitle: String) {
         let episodeKey = makeKey(episode: episodeTitle, podcast: podcastTitle)
-        
+
         // Cancel existing download if any
         if let existingTask = activeDownloads[episodeKey] {
             existingTask.cancel()
         }
-        
+
         let task = urlSession.downloadTask(with: url)
         activeDownloads[episodeKey] = task
+        originalURLs[episodeKey] = url  // Store original URL for file extension
         downloadStates[episodeKey] = .downloading(progress: 0)
-        
+
         task.resume()
         logger.info("Started download: \(episodeTitle)")
     }
@@ -179,10 +215,8 @@ class DownloadManager: NSObject, ObservableObject {
 // MARK: - URLSessionDownloadDelegate
 
 extension DownloadManager: URLSessionDownloadDelegate {
-    
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        guard let originalURL = downloadTask.originalRequest?.url else { return }
 
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         // Find which episode this belongs to
         let episodeKey = activeDownloads.first(where: { $0.value == downloadTask })?.key
         guard let episodeKey = episodeKey else { return }
@@ -193,10 +227,14 @@ extension DownloadManager: URLSessionDownloadDelegate {
         let podcastTitle = String(components[0])
         let episodeTitle = String(components[1])
 
+        // Get the original URL for proper file extension
+        let originalURL = originalURLs[episodeKey] ?? downloadTask.originalRequest?.url
+        let fileExtension = originalURL?.pathExtension ?? "mp3"
+
         // CRITICAL: URLSession will delete the temp file as soon as this method returns!
         // We must copy it synchronously to our own location first
         let tempDirectory = FileManager.default.temporaryDirectory
-        let ourTempFile = tempDirectory.appendingPathComponent(UUID().uuidString + ".tmp")
+        let ourTempFile = tempDirectory.appendingPathComponent(UUID().uuidString + ".\(fileExtension)")
 
         do {
             // Copy the file synchronously before delegate returns
@@ -212,22 +250,24 @@ extension DownloadManager: URLSessionDownloadDelegate {
                         podcastTitle: podcastTitle
                     )
 
-                    // Clean up our temp file
+                    // Clean up our temp file (may already be moved)
                     try? FileManager.default.removeItem(at: ourTempFile)
 
                     await MainActor.run {
-                        downloadStates[episodeKey] = .downloaded(localPath: destinationURL.path)
-                        activeDownloads.removeValue(forKey: episodeKey)
-                        logger.info("Download completed: \(episodeTitle)")
+                        self.downloadStates[episodeKey] = .downloaded(localPath: destinationURL.path)
+                        self.activeDownloads.removeValue(forKey: episodeKey)
+                        self.originalURLs.removeValue(forKey: episodeKey)
+                        self.logger.info("Download completed: \(episodeTitle)")
                     }
                 } catch {
                     // Clean up our temp file on error
                     try? FileManager.default.removeItem(at: ourTempFile)
 
                     await MainActor.run {
-                        downloadStates[episodeKey] = .failed(error: error.localizedDescription)
-                        activeDownloads.removeValue(forKey: episodeKey)
-                        logger.error("Download save failed: \(error.localizedDescription)")
+                        self.downloadStates[episodeKey] = .failed(error: error.localizedDescription)
+                        self.activeDownloads.removeValue(forKey: episodeKey)
+                        self.originalURLs.removeValue(forKey: episodeKey)
+                        self.logger.error("Download save failed: \(error.localizedDescription)")
                     }
                 }
             }
@@ -235,8 +275,9 @@ extension DownloadManager: URLSessionDownloadDelegate {
             // Failed to copy to our temp location
             logger.error("Failed to copy download to temp: \(error.localizedDescription)")
             Task { @MainActor in
-                downloadStates[episodeKey] = .failed(error: "Failed to copy temp file: \(error.localizedDescription)")
-                activeDownloads.removeValue(forKey: episodeKey)
+                self.downloadStates[episodeKey] = .failed(error: "Failed to copy temp file: \(error.localizedDescription)")
+                self.activeDownloads.removeValue(forKey: episodeKey)
+                self.originalURLs.removeValue(forKey: episodeKey)
             }
         }
     }

@@ -2,24 +2,28 @@
 //  PlayerView.swift
 //  PodcastAnalyzer
 //
-//  Full-screen player like Apple Podcasts
+//  DEPRECATED: This full-screen player has been replaced by ExpandedPlayerView
+//  This file is kept for reference but should not be used in new code
 //
 
 import SwiftUI
 
+@available(*, deprecated, message: "Use ExpandedPlayerView instead")
+
 struct PlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: PlayerViewModel
-    
+
     init(episode: PodcastEpisodeInfo, podcastTitle: String, audioURL: String, imageURL: String?) {
-        _viewModel = StateObject(wrappedValue: PlayerViewModel(
-            episode: episode,
-            podcastTitle: podcastTitle,
-            audioURL: audioURL,
-            imageURL: imageURL
-        ))
+        _viewModel = StateObject(
+            wrappedValue: PlayerViewModel(
+                episode: episode,
+                podcastTitle: podcastTitle,
+                audioURL: audioURL,
+                imageURL: imageURL
+            ))
     }
-    
+
     var body: some View {
         ZStack {
             // Background gradient
@@ -29,29 +33,30 @@ struct PlayerView: View {
                 endPoint: .bottom
             )
             .ignoresSafeArea()
-            
+
             VStack(spacing: 0) {
                 // MARK: - Top Bar
                 topBar
-                
+                    .padding(.top)  // Respect safe area for notch
+
                 ScrollView {
                     VStack(spacing: 32) {
                         // MARK: - Artwork
                         artworkSection
-                            .padding(.top, 40)
-                        
+                            .padding(.top, 20)
+
                         // MARK: - Episode Info
                         episodeInfoSection
-                        
+
                         // MARK: - Progress Slider
                         progressSection
-                        
+
                         // MARK: - Playback Controls
                         playbackControlsSection
-                        
+
                         // MARK: - Speed & Additional Controls
                         additionalControlsSection
-                        
+
                         // MARK: - Live Captions
                         if !viewModel.currentCaption.isEmpty {
                             captionsSection
@@ -62,17 +67,15 @@ struct PlayerView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark) // Force dark mode for player
+        .preferredColorScheme(.dark)  // Force dark mode for player
         .onAppear {
             viewModel.startPlayback()
         }
-        .onDisappear {
-            viewModel.pausePlayback()
-        }
+        // Don't pause on disappear - let mini player continue playing
     }
-    
+
     // MARK: - Top Bar
-    
+
     private var topBar: some View {
         HStack {
             Button(action: {
@@ -83,22 +86,22 @@ struct PlayerView: View {
                     .foregroundColor(.white)
                     .padding()
             }
-            
+
             Spacer()
-            
+
             Menu {
                 Button(action: {
                     viewModel.shareEpisode()
                 }) {
                     Label("Share Episode", systemImage: "square.and.arrow.up")
                 }
-                
+
                 Button(action: {
                     viewModel.addToPlaylist()
                 }) {
                     Label("Add to Playlist", systemImage: "plus")
                 }
-                
+
                 Button(action: {
                     viewModel.showEpisodeNotes()
                 }) {
@@ -112,9 +115,9 @@ struct PlayerView: View {
             }
         }
     }
-    
+
     // MARK: - Artwork Section
-    
+
     private var artworkSection: some View {
         ZStack {
             if let url = viewModel.imageURL {
@@ -123,7 +126,7 @@ struct PlayerView: View {
                     case .success(let image):
                         image
                             .resizable()
-                            .aspectRatio(contentMode: .fit) // Changed from .fill to .fit
+                            .aspectRatio(contentMode: .fit)  // Changed from .fill to .fit
                             .clipShape(RoundedRectangle(cornerRadius: 16))
                     case .failure:
                         placeholderArtwork
@@ -141,7 +144,7 @@ struct PlayerView: View {
         .frame(width: 300, height: 300)
         .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
     }
-    
+
     private var placeholderArtwork: some View {
         RoundedRectangle(cornerRadius: 16)
             .fill(Color.gray.opacity(0.3))
@@ -151,9 +154,9 @@ struct PlayerView: View {
                     .foregroundColor(.white.opacity(0.5))
             )
     }
-    
+
     // MARK: - Episode Info Section
-    
+
     private var episodeInfoSection: some View {
         VStack(spacing: 8) {
             Text(viewModel.episodeTitle)
@@ -162,16 +165,16 @@ struct PlayerView: View {
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
-            
+
             Text(viewModel.podcastTitle)
                 .font(.subheadline)
                 .foregroundColor(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
         }
     }
-    
+
     // MARK: - Progress Section
-    
+
     private var progressSection: some View {
         VStack(spacing: 12) {
             // Custom Slider
@@ -181,7 +184,7 @@ struct PlayerView: View {
                     Capsule()
                         .fill(Color.white.opacity(0.3))
                         .frame(height: 4)
-                    
+
                     // Progress
                     Capsule()
                         .fill(Color.white)
@@ -199,16 +202,16 @@ struct PlayerView: View {
                 )
             }
             .frame(height: 4)
-            
+
             // Time labels
             HStack {
                 Text(viewModel.currentTimeString)
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.7))
                     .monospacedDigit()
-                
+
                 Spacer()
-                
+
                 Text(viewModel.remainingTimeString)
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.7))
@@ -216,9 +219,9 @@ struct PlayerView: View {
             }
         }
     }
-    
+
     // MARK: - Playback Controls Section
-    
+
     private var playbackControlsSection: some View {
         HStack(spacing: 60) {
             // Skip backward
@@ -229,7 +232,7 @@ struct PlayerView: View {
                     .font(.system(size: 36))
                     .foregroundColor(.white)
             }
-            
+
             // Play/Pause
             Button(action: {
                 viewModel.togglePlayPause()
@@ -238,7 +241,7 @@ struct PlayerView: View {
                     .font(.system(size: 80))
                     .foregroundColor(.white)
             }
-            
+
             // Skip forward
             Button(action: {
                 viewModel.skipForward()
@@ -250,9 +253,9 @@ struct PlayerView: View {
         }
         .padding(.vertical, 20)
     }
-    
+
     // MARK: - Additional Controls Section
-    
+
     private var additionalControlsSection: some View {
         HStack(spacing: 40) {
             // Playback speed
@@ -278,9 +281,9 @@ struct PlayerView: View {
                 }
                 .foregroundColor(.white)
             }
-            
+
             Spacer()
-            
+
             // Sleep timer (placeholder)
             Button(action: {
                 viewModel.showSleepTimer()
@@ -293,9 +296,9 @@ struct PlayerView: View {
                 }
                 .foregroundColor(.white)
             }
-            
+
             Spacer()
-            
+
             // AirPlay
             Button(action: {
                 viewModel.showAirPlay()
@@ -308,9 +311,9 @@ struct PlayerView: View {
                 }
                 .foregroundColor(.white)
             }
-            
+
             Spacer()
-            
+
             // Queue/Playlist
             Button(action: {
                 viewModel.showQueue()
@@ -326,9 +329,9 @@ struct PlayerView: View {
         }
         .padding(.horizontal, 20)
     }
-    
+
     // MARK: - Captions Section
-    
+
     private var captionsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -338,7 +341,7 @@ struct PlayerView: View {
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.7))
             }
-            
+
             ScrollView {
                 Text(viewModel.currentCaption)
                     .font(.body)
@@ -353,19 +356,3 @@ struct PlayerView: View {
     }
 }
 
-// MARK: - Preview
-
-#Preview {
-    PlayerView(
-        episode: PodcastEpisodeInfo(
-            title: "Building Great Apps with Swift",
-            podcastEpisodeDescription: "Learn about SwiftUI",
-            pubDate: Date(),
-            audioURL: "https://example.com/audio.mp3",
-            imageURL: nil
-        ),
-        podcastTitle: "Swift Talk",
-        audioURL: "https://example.com/audio.mp3",
-        imageURL: "https://example.com/image.jpg"
-    )
-}

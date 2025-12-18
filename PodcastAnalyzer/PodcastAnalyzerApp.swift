@@ -20,7 +20,30 @@ struct PodcastAnalyzerApp: App {
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            // Migration failed - delete old store and create fresh one
+            print("Migration failed, attempting to recreate database: \(error)")
+
+            // Get the default store URL
+            let url = URL.applicationSupportDirectory.appending(path: "default.store")
+
+            // Delete old store files
+            let fileManager = FileManager.default
+            let storeFiles = [
+                url,
+                url.appendingPathExtension("shm"),
+                url.appendingPathExtension("wal")
+            ]
+
+            for file in storeFiles {
+                try? fileManager.removeItem(at: file)
+            }
+
+            // Try again with fresh database
+            do {
+                return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            } catch {
+                fatalError("Could not create ModelContainer after reset: \(error)")
+            }
         }
     }()
 

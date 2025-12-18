@@ -2,7 +2,7 @@
 //  MiniPlayerBar.swift
 //  PodcastAnalyzer
 //
-//  Mini player bar at bottom (like Apple Podcasts)
+//  Compact mini player bar that shows at bottom of TabView
 //
 
 import SwiftUI
@@ -10,8 +10,8 @@ import Combine
 
 struct MiniPlayerBar: View {
     @StateObject private var viewModel = MiniPlayerViewModel()
-    @State private var showFullPlayer = false
-    
+    @State private var showExpandedPlayer = false
+
     var body: some View {
         if viewModel.isVisible {
             VStack(spacing: 0) {
@@ -21,7 +21,7 @@ struct MiniPlayerBar: View {
                         Rectangle()
                             .fill(Color.gray.opacity(0.3))
                             .frame(height: 2)
-                        
+
                         Rectangle()
                             .fill(Color.blue)
                             .frame(
@@ -31,7 +31,7 @@ struct MiniPlayerBar: View {
                     }
                 }
                 .frame(height: 2)
-                
+
                 // Main content
                 HStack(spacing: 12) {
                     // Artwork
@@ -56,22 +56,22 @@ struct MiniPlayerBar: View {
                                     .foregroundColor(.white)
                             )
                     }
-                    
+
                     // Episode info
                     VStack(alignment: .leading, spacing: 4) {
                         Text(viewModel.episodeTitle)
                             .font(.subheadline)
                             .fontWeight(.medium)
                             .lineLimit(1)
-                        
+
                         Text(viewModel.podcastTitle)
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
                     }
-                    
+
                     Spacer()
-                    
+
                     // Play/Pause button
                     Button(action: {
                         viewModel.togglePlayPause()
@@ -85,29 +85,19 @@ struct MiniPlayerBar: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
-                    Color(uiColor: .systemBackground)
+                    RoundedRectangle(cornerRadius: 0)
+                        .fill(Color(uiColor: .systemBackground))
                         .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: -2)
                 )
                 .onTapGesture {
-                    showFullPlayer = true
+                    showExpandedPlayer = true
                 }
             }
-            .frame(height: 70) // Fixed height
-            .fullScreenCover(isPresented: $showFullPlayer) {
-                if let episode = viewModel.currentEpisode {
-                    PlayerView(
-                        episode: PodcastEpisodeInfo(
-                            title: episode.title,
-                            podcastEpisodeDescription: nil,
-                            pubDate: nil,
-                            audioURL: episode.audioURL,
-                            imageURL: episode.imageURL
-                        ),
-                        podcastTitle: episode.podcastTitle,
-                        audioURL: episode.audioURL,
-                        imageURL: episode.imageURL
-                    )
-                }
+            .clipped()
+            .sheet(isPresented: $showExpandedPlayer) {
+                ExpandedPlayerView()
+                    .presentationDetents([.height(300), .large])
+                    .presentationDragIndicator(.visible)
             }
         }
     }

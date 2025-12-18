@@ -19,22 +19,32 @@ import SwiftData
 @Model
 class EpisodeDownloadModel {
     @Attribute(.unique) var id: String
-    
+
     var episodeTitle: String
     var podcastTitle: String
     var audioURL: String
     var localAudioPath: String?
     var captionPath: String?
-    
+
     // Playback state
-    var lastPlaybackPosition: TimeInterval
-    var isCompleted: Bool
+    var lastPlaybackPosition: TimeInterval = 0
+    var duration: TimeInterval = 0
+    var isCompleted: Bool = false
     var lastPlayedDate: Date?
-    
+    var playCount: Int = 0
+
+    // User preferences
+    var isStarred: Bool = false
+    var notes: String?
+
     // Download metadata
     var downloadedDate: Date?
-    var fileSize: Int64
-    
+    var fileSize: Int64 = 0
+
+    // Episode metadata (cached)
+    var imageURL: String?
+    var pubDate: Date?
+
     init(
         episodeTitle: String,
         podcastTitle: String,
@@ -42,10 +52,16 @@ class EpisodeDownloadModel {
         localAudioPath: String? = nil,
         captionPath: String? = nil,
         lastPlaybackPosition: TimeInterval = 0,
+        duration: TimeInterval = 0,
         isCompleted: Bool = false,
         lastPlayedDate: Date? = nil,
+        playCount: Int = 0,
+        isStarred: Bool = false,
+        notes: String? = nil,
         downloadedDate: Date? = nil,
-        fileSize: Int64 = 0
+        fileSize: Int64 = 0,
+        imageURL: String? = nil,
+        pubDate: Date? = nil
     ) {
         self.id = "\(podcastTitle)|\(episodeTitle)"
         self.episodeTitle = episodeTitle
@@ -54,9 +70,37 @@ class EpisodeDownloadModel {
         self.localAudioPath = localAudioPath
         self.captionPath = captionPath
         self.lastPlaybackPosition = lastPlaybackPosition
+        self.duration = duration
         self.isCompleted = isCompleted
         self.lastPlayedDate = lastPlayedDate
+        self.playCount = playCount
+        self.isStarred = isStarred
+        self.notes = notes
         self.downloadedDate = downloadedDate
         self.fileSize = fileSize
+        self.imageURL = imageURL
+        self.pubDate = pubDate
+    }
+
+    /// Progress percentage (0.0 to 1.0)
+    var progress: Double {
+        guard duration > 0 else { return 0 }
+        return min(lastPlaybackPosition / duration, 1.0)
+    }
+
+    /// Formatted remaining time
+    var remainingTimeString: String? {
+        guard duration > 0 else { return nil }
+        let remaining = duration - lastPlaybackPosition
+        if remaining <= 0 { return nil }
+
+        let minutes = Int(remaining) / 60
+        let seconds = Int(remaining) % 60
+        if minutes >= 60 {
+            let hours = minutes / 60
+            let mins = minutes % 60
+            return "\(hours)h \(mins)m left"
+        }
+        return "\(minutes)m \(seconds)s left"
     }
 }

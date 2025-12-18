@@ -27,11 +27,17 @@ final class EpisodeDetailViewModel {
     
     // Download state
     var downloadState: DownloadState = .notDownloaded
-    
+
+    // Transcript state
+    var transcriptState: TranscriptState = .idle
+    var transcriptText: String = ""
+    var isModelReady: Bool = false
+    private let fileStorage = FileStorageManager.shared
+
     // Playback state from SwiftData
     private var episodeModel: EpisodeDownloadModel?
     private var modelContext: ModelContext?
-    
+
     // Cancellables for observation
     private var cancellables = Set<AnyCancellable>()
     
@@ -115,6 +121,22 @@ final class EpisodeDetailViewModel {
     
     var currentCaption: String {
         isPlayingThisEpisode ? audioManager.currentCaption : ""
+    }
+
+    var isStarred: Bool {
+        episodeModel?.isStarred ?? false
+    }
+
+    var savedDuration: TimeInterval {
+        episodeModel?.duration ?? 0
+    }
+
+    var playbackProgress: Double {
+        episodeModel?.progress ?? 0
+    }
+
+    var remainingTimeString: String? {
+        episodeModel?.remainingTimeString
     }
     
     // MARK: - Actions
@@ -225,14 +247,16 @@ final class EpisodeDetailViewModel {
     
     private func createEpisodeModel(context: ModelContext) {
         guard let audioURL = episode.audioURL else { return }
-        
+
         let model = EpisodeDownloadModel(
             episodeTitle: episode.title,
             podcastTitle: podcastTitle,
-            audioURL: audioURL
+            audioURL: audioURL,
+            imageURL: imageURLString,
+            pubDate: episode.pubDate
         )
         context.insert(model)
-        
+
         do {
             try context.save()
             episodeModel = model
@@ -244,7 +268,17 @@ final class EpisodeDetailViewModel {
     private func savePlaybackPosition(_ position: TimeInterval) {
         guard let model = episodeModel else { return }
         model.lastPlaybackPosition = position
-        
+
+        // Also save duration if we have it
+        if audioManager.duration > 0 {
+            model.duration = audioManager.duration
+        }
+
+        // Mark as completed if near the end (within 30 seconds)
+        if model.duration > 0 && position >= model.duration - 30 {
+            model.isCompleted = true
+        }
+
         do {
             try modelContext?.save()
         } catch {
@@ -255,7 +289,16 @@ final class EpisodeDetailViewModel {
     private func updateLastPlayed() {
         guard let model = episodeModel else { return }
         model.lastPlayedDate = Date()
-        
+        model.playCount += 1
+
+        // Save image URL and pub date if not already saved
+        if model.imageURL == nil {
+            model.imageURL = imageURLString
+        }
+        if model.pubDate == nil {
+            model.pubDate = episode.pubDate
+        }
+
         do {
             try modelContext?.save()
         } catch {
@@ -264,10 +307,10 @@ final class EpisodeDetailViewModel {
     }
     
     // MARK: - Description Parsing
-    
+
     private func parseDescription() {
         let html = episode.podcastEpisodeDescription ?? ""
-        
+
         guard !html.isEmpty else {
             descriptionView = AnyView(
                 Text("No description available.")
@@ -276,19 +319,19 @@ final class EpisodeDetailViewModel {
             )
             return
         }
-        
+
         let rootStyle = MarkupStyle(
             font: MarkupStyleFont(size: 16),
             foregroundColor: MarkupStyleColor(color: UIColor.label)
         )
-        
+
         let parser = ZHTMLParserBuilder.initWithDefault()
             .set(rootStyle: rootStyle)
             .build()
-        
+
         Task {
             let attributedString = parser.render(html)
-            
+
             await MainActor.run {
                 self.descriptionView = AnyView(
                     HTMLTextView(attributedString: attributedString)
@@ -297,5 +340,166 @@ final class EpisodeDetailViewModel {
                 )
             }
         }
+    }
+
+    // MARK: - Action Methods
+
+    func shareEpisode() {
+        // TODO: Implement share functionality
+        print("Share episode: \(episode.title)")
+    }
+
+    func translateDescription() {
+        // TODO: Implement translation
+        print("Translate description")
+    }
+
+    func toggleStar() {
+        guard let model = episodeModel else { return }
+        model.isStarred.toggle()
+
+        do {
+            try modelContext?.save()
+        } catch {
+            print("Failed to save star state: \(error)")
+        }
+    }
+
+    func addToList() {
+        // TODO: Implement add to list functionality
+        print("Add to list: \(episode.title)")
+    }
+
+    func downloadAudio() {
+        startDownload()
+    }
+
+    func reportIssue() {
+        // TODO: Implement issue reporting
+        print("Report issue for: \(episode.title)")
+    }
+
+    // MARK: - Transcript Methods
+
+    func checkTranscriptStatus() {
+        Task {
+            // Check if model is ready
+            let transcriptService = TranscriptService()
+            isModelReady = await transcriptService.isModelReady()
+
+            // Check if transcript already exists
+            let exists = await fileStorage.captionFileExists(
+                for: episode.title,
+                podcastTitle: podcastTitle
+            )
+
+            if exists {
+                await loadExistingTranscript()
+            }
+        }
+    }
+
+    func generateTranscript() {
+        guard let audioPath = localAudioPath else {
+            transcriptState = .error("No local audio file available. Please download the episode first.")
+            return
+        }
+
+        Task {
+            do {
+                let audioURL = URL(fileURLWithPath: audioPath)
+                let transcriptService = TranscriptService()
+
+                let modelReady = await transcriptService.isModelReady()
+
+                if !modelReady {
+                    await MainActor.run {
+                        transcriptState = .downloadingModel(progress: 0)
+                    }
+
+                    for await progress in await transcriptService.setupAndInstallAssets() {
+                        await MainActor.run {
+                            transcriptState = .downloadingModel(progress: progress)
+                        }
+                    }
+                } else {
+                    for await _ in await transcriptService.setupAndInstallAssets() {
+                        // Silently consume progress
+                    }
+                }
+
+                guard await transcriptService.isInitialized() else {
+                    throw NSError(
+                        domain: "TranscriptService", code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Failed to initialize transcription service"]
+                    )
+                }
+
+                await MainActor.run {
+                    transcriptState = .transcribing(progress: 0)
+                }
+
+                let srtContent = try await transcriptService.audioToSRT(inputFile: audioURL)
+
+                _ = try await fileStorage.saveCaptionFile(
+                    content: srtContent,
+                    episodeTitle: episode.title,
+                    podcastTitle: podcastTitle
+                )
+
+                await MainActor.run {
+                    transcriptText = srtContent
+                    transcriptState = .completed
+                }
+
+            } catch {
+                await MainActor.run {
+                    transcriptState = .error(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    func copyTranscriptToClipboard() {
+        UIPasteboard.general.string = transcriptText
+    }
+
+    private func loadExistingTranscript() async {
+        do {
+            let content = try await fileStorage.loadCaptionFile(
+                for: episode.title,
+                podcastTitle: podcastTitle
+            )
+
+            await MainActor.run {
+                transcriptText = content
+                transcriptState = .completed
+            }
+        } catch {
+            print("Failed to load transcript: \(error)")
+        }
+    }
+
+    var hasTranscript: Bool {
+        !transcriptText.isEmpty
+    }
+
+    /// Parses SRT content and returns clean text without timestamps
+    var cleanTranscriptText: String {
+        guard !transcriptText.isEmpty else { return "" }
+
+        var cleanLines: [String] = []
+        let entries = transcriptText.components(separatedBy: "\n\n")
+
+        for entry in entries {
+            let lines = entry.components(separatedBy: "\n")
+            // Skip index and timestamp lines, get text
+            if lines.count >= 3 {
+                let textLines = Array(lines[2...])
+                cleanLines.append(contentsOf: textLines)
+            }
+        }
+
+        return cleanLines.joined(separator: " ")
     }
 }

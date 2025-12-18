@@ -2,15 +2,8 @@
 //  PlayerViewModel.swift
 //  PodcastAnalyzer
 //
-//  Created by Bob on 2025/12/17.
-//
-
-
-//
-//  PlayerViewModel.swift
-//  PodcastAnalyzer
-//
-//  ViewModel for PlayerView - manually crafted without macros
+//  DEPRECATED: This ViewModel has been replaced by ExpandedPlayerViewModel
+//  This file is kept for reference but should not be used in new code
 //
 
 import Foundation
@@ -19,6 +12,7 @@ import Combine
 
 // MARK: - PlayerViewModel (Manual Observable Implementation)
 
+@available(*, deprecated, message: "Use ExpandedPlayerViewModel instead")
 class PlayerViewModel: ObservableObject {
     
     // MARK: - Published Properties (like @Published in ObservableObject)

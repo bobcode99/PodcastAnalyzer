@@ -20,7 +20,6 @@ import MediaPlayer
 import os.log
 
 // MARK: - Playback State Notification
-
 extension Notification.Name {
     static let playbackPositionDidUpdate = Notification.Name("playbackPositionDidUpdate")
 }
@@ -30,13 +29,13 @@ struct PlaybackPositionUpdate {
     let podcastTitle: String
     let position: TimeInterval
     let duration: TimeInterval
+    let audioURL: String  // Added: needed to create new models
 }
 
 @Observable
 class EnhancedAudioManager: NSObject {
     static let shared = EnhancedAudioManager()
     
-    // MARK: - Playback State
     var player: AVPlayer?
     var isPlaying: Bool = false
     var currentEpisode: PlaybackEpisode?
@@ -44,16 +43,13 @@ class EnhancedAudioManager: NSObject {
     var duration: TimeInterval = 0
     var playbackRate: Float = 1.0
     
-    // Transcript tracking
     var currentCaption: String = ""
     var captionSegments: [CaptionSegment] = []
     
-    // MARK: - Private Properties
     private var timeObserver: Any?
     private var cancellables = Set<AnyCancellable>()
     private let logger = Logger(subsystem: "com.podcast.analyzer", category: "AudioManager")
     
-    // UserDefaults Keys
     private enum Keys {
         static let lastEpisodeTitle = "lastEpisodeTitle"
         static let lastPodcastTitle = "lastPodcastTitle"
@@ -67,132 +63,100 @@ class EnhancedAudioManager: NSObject {
         super.init()
         setupAudioSession()
         setupRemoteControls()
+        // Critical for remote commands!
+        UIApplication.shared.beginReceivingRemoteControlEvents()
         loadPlaybackRate()
     }
-    
-    // MARK: - Audio Session Setup
     
     private func setupAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .spokenAudio, options: [])
-            try session.setActive(true)
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
             logger.info("Audio session configured for background playback")
         } catch {
-            logger.error("Failed to setup audio session: \(error.localizedDescription)")
+            logger.error("Audio session failed: \(error.localizedDescription)")
         }
     }
-    
-    // MARK: - Remote Control Setup (Lock Screen Controls)
     
     private func setupRemoteControls() {
         let commandCenter = MPRemoteCommandCenter.shared()
         
-        // Play command
         commandCenter.playCommand.isEnabled = true
         commandCenter.playCommand.addTarget { [weak self] _ in
             self?.resume()
             return .success
         }
         
-        // Pause command
         commandCenter.pauseCommand.isEnabled = true
         commandCenter.pauseCommand.addTarget { [weak self] _ in
             self?.pause()
             return .success
         }
         
-        // Skip forward
+        // Skip 15 seconds – fixed with NSNumber
         commandCenter.skipForwardCommand.isEnabled = true
-        commandCenter.skipForwardCommand.preferredIntervals = [15]
+        commandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: 15)]
         commandCenter.skipForwardCommand.addTarget { [weak self] _ in
             self?.skipForward(seconds: 15)
             return .success
         }
         
-        // Skip backward
         commandCenter.skipBackwardCommand.isEnabled = true
-        commandCenter.skipBackwardCommand.preferredIntervals = [15]
+        commandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: 15)]
         commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
             self?.skipBackward(seconds: 15)
             return .success
         }
         
-        // Change playback position
         commandCenter.changePlaybackPositionCommand.isEnabled = true
         commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let event = event as? MPChangePlaybackPositionCommandEvent else {
-                return .commandFailed
-            }
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             self?.seek(to: event.positionTime)
             return .success
         }
-        
-        logger.info("Remote controls configured")
     }
     
-    // MARK: - Playback Control
-    
+    // MARK: - Play
     func play(episode: PlaybackEpisode, audioURL: String, startTime: TimeInterval = 0, imageURL: String? = nil) {
-        logger.info("Playing episode: \(episode.title)")
+        guard let url = URL(string: audioURL) else { return }
         
-        guard let url = URL(string: audioURL) else {
-            logger.error("Invalid audio URL: \(audioURL)")
-            return
-        }
-        
-        // If same episode, toggle play/pause
         if currentEpisode?.id == episode.id, let player = player {
-            if isPlaying {
-                pause()
-            } else {
-                resume()
-            }
+            if isPlaying { pause() } else { resume() }
             return
         }
         
-        // New episode - cleanup old player
         cleanup()
         
-        // Create new player
         let playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
         currentEpisode = episode
         
-        // Set playback position
+        // UPDATE NOW PLAYING BEFORE PLAYING!
+        updateNowPlayingInfo(imageURL: imageURL ?? episode.imageURL)
+        
         if startTime > 0 {
-            let time = CMTime(seconds: startTime, preferredTimescale: 600)
-            player?.seek(to: time)
+            player?.seek(to: CMTime(seconds: startTime, preferredTimescale: 600))
         }
         
-        // Observe playback progress
         setupTimeObserver()
-        
-        // Observe player status
         setupPlayerObservers(playerItem: playerItem)
         
-        // Start playback
         player?.play()
         player?.rate = playbackRate
         isPlaying = true
         
-        // Update Now Playing Info
-        updateNowPlayingInfo(imageURL: imageURL)
-        
-        // Save playback state
-        savePlaybackState(imageURL: imageURL)
-        
-        // Load captions if available
+        savePlaybackState(imageURL: imageURL ?? episode.imageURL)
         loadCaptions(episode: episode)
     }
     
+    // MARK: - Controls – always update Now Playing
     func pause() {
         player?.pause()
         isPlaying = false
         updateNowPlayingPlaybackRate()
         savePlaybackState()
-        postPlaybackPositionUpdate()  // Save position when pausing
-        logger.info("Playback paused")
+        postPlaybackPositionUpdate()
     }
     
     func resume() {
@@ -201,7 +165,6 @@ class EnhancedAudioManager: NSObject {
         isPlaying = true
         updateNowPlayingPlaybackRate()
         savePlaybackState()
-        logger.info("Playback resumed")
     }
     
     func stop() {
@@ -215,26 +178,26 @@ class EnhancedAudioManager: NSObject {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         logger.info("Playback stopped")
     }
-    
+
     func seek(to time: TimeInterval) {
         let cmTime = CMTime(seconds: time, preferredTimescale: 600)
         player?.seek(to: cmTime) { [weak self] _ in
             self?.updateNowPlayingCurrentTime()
             self?.savePlaybackState()
-            self?.postPlaybackPositionUpdate()  // Save position after seeking
+            self?.postPlaybackPositionUpdate()
         }
     }
-    
+
     func skipForward(seconds: TimeInterval = 15) {
         let newTime = min(currentTime + seconds, duration)
         seek(to: newTime)
     }
-    
+
     func skipBackward(seconds: TimeInterval = 15) {
         let newTime = max(currentTime - seconds, 0)
         seek(to: newTime)
     }
-    
+
     func setPlaybackRate(_ rate: Float) {
         playbackRate = rate
         player?.rate = isPlaying ? rate : 0
@@ -242,13 +205,13 @@ class EnhancedAudioManager: NSObject {
         updateNowPlayingPlaybackRate()
         logger.info("Playback rate set to \(rate)x")
     }
-    
+
     // MARK: - Caption Management
-    
+
     private func loadCaptions(episode: PlaybackEpisode) {
         Task {
             let fileStorage = FileStorageManager.shared
-            
+
             if await fileStorage.captionFileExists(for: episode.title, podcastTitle: episode.podcastTitle) {
                 do {
                     let srtContent = try await fileStorage.loadCaptionFile(
@@ -256,7 +219,7 @@ class EnhancedAudioManager: NSObject {
                         podcastTitle: episode.podcastTitle
                     )
                     let segments = parseSRT(srtContent)
-                    
+
                     await MainActor.run {
                         self.captionSegments = segments
                         logger.info("Loaded \(segments.count) caption segments")
@@ -267,23 +230,23 @@ class EnhancedAudioManager: NSObject {
             }
         }
     }
-    
+
     private func parseSRT(_ srtContent: String) -> [CaptionSegment] {
         var segments: [CaptionSegment] = []
         let entries = srtContent.components(separatedBy: "\n\n")
-        
+
         for entry in entries {
             let lines = entry.components(separatedBy: "\n")
             guard lines.count >= 3 else { continue }
-            
+
             let timeLine = lines[1]
             let textLines = Array(lines[2...])
             let text = textLines.joined(separator: " ")
-            
+
             // Parse time format: 00:00:10,500 --> 00:00:13,250
             let times = timeLine.components(separatedBy: " --> ")
             guard times.count == 2 else { continue }
-            
+
             if let startTime = parseTimeString(times[0]),
                let endTime = parseTimeString(times[1]) {
                 segments.append(CaptionSegment(
@@ -293,30 +256,30 @@ class EnhancedAudioManager: NSObject {
                 ))
             }
         }
-        
+
         return segments
     }
-    
+
     private func parseTimeString(_ timeString: String) -> TimeInterval? {
         // Format: 00:00:10,500
         let components = timeString.replacingOccurrences(of: ",", with: ".").components(separatedBy: ":")
         guard components.count == 3 else { return nil }
-        
+
         guard let hours = Double(components[0]),
               let minutes = Double(components[1]),
               let seconds = Double(components[2]) else {
             return nil
         }
-        
+
         return hours * 3600 + minutes * 60 + seconds
     }
-    
+
     private func updateCurrentCaption() {
         guard !captionSegments.isEmpty else {
             currentCaption = ""
             return
         }
-        
+
         // Find the caption segment for current time
         if let segment = captionSegments.first(where: { segment in
             currentTime >= segment.startTime && currentTime <= segment.endTime
@@ -326,9 +289,9 @@ class EnhancedAudioManager: NSObject {
             currentCaption = ""
         }
     }
-    
+
     // MARK: - Now Playing Info
-    
+
     private func updateNowPlayingInfo(imageURL: String? = nil) {
         guard let episode = currentEpisode else { return }
 
@@ -361,19 +324,19 @@ class EnhancedAudioManager: NSObject {
             }
         }
     }
-    
+
     private func updateNowPlayingCurrentTime() {
         var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
-    
+
     private func updateNowPlayingPlaybackRate() {
         var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? playbackRate : 0.0
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
-    
+
     // MARK: - State Persistence
 
     /// Posts a notification with current playback position for SwiftData persistence
@@ -384,7 +347,8 @@ class EnhancedAudioManager: NSObject {
             episodeTitle: episode.title,
             podcastTitle: episode.podcastTitle,
             position: currentTime,
-            duration: duration
+            duration: duration,
+            audioURL: episode.audioURL
         )
 
         NotificationCenter.default.post(
