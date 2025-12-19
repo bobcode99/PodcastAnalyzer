@@ -15,6 +15,9 @@
 
 import SwiftUI
 import Combine
+import os.log
+
+private let logger = Logger(subsystem: "com.podcast.analyzer", category: "TranscriptGeneration")
 
 struct TranscriptGenerationView: View {
     @Environment(\.dismiss) private var dismiss
@@ -322,7 +325,7 @@ class TranscriptGenerationViewModel: ObservableObject {
                     try await fileStorage.deleteCaptionFile(for: episode.title, podcastTitle: podcastTitle)
                 }
             } catch {
-                print("Failed to delete existing transcript: \(error)")
+                logger.error("Failed to delete existing transcript: \(error.localizedDescription)")
             }
             
             // Generate new transcript
@@ -350,7 +353,7 @@ class TranscriptGenerationViewModel: ObservableObject {
                 self.state = .completed
             }
         } catch {
-            print("Failed to load transcript: \(error)")
+            logger.error("Failed to load transcript: \(error.localizedDescription)")
         }
     }
 }

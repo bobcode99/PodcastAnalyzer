@@ -7,6 +7,9 @@
 
 import SwiftUI
 import SwiftData
+import os.log
+
+private let logger = Logger(subsystem: "com.podcast.analyzer", category: "App")
 
 @main
 struct PodcastAnalyzerApp: App {
@@ -21,7 +24,7 @@ struct PodcastAnalyzerApp: App {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
             // Migration failed - delete old store and create fresh one
-            print("Migration failed, attempting to recreate database: \(error)")
+            logger.error("Migration failed, attempting to recreate database: \(error.localizedDescription)")
 
             // Get the default store URL
             let url = URL.applicationSupportDirectory.appending(path: "default.store")

@@ -4,100 +4,149 @@ import SwiftData
 struct SettingsView: View {
     @StateObject private var viewModel = SettingsViewModel()
     @Environment(\.modelContext) var modelContext
-    
+    @State private var showAddFeedSheet = false
+
+    private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Settings")
-                .font(.title2)
-                .fontWeight(.bold)
-            
-            // MARK: - Add Feed Section
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Add RSS Feed")
-                    .font(.headline)
-                
-                HStack(spacing: 10) {
-                    TextField("Paste RSS feed URL", text: $viewModel.rssUrlInput)
-                        .textFieldStyle(.roundedBorder)
-                        .autocorrectionDisabled()
-                        .disableAutocapitalization()
-                        .disabled(viewModel.isValidating)
-                    
-                    if viewModel.isValidating {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    } else {
-                        Button("Add Feed") {
-                            viewModel.addRssLink(modelContext: modelContext)
+        NavigationStack {
+            List {
+                // MARK: - Subscriptions Section
+                Section {
+                    Button(action: {
+                        showAddFeedSheet = true
+                    }) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundColor(.blue)
+                                .font(.title2)
+                            Text("Add RSS Feed")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.secondary)
+                                .font(.caption)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(viewModel.rssUrlInput.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
+                } header: {
+                    Text("Subscriptions")
+                } footer: {
+                    Text("Add podcasts by pasting their RSS feed URL")
                 }
-                
-                if !viewModel.successMessage.isEmpty {
-                    Text(viewModel.successMessage)
-                        .foregroundColor(.green)
-                        .font(.caption)
-                }
-                
-                if !viewModel.errorMessage.isEmpty {
-                    Text(viewModel.errorMessage)
-                        .foregroundColor(.red)
-                        .font(.caption)
-                }
-            }
-            
-            // MARK: - List Feeds Section
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Your RSS Feeds")
-                    .font(.headline)
-                
-                if viewModel.podcastInfoModelList.isEmpty {
-                    VStack(alignment: .center, spacing: 8) {
-                        Image(systemName: "doc.text.magnifyingglass")
-                            .font(.system(size: 30))
-                            .foregroundColor(.gray)
-                        Text("No feeds added yet")
-                            .foregroundColor(.gray)
-                            .font(.caption)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 8) {
-                            // 1. FIXED: Removed 'id: \.self'
-                            ForEach(viewModel.podcastInfoModelList) { feed in
-                                FeedRowView(feed: feed, viewModel: viewModel, modelContext: modelContext)
+
+                // MARK: - Your Feeds Section
+                Section {
+                    if viewModel.podcastInfoModelList.isEmpty {
+                        HStack {
+                            Spacer()
+                            VStack(spacing: 8) {
+                                Image(systemName: "antenna.radiowaves.left.and.right")
+                                    .font(.system(size: 36))
+                                    .foregroundColor(.secondary)
+                                Text("No podcasts yet")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Text("Tap \"Add RSS Feed\" to get started")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                            .padding(.vertical, 20)
+                            Spacer()
+                        }
+                    } else {
+                        ForEach(viewModel.podcastInfoModelList) { feed in
+                            FeedRowView(feed: feed)
+                        }
+                        .onDelete { indexSet in
+                            for index in indexSet {
+                                let feed = viewModel.podcastInfoModelList[index]
+                                viewModel.removePodcastFeed(feed, modelContext: modelContext)
                             }
                         }
                     }
+                } header: {
+                    HStack {
+                        Text("Your Podcasts")
+                        Spacer()
+                        if !viewModel.podcastInfoModelList.isEmpty {
+                            Text("\(viewModel.podcastInfoModelList.count)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+
+                // MARK: - Playback Section
+                Section {
+                    Picker(selection: $viewModel.defaultPlaybackSpeed) {
+                        ForEach(playbackSpeeds, id: \.self) { speed in
+                            Text(formatSpeed(speed)).tag(speed)
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: "gauge.with.dots.needle.33percent")
+                                .foregroundColor(.blue)
+                                .frame(width: 24)
+                            Text("Default Speed")
+                        }
+                    }
+                    .onChange(of: viewModel.defaultPlaybackSpeed) { _, newValue in
+                        viewModel.setDefaultPlaybackSpeed(newValue)
+                    }
+                } header: {
+                    Text("Playback")
+                } footer: {
+                    Text("New episodes will start at this speed")
+                }
+
+                // MARK: - About Section
+                Section {
+                    HStack {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.blue)
+                            .frame(width: 24)
+                        Text("Version")
+                        Spacer()
+                        Text("1.0.0")
+                            .foregroundColor(.secondary)
+                    }
+                } header: {
+                    Text("About")
                 }
             }
-            
-            Spacer()
+            .listStyle(.insetGrouped)
+            .navigationTitle("Settings")
+            .sheet(isPresented: $showAddFeedSheet) {
+                AddFeedView(viewModel: viewModel, modelContext: modelContext) {
+                    showAddFeedSheet = false
+                }
+            }
+            .onAppear {
+                viewModel.loadFeeds(modelContext: modelContext)
+            }
         }
-        .padding()
-        .onAppear {
-            viewModel.loadFeeds(modelContext: modelContext)
+    }
+
+    private func formatSpeed(_ speed: Float) -> String {
+        if speed == 1.0 {
+            return "1x"
+        } else if speed.truncatingRemainder(dividingBy: 1) == 0 {
+            return "\(Int(speed))x"
+        } else {
+            return String(format: "%.2gx", speed)
         }
     }
 }
 
-// MARK: - Subview for cleaner code
-// Extracting this view fixes type inference issues and makes debugging easier
+// MARK: - Feed Row View
 struct FeedRowView: View {
     let feed: PodcastInfoModel
-    @ObservedObject var viewModel: SettingsViewModel
-    var modelContext: ModelContext
 
     var body: some View {
         HStack(spacing: 12) {
-            // 2. FIXED: Accessing 'feed.podcastInfo.imageURL'
+            // Podcast artwork
             if let urlString = feed.podcastInfo.imageURL.isEmpty ? nil : feed.podcastInfo.imageURL,
                let url = URL(string: urlString) {
-                
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .empty:
@@ -108,53 +157,161 @@ struct FeedRowView: View {
                     case .success(let image):
                         image.resizable().scaledToFill()
                     case .failure:
-                        Image(systemName: "apple.podcasts.pages.fill")
-                            .resizable().foregroundColor(.purple)
+                        Image(systemName: "mic.fill")
+                            .foregroundColor(.purple)
                     @unknown default:
                         EmptyView()
                     }
                 }
-                .frame(width: 48, height: 48)
+                .frame(width: 50, height: 50)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                
             } else {
-                // Fallback Image
-                Image(systemName: "apple.podcasts.pages.fill")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 48, height: 48)
-                    .foregroundColor(.purple)
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.purple.opacity(0.2))
+                    .frame(width: 50, height: 50)
+                    .overlay(
+                        Image(systemName: "mic.fill")
+                            .foregroundColor(.purple)
+                    )
             }
-            
+
             VStack(alignment: .leading, spacing: 4) {
-                // 3. FIXED: Accessing 'feed.podcastInfo.title'
                 Text(feed.podcastInfo.title)
                     .font(.body)
-                    .fontWeight(.semibold)
+                    .fontWeight(.medium)
                     .lineLimit(1)
-                
-                // 4. FIXED: Accessing 'feed.podcastInfo.rssUrl'
-                Text(feed.podcastInfo.rssUrl)
+
+                Text("\(feed.podcastInfo.episodes.count) episodes")
                     .font(.caption)
-                    .foregroundColor(.gray)
-                    .lineLimit(1)
+                    .foregroundColor(.secondary)
             }
-            
-            Spacer()
-            
-            Button(action: {
-                viewModel.removePodcastFeed(feed, modelContext: modelContext)
-            }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(.red)
-            }
-            .buttonStyle(.plain)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(6)
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Add Feed Sheet View
+struct AddFeedView: View {
+    @ObservedObject var viewModel: SettingsViewModel
+    var modelContext: ModelContext
+    var onDismiss: () -> Void
+
+    @FocusState private var isTextFieldFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                // Icon
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 60))
+                    .foregroundColor(.blue)
+                    .padding(.top, 40)
+
+                // Title and description
+                VStack(spacing: 8) {
+                    Text("Add Podcast")
+                        .font(.title2)
+                        .fontWeight(.bold)
+
+                    Text("Enter the RSS feed URL to subscribe")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                // Input field
+                VStack(spacing: 12) {
+                    TextField("https://example.com/feed.xml", text: $viewModel.rssUrlInput)
+                        .textFieldStyle(.plain)
+                        .padding(16)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                        .disabled(viewModel.isValidating)
+                        .focused($isTextFieldFocused)
+
+                    // Status messages
+                    if viewModel.isValidating {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Validating feed...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else if !viewModel.successMessage.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text(viewModel.successMessage)
+                                .font(.caption)
+                                .foregroundColor(.green)
+                        }
+                    } else if !viewModel.errorMessage.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.red)
+                            Text(viewModel.errorMessage)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
+                }
+                .padding(.horizontal, 24)
+
+                Spacer()
+
+                // Add button
+                Button(action: {
+                    viewModel.addRssLink(modelContext: modelContext) {
+                        // Dismiss on success
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            onDismiss()
+                        }
+                    }
+                }) {
+                    HStack {
+                        if viewModel.isValidating {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Add Podcast")
+                        }
+                    }
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(viewModel.rssUrlInput.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isValidating ? Color.gray : Color.blue)
+                    )
+                }
+                .disabled(viewModel.rssUrlInput.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isValidating)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        viewModel.clearMessages()
+                        onDismiss()
+                    }
+                }
+            }
+            .onAppear {
+                isTextFieldFocused = true
+            }
+            .onDisappear {
+                viewModel.clearMessages()
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 }
 

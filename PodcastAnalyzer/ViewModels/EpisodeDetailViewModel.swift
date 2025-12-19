@@ -9,6 +9,9 @@ import SwiftUI
 import ZMarkupParser
 import SwiftData
 import Combine
+import os.log
+
+private let logger = Logger(subsystem: "com.podcast.analyzer", category: "EpisodeDetailViewModel")
 
 @Observable
 final class EpisodeDetailViewModel {
@@ -143,7 +146,7 @@ final class EpisodeDetailViewModel {
     
     func playAction() {
         guard let audioURLString = episode.audioURL else { return }
-        
+
         // Prefer local file if available
         let playbackURL: String
         if let localPath = localAudioPath {
@@ -151,7 +154,7 @@ final class EpisodeDetailViewModel {
         } else {
             playbackURL = audioURLString
         }
-        
+
         let playbackEpisode = PlaybackEpisode(
             id: "\(podcastTitle)|\(episode.title)",
             title: episode.title,
@@ -159,17 +162,21 @@ final class EpisodeDetailViewModel {
             audioURL: playbackURL,
             imageURL: imageURLString
         )
-        
+
         // Resume from saved position if available
         let startTime = episodeModel?.lastPlaybackPosition ?? 0
-        
+
+        // Use default speed from settings only for fresh plays (not resuming)
+        let useDefaultSpeed = startTime == 0
+
         audioManager.play(
             episode: playbackEpisode,
             audioURL: playbackURL,
             startTime: startTime,
-            imageURL: imageURLString
+            imageURL: imageURLString,
+            useDefaultSpeed: useDefaultSpeed
         )
-        
+
         // Update last played date
         updateLastPlayed()
     }
@@ -241,10 +248,10 @@ final class EpisodeDetailViewModel {
                 createEpisodeModel(context: context)
             }
         } catch {
-            print("Failed to load episode model: \(error)")
+            logger.error("Failed to load episode model: \(error.localizedDescription)")
         }
     }
-    
+
     private func createEpisodeModel(context: ModelContext) {
         guard let audioURL = episode.audioURL else { return }
 
@@ -261,7 +268,7 @@ final class EpisodeDetailViewModel {
             try context.save()
             episodeModel = model
         } catch {
-            print("Failed to create episode model: \(error)")
+            logger.error("Failed to create episode model: \(error.localizedDescription)")
         }
     }
     
@@ -282,10 +289,10 @@ final class EpisodeDetailViewModel {
         do {
             try modelContext?.save()
         } catch {
-            print("Failed to save playback position: \(error)")
+            logger.error("Failed to save playback position: \(error.localizedDescription)")
         }
     }
-    
+
     private func updateLastPlayed() {
         guard let model = episodeModel else { return }
         model.lastPlayedDate = Date()
@@ -302,10 +309,10 @@ final class EpisodeDetailViewModel {
         do {
             try modelContext?.save()
         } catch {
-            print("Failed to update last played: \(error)")
+            logger.error("Failed to update last played: \(error.localizedDescription)")
         }
     }
-    
+
     // MARK: - Description Parsing
 
     private func parseDescription() {
@@ -346,12 +353,12 @@ final class EpisodeDetailViewModel {
 
     func shareEpisode() {
         // TODO: Implement share functionality
-        print("Share episode: \(episode.title)")
+        logger.debug("Share episode: \(self.episode.title)")
     }
 
     func translateDescription() {
         // TODO: Implement translation
-        print("Translate description")
+        logger.debug("Translate description requested")
     }
 
     func toggleStar() {
@@ -361,13 +368,13 @@ final class EpisodeDetailViewModel {
         do {
             try modelContext?.save()
         } catch {
-            print("Failed to save star state: \(error)")
+            logger.error("Failed to save star state: \(error.localizedDescription)")
         }
     }
 
     func addToList() {
         // TODO: Implement add to list functionality
-        print("Add to list: \(episode.title)")
+        logger.debug("Add to list: \(self.episode.title)")
     }
 
     func downloadAudio() {
@@ -376,7 +383,7 @@ final class EpisodeDetailViewModel {
 
     func reportIssue() {
         // TODO: Implement issue reporting
-        print("Report issue for: \(episode.title)")
+        logger.debug("Report issue for: \(self.episode.title)")
     }
 
     // MARK: - Transcript Methods
@@ -476,7 +483,7 @@ final class EpisodeDetailViewModel {
                 transcriptState = .completed
             }
         } catch {
-            print("Failed to load transcript: \(error)")
+            logger.error("Failed to load transcript: \(error.localizedDescription)")
         }
     }
 

@@ -9,10 +9,12 @@
 import AVFoundation
 import Foundation
 import Speech
+import os.log
 
 // Change availability to iOS and a more realistic version number (e.g., 17.0)
 @available(iOS 17.0, *)
 public actor TranscriptService {
+    private nonisolated let logger = Logger(subsystem: "com.podcast.analyzer", category: "TranscriptService")
     private var censor: Bool = false
     private var needsAudioTimeRange: Bool = true
     private var targetLocale: Locale
@@ -60,7 +62,7 @@ public actor TranscriptService {
 
         let modules: [any SpeechModule] = [newTranscriber]
         let installed = await Set(SpeechTranscriber.installedLocales)
-        print("Installed locales: \(installed)")
+        logger.info("Installed locales: \(installed.map { $0.identifier }.joined(separator: ", "))")
 
         // Check if assets are already installed
         if installed.map({ $0.identifier(.bcp47) }).contains(
@@ -97,7 +99,7 @@ public actor TranscriptService {
                 continuation.yield(1.0)
             }
         } catch {
-            print("Asset setup failed: \(error)")
+            logger.error("Asset setup failed: \(error.localizedDescription)")
         }
 
         // Always create analyzer after setup (even if installation failed, we still need it)
@@ -135,7 +137,7 @@ public actor TranscriptService {
         do {
             try await AssetInventory.reserve(locale: targetLocale)
         } catch {
-            print("Failed to reserve locale: \(error)")
+            logger.error("Failed to reserve locale: \(error.localizedDescription)")
         }
     }
 
@@ -156,7 +158,7 @@ public actor TranscriptService {
         let audioFileDuration: TimeInterval =
             Double(audioFile.length) / audioFile.processingFormat.sampleRate
 
-        print("Audio file duration: \(audioFileDuration)")
+        logger.info("Audio file duration: \(audioFileDuration) seconds")
 
         // Start the analyzer
         try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
@@ -214,7 +216,7 @@ public actor TranscriptService {
         let audioFileDuration: TimeInterval =
             Double(audioFile.length) / audioFile.processingFormat.sampleRate
 
-        print("Audio file duration: \(audioFileDuration)")
+        logger.info("Audio file duration for SRT: \(audioFileDuration) seconds")
 
         // Start the analyzer
         try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)

@@ -9,6 +9,9 @@
 import Foundation
 import SwiftUI
 import Combine
+import os.log
+
+private let logger = Logger(subsystem: "com.podcast.analyzer", category: "PlayerViewModel")
 
 // MARK: - PlayerViewModel (Manual Observable Implementation)
 
@@ -138,35 +141,35 @@ class PlayerViewModel: ObservableObject {
     }
     
     // MARK: - Additional Actions
-    
+
     func shareEpisode() {
         // TODO: Implement sharing
-        print("Share episode: \(episodeTitle)")
+        logger.debug("Share episode: \(self.episodeTitle)")
     }
-    
+
     func addToPlaylist() {
         // TODO: Implement playlist
-        print("Add to playlist: \(episodeTitle)")
+        logger.debug("Add to playlist: \(self.episodeTitle)")
     }
-    
+
     func showEpisodeNotes() {
         // TODO: Implement episode notes
-        print("Show episode notes")
+        logger.debug("Show episode notes requested")
     }
-    
+
     func showSleepTimer() {
         // TODO: Implement sleep timer
-        print("Show sleep timer")
+        logger.debug("Show sleep timer requested")
     }
-    
+
     func showAirPlay() {
         // TODO: Implement AirPlay picker
-        print("Show AirPlay")
+        logger.debug("Show AirPlay requested")
     }
-    
+
     func showQueue() {
         // TODO: Implement queue
-        print("Show queue")
+        logger.debug("Show queue requested")
     }
     
     // MARK: - Helpers

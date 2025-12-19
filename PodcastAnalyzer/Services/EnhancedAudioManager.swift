@@ -57,6 +57,7 @@ class EnhancedAudioManager: NSObject {
         static let lastAudioURL = "lastAudioURL"
         static let playbackRate = "playbackRate"
         static let lastImageURL = "lastImageURL"
+        static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
     }
     
     override private init() {
@@ -118,34 +119,43 @@ class EnhancedAudioManager: NSObject {
     }
     
     // MARK: - Play
-    func play(episode: PlaybackEpisode, audioURL: String, startTime: TimeInterval = 0, imageURL: String? = nil) {
+    func play(episode: PlaybackEpisode, audioURL: String, startTime: TimeInterval = 0, imageURL: String? = nil, useDefaultSpeed: Bool = false) {
         guard let url = URL(string: audioURL) else { return }
-        
+
         if currentEpisode?.id == episode.id, let player = player {
             if isPlaying { pause() } else { resume() }
             return
         }
-        
+
         cleanup()
-        
+
+        // Apply default speed from settings for new episodes
+        if useDefaultSpeed {
+            let defaultSpeed = UserDefaults.standard.float(forKey: Keys.defaultPlaybackSpeed)
+            if defaultSpeed > 0 {
+                playbackRate = defaultSpeed
+                UserDefaults.standard.set(defaultSpeed, forKey: Keys.playbackRate)
+            }
+        }
+
         let playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
         currentEpisode = episode
-        
+
         // UPDATE NOW PLAYING BEFORE PLAYING!
         updateNowPlayingInfo(imageURL: imageURL ?? episode.imageURL)
-        
+
         if startTime > 0 {
             player?.seek(to: CMTime(seconds: startTime, preferredTimescale: 600))
         }
-        
+
         setupTimeObserver()
         setupPlayerObservers(playerItem: playerItem)
-        
+
         player?.play()
         player?.rate = playbackRate
         isPlaying = true
-        
+
         savePlaybackState(imageURL: imageURL ?? episode.imageURL)
         loadCaptions(episode: episode)
     }
