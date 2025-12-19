@@ -33,26 +33,15 @@ class HomeViewModel: ObservableObject {
 
         logger.info("Starting to load podcasts from \(self.podcastInfoModelList.count) feeds")
 
-        // Use Task.detached to avoid blocking main thread
-        Task.detached { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
 
-            let podcasts = await MainActor.run { self.podcastInfoModelList }
-
-            for podcastInfoModel in podcasts {
-                await self.logger.info("Fetching podcast from URL: \(podcastInfoModel.podcastInfo.rssUrl)")
-
-                // Update feed with fetched data
-                // Commented out for now
-                // podcastInfoModel.podcastInfo.episodes.forEach { episode in
-                //     self.logger.info("All:  \(episode.title)")
-                // }
+            for podcastInfoModel in podcastInfoModelList {
+                logger.info("Fetching podcast from URL: \(podcastInfoModel.podcastInfo.rssUrl)")
             }
 
-            await MainActor.run {
-                self.isLoading = false
-                self.logger.info("Finished loading all podcasts")
-            }
+            isLoading = false
+            logger.info("Finished loading all podcasts")
         }
     }
     

@@ -122,7 +122,7 @@ class EnhancedAudioManager: NSObject {
     func play(episode: PlaybackEpisode, audioURL: String, startTime: TimeInterval = 0, imageURL: String? = nil, useDefaultSpeed: Bool = false) {
         guard let url = URL(string: audioURL) else { return }
 
-        if currentEpisode?.id == episode.id, let player = player {
+        if currentEpisode?.id == episode.id, player != nil {
             if isPlaying { pause() } else { resume() }
             return
         }

@@ -99,6 +99,28 @@ struct SettingsView: View {
                     Text("New episodes will start at this speed")
                 }
 
+                // MARK: - Transcript Section
+                Section {
+                    HStack {
+                        Image(systemName: "text.bubble")
+                            .foregroundColor(.blue)
+                            .frame(width: 24)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Speech Model")
+                            transcriptStatusText
+                        }
+
+                        Spacer()
+
+                        transcriptActionButton
+                    }
+                } header: {
+                    Text("Transcript")
+                } footer: {
+                    Text("Speech model is required for generating transcripts from audio")
+                }
+
                 // MARK: - About Section
                 Section {
                     HStack {
@@ -123,7 +145,74 @@ struct SettingsView: View {
             }
             .onAppear {
                 viewModel.loadFeeds(modelContext: modelContext)
+                viewModel.checkTranscriptModelStatus()
             }
+        }
+    }
+
+    // MARK: - Transcript Status Views
+
+    @ViewBuilder
+    private var transcriptStatusText: some View {
+        switch viewModel.transcriptModelStatus {
+        case .checking:
+            Text("Checking...")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        case .notDownloaded:
+            Text("Not installed")
+                .font(.caption)
+                .foregroundColor(.orange)
+        case .downloading(let progress):
+            Text("Downloading \(Int(progress * 100))%")
+                .font(.caption)
+                .foregroundColor(.blue)
+        case .ready:
+            Text("Ready")
+                .font(.caption)
+                .foregroundColor(.green)
+        case .error(let message):
+            Text(message)
+                .font(.caption)
+                .foregroundColor(.red)
+                .lineLimit(1)
+        case .simulatorNotSupported:
+            Text("Requires physical device")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var transcriptActionButton: some View {
+        switch viewModel.transcriptModelStatus {
+        case .checking:
+            ProgressView()
+                .scaleEffect(0.8)
+        case .notDownloaded, .error:
+            Button("Download") {
+                viewModel.downloadTranscriptModel()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        case .downloading(let progress):
+            HStack(spacing: 8) {
+                ProgressView(value: progress)
+                    .frame(width: 60)
+                Button {
+                    viewModel.cancelTranscriptDownload()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        case .ready:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(.green)
+        case .simulatorNotSupported:
+            Image(systemName: "desktopcomputer")
+                .foregroundColor(.secondary)
         }
     }
 

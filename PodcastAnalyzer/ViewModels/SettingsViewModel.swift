@@ -4,6 +4,34 @@ import Combine
 import SwiftData
 import os.log
 
+// MARK: - Transcript Model Status
+enum TranscriptModelStatus: Equatable {
+    case checking
+    case notDownloaded
+    case downloading(progress: Double)
+    case ready
+    case error(String)
+    case simulatorNotSupported
+
+    var isReady: Bool {
+        if case .ready = self { return true }
+        return false
+    }
+
+    var isDownloading: Bool {
+        if case .downloading = self { return true }
+        return false
+    }
+
+    static var isSimulator: Bool {
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        return false
+        #endif
+    }
+}
+
 @MainActor
 class SettingsViewModel: ObservableObject {
     @Published var rssUrlInput: String = ""
@@ -13,7 +41,11 @@ class SettingsViewModel: ObservableObject {
     @Published var isValidating: Bool = false
     @Published var defaultPlaybackSpeed: Float = 1.0
 
+    // Transcript model status
+    @Published var transcriptModelStatus: TranscriptModelStatus = .checking
+
     private var successMessageTask: Task<Void, Never>?
+    private var transcriptDownloadTask: Task<Void, Never>?
     private let service = PodcastRssService()
     private let logger = Logger(subsystem: "com.podcast.analyzer", category: "SettingsViewModel")
 
@@ -49,61 +81,54 @@ class SettingsViewModel: ObservableObject {
         errorMessage = ""
         successMessage = ""
 
-        // Use Task.detached to avoid blocking main thread
-        Task.detached { [weak self] in
+        // Fetch and validate RSS feed
+        Task { [weak self] in
             guard let self else { return }
 
             do {
-                await self.logger.info("Validating RSS feed: \(trimmedLink)")
+                logger.info("Validating RSS feed: \(trimmedLink)")
 
                 // Fetch happens on background thread
-                let podcastInfo = try await self.service.fetchPodcast(from: trimmedLink)
-                await self.logger.info("RSS feed is valid: \(podcastInfo.title)")
-                await self.logger.debug("image url: \(podcastInfo.imageURL)")
+                let podcastInfo = try await service.fetchPodcast(from: trimmedLink)
+                logger.info("RSS feed is valid: \(podcastInfo.title)")
+                logger.debug("image url: \(podcastInfo.imageURL)")
 
-                // Switch to main actor for UI updates and database operations
-                await MainActor.run {
-                    // Create new podcast feed
-                    let podcastInfoModel = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date.now)
+                // Create new podcast feed
+                let podcastInfoModel = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date.now)
 
-                    // Save to database
-                    modelContext.insert(podcastInfoModel)
-                    try? modelContext.save()
+                // Save to database
+                modelContext.insert(podcastInfoModel)
+                try? modelContext.save()
 
-                    self.podcastInfoModelList.append(podcastInfoModel)
-                    self.rssUrlInput = ""
-                    self.errorMessage = ""
-                    self.successMessage = "Feed added successfully!"
-                    self.logger.info("Feed saved to database: \(podcastInfo.title)")
+                podcastInfoModelList.append(podcastInfoModel)
+                rssUrlInput = ""
+                errorMessage = ""
+                successMessage = "Feed added successfully!"
+                logger.info("Feed saved to database: \(podcastInfo.title)")
 
-                    self.isValidating = false
+                isValidating = false
 
-                    // Call success callback
-                    onSuccess?()
+                // Call success callback
+                onSuccess?()
 
-                    // Hide success message after 2 seconds
-                    self.successMessageTask?.cancel()
-                    self.successMessageTask = Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 2_000_000_000)
-                        if !Task.isCancelled {
-                            self.successMessage = ""
-                        }
+                // Hide success message after 2 seconds
+                successMessageTask?.cancel()
+                successMessageTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if !Task.isCancelled {
+                        self.successMessage = ""
                     }
                 }
             } catch let error as PodcastServiceError {
-                await MainActor.run {
-                    self.logger.error("RSS validation failed: \(error.localizedDescription)")
-                    self.errorMessage = "Invalid RSS feed: \(error.localizedDescription)"
-                    self.successMessage = ""
-                    self.isValidating = false
-                }
+                logger.error("RSS validation failed: \(error.localizedDescription)")
+                errorMessage = "Invalid RSS feed: \(error.localizedDescription)"
+                successMessage = ""
+                isValidating = false
             } catch {
-                await MainActor.run {
-                    self.logger.error("Unexpected error: \(error.localizedDescription)")
-                    self.errorMessage = "Error: \(error.localizedDescription)"
-                    self.successMessage = ""
-                    self.isValidating = false
-                }
+                logger.error("Unexpected error: \(error.localizedDescription)")
+                errorMessage = "Error: \(error.localizedDescription)"
+                successMessage = ""
+                isValidating = false
             }
         }
     }
@@ -153,6 +178,72 @@ class SettingsViewModel: ObservableObject {
     private func loadDefaultPlaybackSpeed() {
         let savedSpeed = UserDefaults.standard.float(forKey: Keys.defaultPlaybackSpeed)
         defaultPlaybackSpeed = savedSpeed > 0 ? savedSpeed : 1.0
+    }
+
+    // MARK: - Transcript Model Management
+
+    func checkTranscriptModelStatus() {
+        // Check if running on simulator
+        #if targetEnvironment(simulator)
+        transcriptModelStatus = .simulatorNotSupported
+        logger.info("Transcript model download not supported on simulator")
+        return
+        #else
+        transcriptModelStatus = .checking
+
+        Task {
+            let transcriptService = TranscriptService()
+            let isReady = await transcriptService.isModelReady()
+
+            await MainActor.run {
+                if isReady {
+                    transcriptModelStatus = .ready
+                    logger.info("Transcript model is ready")
+                } else {
+                    transcriptModelStatus = .notDownloaded
+                    logger.info("Transcript model not downloaded")
+                }
+            }
+        }
+        #endif
+    }
+
+    func downloadTranscriptModel() {
+        guard !transcriptModelStatus.isDownloading else { return }
+
+        transcriptDownloadTask?.cancel()
+        transcriptModelStatus = .downloading(progress: 0)
+
+        transcriptDownloadTask = Task { [weak self] in
+            guard let self else { return }
+
+            let transcriptService = TranscriptService()
+
+            for await progress in await transcriptService.setupAndInstallAssets() {
+                if Task.isCancelled { break }
+                transcriptModelStatus = .downloading(progress: progress)
+            }
+
+            if !Task.isCancelled {
+                // Verify installation
+                let isReady = await transcriptService.isModelReady()
+
+                if isReady {
+                    transcriptModelStatus = .ready
+                    logger.info("Transcript model downloaded successfully")
+                } else {
+                    transcriptModelStatus = .error("Download completed but model not ready")
+                    logger.error("Transcript model download failed verification")
+                }
+            }
+        }
+    }
+
+    func cancelTranscriptDownload() {
+        transcriptDownloadTask?.cancel()
+        transcriptDownloadTask = nil
+        transcriptModelStatus = .notDownloaded
+        logger.info("Transcript model download cancelled")
     }
 
     // MARK: - Private Methods
