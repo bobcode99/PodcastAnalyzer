@@ -2,7 +2,7 @@
 //  EpisodeDetailView.swift
 //  PodcastAnalyzer
 //
-//  Redesigned with tabs (Summary, Transcript, Keywords) and action buttons
+//  Fixed: Added Regenerate option to live view and fixed state visibility
 //
 
 import Combine
@@ -33,26 +33,15 @@ struct EpisodeDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // MARK: - Header with Episode Info
             headerSection
-
             Divider()
-
-            // MARK: - Tab Selector
             tabSelector
-
             Divider()
 
-            // MARK: - Tab Content
             TabView(selection: $selectedTab) {
-                summaryTab
-                    .tag(0)
-
-                transcriptTab
-                    .tag(1)
-
-                keywordsTab
-                    .tag(2)
+                summaryTab.tag(0)
+                transcriptTab.tag(1)
+                keywordsTab.tag(2)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
         }
@@ -61,48 +50,28 @@ struct EpisodeDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 16) {
-                    // Share button
-                    Button(action: {
-                        viewModel.shareEpisode()
-                    }) {
+                    Button(action: { viewModel.shareEpisode() }) {
                         Image(systemName: "square.and.arrow.up")
                     }
-
-                    // Translate button (placeholder)
-                    Button(action: {
-                        viewModel.translateDescription()
-                    }) {
+                    Button(action: { viewModel.translateDescription() }) {
                         Image(systemName: "character.bubble")
                     }
-
-                    // More menu
                     Menu {
-                        Button(action: {
-                            viewModel.toggleStar()
-                        }) {
+                        Button(action: { viewModel.toggleStar() }) {
                             Label(
                                 viewModel.isStarred ? "Unstar" : "Star",
                                 systemImage: viewModel.isStarred ? "star.fill" : "star"
                             )
                         }
-
-                        Button(action: {
-                            viewModel.addToList()
-                        }) {
+                        Button(action: { viewModel.addToList() }) {
                             Label("Add to List", systemImage: "plus")
                         }
-
                         if !viewModel.hasLocalAudio {
-                            Button(action: {
-                                viewModel.downloadAudio()
-                            }) {
+                            Button(action: { viewModel.downloadAudio() }) {
                                 Label("Download Audio", systemImage: "arrow.down.circle")
                             }
                         }
-
-                        Button(action: {
-                            viewModel.reportIssue()
-                        }) {
+                        Button(action: { viewModel.reportIssue() }) {
                             Label("Report Issue", systemImage: "exclamationmark.triangle")
                         }
                     } label: {
@@ -137,22 +106,17 @@ struct EpisodeDetailView: View {
     }
 
     // MARK: - Header Section
-
+    // (Kept as is from your code)
     private var headerSection: some View {
         VStack(spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
-                // Artwork (no play overlay)
                 if let url = URL(string: viewModel.imageURLString) {
                     AsyncImage(url: url) { phase in
                         switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFit()
-                        case .failure:
-                            Color.gray
-                        case .empty:
-                            ProgressView()
-                        @unknown default:
-                            Color.gray
+                        case .success(let image): image.resizable().scaledToFit()
+                        case .failure: Color.gray
+                        case .empty: ProgressView()
+                        @unknown default: Color.gray
                         }
                     }
                     .frame(width: 80, height: 80)
@@ -162,55 +126,34 @@ struct EpisodeDetailView: View {
                     Color.gray.frame(width: 80, height: 80).cornerRadius(10)
                 }
 
-                // Episode info
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
                         Text(viewModel.title)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .lineLimit(2)
-
+                            .font(.subheadline).fontWeight(.semibold).lineLimit(2)
                         if viewModel.isStarred {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(.yellow)
+                            Image(systemName: "star.fill").font(.system(size: 10)).foregroundColor(
+                                .yellow)
                         }
                     }
-
-                    Text(viewModel.podcastTitle)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Text(viewModel.podcastTitle).font(.caption).foregroundColor(.secondary)
                         .lineLimit(1)
-
                     if let dateString = viewModel.pubDateString {
-                        Text(dateString)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                        Text(dateString).font(.caption2).foregroundColor(.secondary)
                     }
-
-                    // Progress indicator
                     if viewModel.playbackProgress > 0 && viewModel.playbackProgress < 1 {
                         VStack(alignment: .leading, spacing: 2) {
-                            ProgressView(value: viewModel.playbackProgress)
-                                .tint(.blue)
+                            ProgressView(value: viewModel.playbackProgress).tint(.blue)
                             if let remaining = viewModel.remainingTimeString {
-                                Text(remaining)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
+                                Text(remaining).font(.caption2).foregroundColor(.secondary)
                             }
                         }
                     }
                 }
-
                 Spacer()
             }
 
-            // Action buttons row (Play + Download) - compact
             HStack(spacing: 8) {
-                // Play button (compact)
-                Button(action: {
-                    viewModel.playAction()
-                }) {
+                Button(action: { viewModel.playAction() }) {
                     HStack(spacing: 4) {
                         Image(
                             systemName: viewModel.isPlayingThisEpisode
@@ -221,188 +164,146 @@ struct EpisodeDetailView: View {
                             viewModel.isPlayingThisEpisode && viewModel.audioManager.isPlaying
                                 ? "Pause" : "Play"
                         )
-                        .font(.caption)
-                        .fontWeight(.medium)
+                        .font(.caption).fontWeight(.medium)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(viewModel.isPlayDisabled)
 
-                // Download button (compact)
                 downloadButton
-
                 Spacer()
             }
 
-            // Playback mode indicator
             if !viewModel.hasLocalAudio && viewModel.audioURL != nil {
                 HStack(spacing: 4) {
-                    Image(systemName: "wifi")
-                        .font(.caption2)
-                    Text("Streaming")
-                        .font(.caption2)
+                    Image(systemName: "wifi").font(.caption2)
+                    Text("Streaming").font(.caption2)
                 }
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 10)
+        .padding(.horizontal).padding(.vertical, 10)
     }
 
-    // MARK: - Download Button (compact)
-
+    // MARK: - Download Button
     @ViewBuilder
     private var downloadButton: some View {
         switch viewModel.downloadState {
         case .notDownloaded:
-            Button(action: {
-                viewModel.startDownload()
-            }) {
+            Button(action: { viewModel.startDownload() }) {
                 HStack(spacing: 4) {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 12))
-                    Text("Download")
-                        .font(.caption)
-                        .fontWeight(.medium)
+                    Image(systemName: "arrow.down.circle").font(.system(size: 12))
+                    Text("Download").font(.caption).fontWeight(.medium)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 12).padding(.vertical, 8)
             }
             .buttonStyle(.bordered)
-
         case .downloading(let progress):
-            Button(action: {
-                viewModel.cancelDownload()
-            }) {
+            Button(action: { viewModel.cancelDownload() }) {
                 HStack(spacing: 4) {
-                    ProgressView()
-                        .scaleEffect(0.6)
-                    Text("\(Int(progress * 100))%")
-                        .font(.caption)
-                        .fontWeight(.medium)
+                    ProgressView().scaleEffect(0.6)
+                    Text("\(Int(progress * 100))%").font(.caption).fontWeight(.medium)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 12).padding(.vertical, 8)
             }
-            .buttonStyle(.bordered)
-            .tint(.orange)
-
+            .buttonStyle(.bordered).tint(.orange)
         case .downloaded:
-            Button(action: {
-                showDeleteConfirmation = true
-            }) {
+            Button(action: { showDeleteConfirmation = true }) {
                 HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 12))
-                    Text("Downloaded")
-                        .font(.caption)
-                        .fontWeight(.medium)
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 12))
+                    Text("Downloaded").font(.caption).fontWeight(.medium)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 12).padding(.vertical, 8)
             }
-            .buttonStyle(.bordered)
-            .tint(.green)
-
+            .buttonStyle(.bordered).tint(.green)
         case .failed:
-            Button(action: {
-                viewModel.startDownload()
-            }) {
+            Button(action: { viewModel.startDownload() }) {
                 HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.circle")
-                        .font(.system(size: 12))
-                    Text("Retry")
-                        .font(.caption)
-                        .fontWeight(.medium)
+                    Image(systemName: "exclamationmark.circle").font(.system(size: 12))
+                    Text("Retry").font(.caption).fontWeight(.medium)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 12).padding(.vertical, 8)
             }
-            .buttonStyle(.bordered)
-            .tint(.red)
+            .buttonStyle(.bordered).tint(.red)
         }
     }
 
     // MARK: - Tab Selector
-
     private var tabSelector: some View {
         HStack(spacing: 0) {
             TabButton(title: "Summary", isSelected: selectedTab == 0) {
-                withAnimation {
-                    selectedTab = 0
-                }
+                withAnimation { selectedTab = 0 }
             }
-
             TabButton(title: "Transcript", isSelected: selectedTab == 1) {
-                withAnimation {
-                    selectedTab = 1
-                }
+                withAnimation { selectedTab = 1 }
             }
-
             TabButton(title: "Keywords", isSelected: selectedTab == 2) {
-                withAnimation {
-                    selectedTab = 2
-                }
+                withAnimation { selectedTab = 2 }
             }
         }
         .background(Color(uiColor: .systemBackground))
     }
 
     // MARK: - Summary Tab
-
     private var summaryTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // Episode description
-                viewModel.descriptionView
-                    .padding(.horizontal)
+                viewModel.descriptionView.padding(.horizontal)
             }
             .padding(.vertical)
         }
     }
 
-    // MARK: - Transcript Tab
-
+    // MARK: - Transcript Tab (FIXED)
     private var transcriptTab: some View {
         VStack(spacing: 0) {
-            // Status section (only show when no transcript)
-            if !viewModel.hasTranscript {
+            // Determine active state to prioritize progress views
+            let isProcessing = isTranscribingOrDownloadingModel(state: viewModel.transcriptState)
+
+            if isProcessing {
+                // Case 1: Active Processing (Always show this if happening)
+                transcriptStatusSection
+            } else if viewModel.hasTranscript {
+                // Case 2: Transcript exists and we are idle
+                liveCaptionsView
+            } else {
+                // Case 3: No transcript, idle or error
                 ScrollView {
                     transcriptStatusSection
                         .padding(.vertical)
                 }
-            } else {
-                // Live captions interface
-                liveCaptionsView
             }
         }
         .onReceive(playbackTimer) { _ in
-            // Trigger refresh for highlighting current segment
-            if viewModel.isPlayingThisEpisode {
-                refreshTrigger.toggle()
-            }
+            if viewModel.isPlayingThisEpisode { refreshTrigger.toggle() }
         }
     }
 
-    // MARK: - Live Captions View
+    // Helper to check processing state
+    private func isTranscribingOrDownloadingModel(state: TranscriptState) -> Bool {
+        switch state {
+        case .downloadingModel, .transcribing:
+            return true
+        default:
+            return false
+        }
+    }
 
+    // MARK: - Live Captions View (FIXED)
     private var liveCaptionsView: some View {
         VStack(spacing: 0) {
-            // Header with search and copy
+            // Header with search and Options
             VStack(spacing: 12) {
                 // Search bar
                 HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
+                    Image(systemName: "magnifyingglass").foregroundColor(.secondary)
                     TextField("Search transcript...", text: $viewModel.transcriptSearchQuery)
                         .textFieldStyle(.plain)
                     if !viewModel.transcriptSearchQuery.isEmpty {
                         Button(action: { viewModel.transcriptSearchQuery = "" }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.secondary)
+                            Image(systemName: "xmark.circle.fill").foregroundColor(.secondary)
                         }
                     }
                 }
@@ -418,12 +319,32 @@ struct EpisodeDetailView: View {
 
                     Spacer()
 
-                    Button(action: {
-                        viewModel.copyTranscriptToClipboard()
-                        showCopySuccess = true
-                    }) {
-                        Label("Copy All", systemImage: "doc.on.doc")
-                            .font(.caption)
+                    // FIXED: Replaced single "Copy" button with a Menu including Regenerate
+                    Menu {
+                        Button(action: {
+                            viewModel.copyTranscriptToClipboard()
+                            showCopySuccess = true
+                        }) {
+                            Label("Copy All", systemImage: "doc.on.doc")
+                        }
+
+                        Divider()
+
+                        Button(
+                            role: .destructive,
+                            action: {
+                                viewModel.generateTranscript()
+                            }
+                        ) {
+                            Label("Regenerate Transcript", systemImage: "arrow.clockwise")
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Options")
+                            Image(systemName: "chevron.down")
+                        }
+                        .font(.caption)
+                        .fontWeight(.medium)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -432,8 +353,7 @@ struct EpisodeDetailView: View {
             .padding(.horizontal)
             .padding(.top, 12)
 
-            Divider()
-                .padding(.top, 12)
+            Divider().padding(.top, 12)
 
             // Scrollable transcript segments
             ScrollViewReader { proxy in
@@ -444,9 +364,7 @@ struct EpisodeDetailView: View {
                                 segment: segment,
                                 isCurrentSegment: viewModel.currentSegmentId == segment.id,
                                 searchQuery: viewModel.transcriptSearchQuery,
-                                onTap: {
-                                    viewModel.seekToSegment(segment)
-                                }
+                                onTap: { viewModel.seekToSegment(segment) }
                             )
                             .id(segment.id)
                         }
@@ -454,7 +372,6 @@ struct EpisodeDetailView: View {
                     .padding(.vertical, 8)
                 }
                 .onChange(of: viewModel.currentSegmentId) { _, newId in
-                    // Auto-scroll to current segment during playback
                     if let id = newId, viewModel.transcriptSearchQuery.isEmpty {
                         withAnimation(.easeInOut(duration: 0.3)) {
                             proxy.scrollTo(id, anchor: .center)
@@ -465,6 +382,7 @@ struct EpisodeDetailView: View {
         }
     }
 
+    // MARK: - Transcript Status Section
     @ViewBuilder
     private var transcriptStatusSection: some View {
         VStack(spacing: 16) {
@@ -475,83 +393,53 @@ struct EpisodeDetailView: View {
                         Image(systemName: "waveform")
                             .font(.system(size: 50))
                             .foregroundColor(.blue)
-
-                        Text("Ready to Generate Transcript")
-                            .font(.headline)
-
+                        Text("Ready to Generate Transcript").font(.headline)
                         if !viewModel.isModelReady {
                             Text("Speech recognition model will be downloaded on first use")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
+                                .font(.caption).foregroundColor(.secondary).multilineTextAlignment(
+                                    .center)
                         }
-
-                        Button(action: {
-                            viewModel.generateTranscript()
-                        }) {
+                        Button(action: { viewModel.generateTranscript() }) {
                             Label("Generate Transcript", systemImage: "text.bubble")
                                 .font(.subheadline)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 10)
+                                .padding(.horizontal, 20).padding(.vertical, 10)
                         }
                         .buttonStyle(.borderedProminent)
                     }
                 } else {
                     VStack(spacing: 12) {
-                        Image(systemName: "text.bubble")
-                            .font(.system(size: 48))
-                            .foregroundColor(.secondary)
-
-                        Text("No transcript available")
-                            .font(.headline)
-
+                        Image(systemName: "text.bubble").font(.system(size: 48)).foregroundColor(
+                            .secondary)
+                        Text("No transcript available").font(.headline)
                         Text("Download the episode to generate a transcript.")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
+                            .font(.subheadline).foregroundColor(.secondary).multilineTextAlignment(
+                                .center)
                     }
                 }
 
             case .downloadingModel(let progress):
                 VStack(spacing: 12) {
-                    ProgressView(value: progress)
-                        .frame(width: 200)
-
-                    Text("Downloading Speech Model")
-                        .font(.headline)
-
-                    Text("\(Int(progress * 100))%")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    ProgressView(value: progress).frame(width: 200)
+                    Text("Downloading Speech Model").font(.headline)
+                    Text("\(Int(progress * 100))%").font(.caption).foregroundColor(.secondary)
                 }
 
             case .transcribing(let progress):
                 VStack(spacing: 12) {
-                    ProgressView()
-                        .scaleEffect(1.5)
-
-                    Text("Generating Transcript...")
-                        .font(.headline)
-
+                    ProgressView().scaleEffect(1.5)
+                    Text("Generating Transcript...").font(.headline)
                     if progress > 0 {
-                        Text("Processing audio...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        Text("Processing audio...").font(.caption).foregroundColor(.secondary)
                     }
                 }
 
             case .completed:
+                // This state is briefly visible or used if transcript is empty
                 VStack(spacing: 12) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 50))
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 50))
                         .foregroundColor(.green)
-
-                    Text("Transcript Generated")
-                        .font(.headline)
-
-                    Button(action: {
-                        viewModel.generateTranscript()
-                    }) {
+                    Text("Transcript Generated").font(.headline)
+                    Button(action: { viewModel.generateTranscript() }) {
                         Label("Regenerate", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
@@ -559,21 +447,12 @@ struct EpisodeDetailView: View {
 
             case .error(let message):
                 VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 50))
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 50))
                         .foregroundColor(.red)
-
-                    Text("Error")
-                        .font(.headline)
-
-                    Text(message)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-
-                    Button(action: {
-                        viewModel.generateTranscript()
-                    }) {
+                    Text("Error").font(.headline)
+                    Text(message).font(.caption).foregroundColor(.secondary).multilineTextAlignment(
+                        .center)
+                    Button(action: { viewModel.generateTranscript() }) {
                         Label("Retry", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
@@ -588,21 +467,13 @@ struct EpisodeDetailView: View {
     }
 
     // MARK: - Keywords Tab
-
     private var keywordsTab: some View {
         ScrollView {
             VStack(spacing: 12) {
-                Image(systemName: "tag")
-                    .font(.system(size: 48))
-                    .foregroundColor(.secondary)
-
-                Text("Keywords")
-                    .font(.headline)
-
+                Image(systemName: "tag").font(.system(size: 48)).foregroundColor(.secondary)
+                Text("Keywords").font(.headline)
                 Text("Keyword extraction coming soon.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
+                    .font(.subheadline).foregroundColor(.secondary).multilineTextAlignment(.center)
             }
             .padding()
         }
@@ -780,3 +651,4 @@ struct TranscriptSegmentRow: View {
     }
 }
 
+// (Existing Helper Components: TabButton, TranscriptSegmentRow remain unchanged)
