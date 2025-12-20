@@ -316,16 +316,26 @@ public actor TranscriptService {
         return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
     }
 
+    /// Helper to check for sentence endings in various languages
+    private func isSentenceEnd(_ text: String) -> Bool {
+        // Includes:
+        // English/European: . ! ?
+        // Chinese/CJK: 。 (IDEOGRAPHIC FULL STOP), ！ (FULLWIDTH EXCLAMATION MARK), ？ (FULLWIDTH QUESTION MARK)
+        let terminators: Set<Character> = [".", "!", "?", "。", "！", "？"]
+
+        // Check the last character (trimming whitespace/newlines first just in case)
+        guard let lastChar = text.trimmingCharacters(in: .whitespacesAndNewlines).last else {
+            return false
+        }
+        return terminators.contains(lastChar)
+    }
+
     /// Converts an AttributedString transcript to SRT subtitle format
-    /// - Parameter transcript: The transcript as AttributedString with audioTimeRange attributes
-    /// - Parameter maxLength: Maximum length for each subtitle entry (optional)
-    /// - Returns: SRT formatted subtitle string
     private func transcriptToSRT(transcript: AttributedString, maxLength: Int?) -> String {
-        // Get sentences from the transcript by processing runs
         var sentences: [(text: AttributedString, timeRange: CMTimeRange?)] = []
 
         if let maxLength = maxLength {
-            // Split into sentences with max length
+            // --- Logic for Max Length Split ---
             var currentSentence: AttributedString = ""
             var currentTimeRange: CMTimeRange?
 
@@ -334,28 +344,37 @@ public actor TranscriptService {
                 let runText = AttributedString(runSubstring)
                 let runLength = runText.characters.count
 
-                // Get audioTimeRange from this run
-                var runTimeRange: CMTimeRange?
-                if let audioTimeRange = run.audioTimeRange {
-                    runTimeRange = audioTimeRange
-                }
+                // Get audioTimeRange
+                let runTimeRange = run.audioTimeRange
 
+                // If adding this run keeps us under maxLength
                 if currentSentence.characters.count + runLength <= maxLength {
                     currentSentence += runText
-                    // Update time range
-                    if let runRange = runTimeRange {
-                        if let currentRange = currentTimeRange {
-                            let start = min(currentRange.start.seconds, runRange.start.seconds)
-                            let end = max(currentRange.end.seconds, runRange.end.seconds)
+
+                    // Update time range logic
+                    if let range = runTimeRange {
+                        if let current = currentTimeRange {
+                            let start = min(current.start.seconds, range.start.seconds)
+                            let end = max(current.end.seconds, range.end.seconds)
                             currentTimeRange = CMTimeRange(
                                 start: CMTime(seconds: start, preferredTimescale: 600),
                                 duration: CMTime(seconds: end - start, preferredTimescale: 600)
                             )
                         } else {
-                            currentTimeRange = runRange
+                            currentTimeRange = range
                         }
                     }
+
+                    // OPTIONAL: Even in max length mode, if we hit a period, we should probably split
+                    // to avoid cutting sentences in weird places, but strictly following maxLength logic:
+                    if isSentenceEnd(String(runText.characters)) {
+                        sentences.append((currentSentence, currentTimeRange))
+                        currentSentence = ""
+                        currentTimeRange = nil
+                    }
+
                 } else {
+                    // Length exceeded, push current and start new
                     if currentSentence.characters.count > 0 {
                         sentences.append((currentSentence, currentTimeRange))
                     }
@@ -367,7 +386,7 @@ public actor TranscriptService {
                 sentences.append((currentSentence, currentTimeRange))
             }
         } else {
-            // Use natural sentence boundaries - process by runs and group by audioTimeRange
+            // --- Logic for Natural Sentence Boundaries (The Fix is Here) ---
             var currentSentence: AttributedString = ""
             var currentTimeRange: CMTimeRange?
 
@@ -376,7 +395,7 @@ public actor TranscriptService {
                 let runText = AttributedString(runSubstring)
                 currentSentence += runText
 
-                // Get audioTimeRange from this run
+                // 1. Expand the Time Range for the current sentence
                 if let audioTimeRange = run.audioTimeRange {
                     if let existingRange = currentTimeRange {
                         let start = min(existingRange.start.seconds, audioTimeRange.start.seconds)
@@ -390,9 +409,11 @@ public actor TranscriptService {
                     }
                 }
 
-                // Check if this run ends a sentence
+                // 2. Check for sentence ending (Support English & Chinese)
                 let text = String(runText.characters)
-                if text.hasSuffix(".") || text.hasSuffix("!") || text.hasSuffix("?") {
+
+                // FIXED: Use the helper that checks for "。" "！" "？"
+                if isSentenceEnd(text) {
                     if currentSentence.characters.count > 0 {
                         sentences.append((currentSentence, currentTimeRange))
                     }
@@ -400,52 +421,48 @@ public actor TranscriptService {
                     currentTimeRange = nil
                 }
             }
+            // Catch any remaining text
             if currentSentence.characters.count > 0 {
                 sentences.append((currentSentence, currentTimeRange))
             }
         }
 
-        // Convert sentences to SRT entries
+        // --- Convert to SRT String ---
         let srtEntries = sentences.enumerated().compactMap { index, entry -> String? in
             let (sentence, timeRange) = entry
 
-            // Try to get timeRange from sentence level first, then use the computed one
-            var finalTimeRange: CMTimeRange?
-
-            // Check if audioTimeRange is set at the sentence level
-            for run in sentence.runs {
-                if let audioTimeRange = run.audioTimeRange {
-                    if finalTimeRange == nil {
-                        finalTimeRange = audioTimeRange
-                    } else {
-                        // Extend the range
-                        let start = min(finalTimeRange!.start.seconds, audioTimeRange.start.seconds)
-                        let end = max(finalTimeRange!.end.seconds, audioTimeRange.end.seconds)
-                        finalTimeRange = CMTimeRange(
-                            start: CMTime(seconds: start, preferredTimescale: 600),
-                            duration: CMTime(seconds: end - start, preferredTimescale: 600)
-                        )
+            // Fallback: if sentence-level time range is missing, scan runs again
+            var finalTimeRange = timeRange
+            if finalTimeRange == nil {
+                for run in sentence.runs {
+                    if let audioTimeRange = run.audioTimeRange {
+                        if finalTimeRange == nil {
+                            finalTimeRange = audioTimeRange
+                        } else {
+                            let start = min(
+                                finalTimeRange!.start.seconds, audioTimeRange.start.seconds)
+                            let end = max(finalTimeRange!.end.seconds, audioTimeRange.end.seconds)
+                            finalTimeRange = CMTimeRange(
+                                start: CMTime(seconds: start, preferredTimescale: 600),
+                                duration: CMTime(seconds: end - start, preferredTimescale: 600)
+                            )
+                        }
                     }
                 }
             }
 
-            // Use computed timeRange if sentence-level one is not available
-            let range = finalTimeRange ?? timeRange
-            guard let range = range else { return nil }
+            guard let range = finalTimeRange else { return nil }
 
             let text = String(sentence.characters).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard text.count > 0 else { return nil }
+            guard !text.isEmpty else { return nil }
 
-            // Build SRT entry with explicit newlines
             let entryNumber = index + 1
             let startTime = formatSRTTime(range.start.seconds)
             let endTime = formatSRTTime(range.end.seconds)
-            // Standard SRT format: index, timestamp, text (no trailing newline - separator adds it)
+
             return "\(entryNumber)\n\(startTime) --> \(endTime)\n\(text)"
         }
 
-        // Join with double newline between entries (standard SRT format)
         return srtEntries.joined(separator: "\n\n")
     }
-
 }
