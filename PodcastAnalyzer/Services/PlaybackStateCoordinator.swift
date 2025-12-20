@@ -66,6 +66,18 @@ class PlaybackStateCoordinator: ObservableObject {
             model.lastPlaybackPosition = update.position
             model.lastPlayedDate = Date()
 
+            // IMPORTANT: Always update duration from the player (this is the actual duration)
+            if update.duration > 0 {
+                model.duration = update.duration
+            }
+
+            // Reset completed status when replaying from the beginning (position < 5 seconds)
+            // This allows users to re-listen and get fresh progress tracking
+            if update.position < 5 && model.isCompleted {
+                model.isCompleted = false
+                logger.info("Reset completed status for: \(update.episodeTitle) (replay detected)")
+            }
+
             // Mark as completed if within 30 seconds of end
             if update.duration > 0 && (update.duration - update.position) < 30 {
                 model.isCompleted = true

@@ -129,6 +129,11 @@ class EnhancedAudioManager: NSObject {
 
         cleanup()
 
+        // IMPORTANT: Reset duration and currentTime for new episode
+        // This prevents showing old duration in Now Playing
+        duration = 0
+        currentTime = 0
+
         // Apply default speed from settings for new episodes
         if useDefaultSpeed {
             let defaultSpeed = UserDefaults.standard.float(forKey: Keys.defaultPlaybackSpeed)
@@ -142,7 +147,7 @@ class EnhancedAudioManager: NSObject {
         player = AVPlayer(playerItem: playerItem)
         currentEpisode = episode
 
-        // UPDATE NOW PLAYING BEFORE PLAYING!
+        // Update Now Playing info (duration will be 0 initially, updated when available)
         updateNowPlayingInfo(imageURL: imageURL ?? episode.imageURL)
 
         if startTime > 0 {
@@ -341,6 +346,14 @@ class EnhancedAudioManager: NSObject {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
 
+    private func updateNowPlayingDuration() {
+        guard duration > 0 else { return }
+        var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        logger.info("Updated Now Playing duration: \(Int(self.duration))s")
+    }
+
     private func updateNowPlayingPlaybackRate() {
         var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? playbackRate : 0.0
@@ -422,14 +435,23 @@ class EnhancedAudioManager: NSObject {
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
         timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self = self else { return }
-            
+
             self.currentTime = time.seconds
-            
-            if let duration = self.player?.currentItem?.duration.seconds,
-               duration.isFinite {
-                self.duration = duration
+
+            // Track if duration was previously unknown
+            let previousDuration = self.duration
+
+            if let newDuration = self.player?.currentItem?.duration.seconds,
+               newDuration.isFinite {
+                self.duration = newDuration
+
+                // Update Now Playing duration when it first becomes available
+                // (transition from 0 or invalid to valid duration)
+                if previousDuration <= 0 && newDuration > 0 {
+                    self.updateNowPlayingDuration()
+                }
             }
-            
+
             // Update current caption
             self.updateCurrentCaption()
 

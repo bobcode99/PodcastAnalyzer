@@ -18,6 +18,7 @@ struct EpisodeListView: View {
     @State private var showDeleteConfirmation = false
     @State private var isRefreshing = false
     @State private var isDescriptionExpanded = false
+    @State private var refreshTimer: Timer?
 
     private let rssService = PodcastRssService()
 
@@ -97,6 +98,11 @@ struct EpisodeListView: View {
         .iosNavigationBarTitleDisplayModeInline()
         .onAppear {
             loadEpisodeModels()
+            // Start periodic refresh for playback state updates
+            startRefreshTimer()
+        }
+        .onDisappear {
+            stopRefreshTimer()
         }
         .refreshable {
             await refreshPodcast()
@@ -124,6 +130,18 @@ struct EpisodeListView: View {
 
     private func makeEpisodeKey(_ episode: PodcastEpisodeInfo) -> String {
         "\(podcastModel.podcastInfo.title)|\(episode.title)"
+    }
+
+    private func startRefreshTimer() {
+        // Refresh every 2 seconds to update playback progress
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            loadEpisodeModels()
+        }
+    }
+
+    private func stopRefreshTimer() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
     }
 
     private func loadEpisodeModels() {

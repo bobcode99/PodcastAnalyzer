@@ -60,6 +60,7 @@ final class EpisodeDetailViewModel {
     func setModelContext(_ context: ModelContext) {
         self.modelContext = context
         loadEpisodeModel()
+        observePlaybackState()
     }
 
     // MARK: - Episode Properties
@@ -227,6 +228,34 @@ final class EpisodeDetailViewModel {
                 self?.updateDownloadState()
             }
             .store(in: &cancellables)
+    }
+
+    private func observePlaybackState() {
+        // Poll for playback state changes (duration, progress, completion)
+        Timer.publish(every: 2.0, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.refreshEpisodeModel()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func refreshEpisodeModel() {
+        guard let context = modelContext else { return }
+
+        let id = "\(podcastTitle)|\(episode.title)"
+        let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+            predicate: #Predicate { $0.id == id }
+        )
+
+        do {
+            let results = try context.fetch(descriptor)
+            if let model = results.first {
+                episodeModel = model
+            }
+        } catch {
+            // Silent fail - model will be refreshed on next timer tick
+        }
     }
 
     // MARK: - SwiftData Persistence
