@@ -41,8 +41,9 @@ class SettingsViewModel: ObservableObject {
     @Published var isValidating: Bool = false
     @Published var defaultPlaybackSpeed: Float = 1.0
 
-    // Transcript model status
+    // Transcript model status and locale
     @Published var transcriptModelStatus: TranscriptModelStatus = .checking
+    @Published var selectedTranscriptLocale: String = "zh-tw"
 
     private var successMessageTask: Task<Void, Never>?
     private var transcriptDownloadTask: Task<Void, Never>?
@@ -51,10 +52,50 @@ class SettingsViewModel: ObservableObject {
 
     private enum Keys {
         static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
+        static let selectedTranscriptLocale = "selectedTranscriptLocale"
     }
 
     init() {
         loadDefaultPlaybackSpeed()
+        loadSelectedTranscriptLocale()
+    }
+
+    // MARK: - Transcript Locale Settings
+
+    struct TranscriptLocaleOption: Identifiable, Hashable {
+        let id: String  // locale code like "zh-tw"
+        let name: String  // display name like "繁體中文 (台灣)"
+    }
+
+    static let availableTranscriptLocales: [TranscriptLocaleOption] = [
+        TranscriptLocaleOption(id: "zh-tw", name: "繁體中文 (台灣)"),
+        TranscriptLocaleOption(id: "zh-cn", name: "简体中文 (中国)"),
+        TranscriptLocaleOption(id: "en-us", name: "English (US)"),
+        TranscriptLocaleOption(id: "en-gb", name: "English (UK)"),
+        TranscriptLocaleOption(id: "ja-jp", name: "日本語"),
+        TranscriptLocaleOption(id: "ko-kr", name: "한국어"),
+        TranscriptLocaleOption(id: "fr-fr", name: "Français"),
+        TranscriptLocaleOption(id: "de-de", name: "Deutsch"),
+        TranscriptLocaleOption(id: "es-es", name: "Español"),
+        TranscriptLocaleOption(id: "it-it", name: "Italiano"),
+        TranscriptLocaleOption(id: "pt-br", name: "Português (Brasil)"),
+    ]
+
+    func setSelectedTranscriptLocale(_ locale: String) {
+        selectedTranscriptLocale = locale
+        UserDefaults.standard.set(locale, forKey: Keys.selectedTranscriptLocale)
+        logger.info("Selected transcript locale set to \(locale)")
+        // Re-check model status for new locale
+        checkTranscriptModelStatus()
+    }
+
+    private func loadSelectedTranscriptLocale() {
+        if let saved = UserDefaults.standard.string(forKey: Keys.selectedTranscriptLocale) {
+            selectedTranscriptLocale = saved
+        } else {
+            // Default to zh-tw
+            selectedTranscriptLocale = "zh-tw"
+        }
     }
 
     // MARK: - Public Methods
@@ -192,7 +233,7 @@ class SettingsViewModel: ObservableObject {
         transcriptModelStatus = .checking
 
         Task {
-            let transcriptService = TranscriptService()
+            let transcriptService = TranscriptService(language: selectedTranscriptLocale)
             let isReady = await transcriptService.isModelReady()
 
             await MainActor.run {
@@ -217,7 +258,7 @@ class SettingsViewModel: ObservableObject {
         transcriptDownloadTask = Task { [weak self] in
             guard let self else { return }
 
-            let transcriptService = TranscriptService()
+            let transcriptService = TranscriptService(language: selectedTranscriptLocale)
 
             for await progress in await transcriptService.setupAndInstallAssets() {
                 if Task.isCancelled { break }

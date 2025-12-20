@@ -5,29 +5,29 @@
 //  Enhanced with download management and playback state
 //
 
+import Combine
+import SwiftData
 import SwiftUI
 import ZMarkupParser
-import SwiftData
-import Combine
 import os.log
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "EpisodeDetailViewModel")
 
 @Observable
 final class EpisodeDetailViewModel {
-    
+
     var descriptionView: AnyView = AnyView(
         Text("Loading...").foregroundColor(.secondary)
     )
-    
+
     let episode: PodcastEpisodeInfo
     let podcastTitle: String
     private let fallbackImageURL: String?
-    
+
     // Reference singletons
     let audioManager = EnhancedAudioManager.shared
     private let downloadManager = DownloadManager.shared
-    
+
     // Download state
     var downloadState: DownloadState = .notDownloaded
 
@@ -43,44 +43,44 @@ final class EpisodeDetailViewModel {
 
     // Cancellables for observation
     private var cancellables = Set<AnyCancellable>()
-    
+
     init(episode: PodcastEpisodeInfo, podcastTitle: String, fallbackImageURL: String?) {
         self.episode = episode
         self.podcastTitle = podcastTitle
         self.fallbackImageURL = fallbackImageURL
         parseDescription()
-        
+
         // Initialize download state
         updateDownloadState()
-        
+
         // Observe download state changes
         observeDownloadState()
     }
-    
+
     func setModelContext(_ context: ModelContext) {
         self.modelContext = context
         loadEpisodeModel()
     }
-    
+
     // MARK: - Episode Properties
-    
+
     var title: String { episode.title }
-    
+
     var pubDateString: String? {
         episode.pubDate?.formatted(date: .long, time: .omitted)
     }
-    
+
     var imageURLString: String {
         episode.imageURL ?? fallbackImageURL ?? ""
     }
-    
+
     var audioURL: String? { episode.audioURL }
     var isPlayDisabled: Bool {
         guard episode.audioURL != nil else { return true }
         // Can play if downloaded or has URL
         return !hasLocalAudio && episode.audioURL == nil
     }
-    
+
     var playbackURL: String {
         // Prefer local file if available
         if let localPath = localAudioPath {
@@ -88,40 +88,40 @@ final class EpisodeDetailViewModel {
         }
         return episode.audioURL ?? ""
     }
-    
+
     var hasLocalAudio: Bool {
         if case .downloaded = downloadState {
             return true
         }
         return false
     }
-    
+
     var localAudioPath: String? {
         if case .downloaded(let path) = downloadState {
             return path
         }
         return nil
     }
-    
+
     // MARK: - Playback State
-    
+
     var isPlayingThisEpisode: Bool {
         guard let currentEpisode = audioManager.currentEpisode else { return false }
         return currentEpisode.title == episode.title && currentEpisode.podcastTitle == podcastTitle
     }
-    
+
     var currentTime: TimeInterval {
         isPlayingThisEpisode ? audioManager.currentTime : (episodeModel?.lastPlaybackPosition ?? 0)
     }
-    
+
     var duration: TimeInterval {
         isPlayingThisEpisode ? audioManager.duration : 0
     }
-    
+
     var playbackRate: Float {
         audioManager.playbackRate
     }
-    
+
     var currentCaption: String {
         isPlayingThisEpisode ? audioManager.currentCaption : ""
     }
@@ -141,9 +141,9 @@ final class EpisodeDetailViewModel {
     var remainingTimeString: String? {
         episodeModel?.remainingTimeString
     }
-    
+
     // MARK: - Actions
-    
+
     func playAction() {
         guard let audioURLString = episode.audioURL else { return }
 
@@ -180,45 +180,45 @@ final class EpisodeDetailViewModel {
         // Update last played date
         updateLastPlayed()
     }
-    
+
     func seek(to time: TimeInterval) {
         audioManager.seek(to: time)
         savePlaybackPosition(time)
     }
-    
+
     func skipForward() {
         audioManager.skipForward()
     }
-    
+
     func skipBackward() {
         audioManager.skipBackward()
     }
-    
+
     func setPlaybackSpeed(_ rate: Float) {
         audioManager.setPlaybackRate(rate)
     }
-    
+
     // MARK: - Download Management
-    
+
     func startDownload() {
         downloadManager.downloadEpisode(episode: episode, podcastTitle: podcastTitle)
     }
-    
+
     func cancelDownload() {
         downloadManager.cancelDownload(episodeTitle: episode.title, podcastTitle: podcastTitle)
     }
-    
+
     func deleteDownload() {
         downloadManager.deleteDownload(episodeTitle: episode.title, podcastTitle: podcastTitle)
     }
-    
+
     private func updateDownloadState() {
         downloadState = downloadManager.getDownloadState(
             episodeTitle: episode.title,
             podcastTitle: podcastTitle
         )
     }
-    
+
     private func observeDownloadState() {
         // Poll for download state changes
         Timer.publish(every: 0.5, on: .main, in: .common)
@@ -228,17 +228,17 @@ final class EpisodeDetailViewModel {
             }
             .store(in: &cancellables)
     }
-    
+
     // MARK: - SwiftData Persistence
-    
+
     private func loadEpisodeModel() {
         guard let context = modelContext else { return }
-        
+
         let id = "\(podcastTitle)|\(episode.title)"
         let descriptor = FetchDescriptor<EpisodeDownloadModel>(
             predicate: #Predicate { $0.id == id }
         )
-        
+
         do {
             let results = try context.fetch(descriptor)
             if let model = results.first {
@@ -271,7 +271,7 @@ final class EpisodeDetailViewModel {
             logger.error("Failed to create episode model: \(error.localizedDescription)")
         }
     }
-    
+
     private func savePlaybackPosition(_ position: TimeInterval) {
         guard let model = episodeModel else { return }
         model.lastPlaybackPosition = position
@@ -388,10 +388,31 @@ final class EpisodeDetailViewModel {
 
     // MARK: - Transcript Methods
 
+    /// Gets the podcast language from SwiftData, falling back to "en" if not found
+    private func getPodcastLanguage() -> String {
+        guard let context = modelContext else { return "en" }
+
+        let descriptor = FetchDescriptor<PodcastInfoModel>(
+            predicate: #Predicate { $0.podcastInfo.title == podcastTitle }
+        )
+
+        do {
+            let results = try context.fetch(descriptor)
+            if let podcastModel = results.first {
+                return podcastModel.podcastInfo.language
+            }
+        } catch {
+            logger.error("Failed to fetch podcast language: \(error.localizedDescription)")
+        }
+
+        return "en"  // Default fallback
+    }
+
     func checkTranscriptStatus() {
         Task {
-            // Check if model is ready
-            let transcriptService = TranscriptService()
+            // Get podcast language and create transcript service
+            let language = getPodcastLanguage()
+            let transcriptService = TranscriptService(language: language)
             isModelReady = await transcriptService.isModelReady()
 
             // Check if transcript already exists
@@ -408,14 +429,17 @@ final class EpisodeDetailViewModel {
 
     func generateTranscript() {
         guard let audioPath = localAudioPath else {
-            transcriptState = .error("No local audio file available. Please download the episode first.")
+            transcriptState = .error(
+                "No local audio file available. Please download the episode first.")
             return
         }
 
         Task {
             do {
                 let audioURL = URL(fileURLWithPath: audioPath)
-                let transcriptService = TranscriptService()
+                // Get podcast language and create transcript service
+                let language = getPodcastLanguage()
+                let transcriptService = TranscriptService(language: language)
 
                 let modelReady = await transcriptService.isModelReady()
 
@@ -438,7 +462,9 @@ final class EpisodeDetailViewModel {
                 guard await transcriptService.isInitialized() else {
                     throw NSError(
                         domain: "TranscriptService", code: 1,
-                        userInfo: [NSLocalizedDescriptionKey: "Failed to initialize transcription service"]
+                        userInfo: [
+                            NSLocalizedDescriptionKey: "Failed to initialize transcription service"
+                        ]
                     )
                 }
 
@@ -504,7 +530,8 @@ final class EpisodeDetailViewModel {
             // Skip index and timestamp lines, get text
             if lines.count >= 3 {
                 let textLines = Array(lines[2...])
-                let combinedText = textLines.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+                let combinedText = textLines.joined(separator: " ").trimmingCharacters(
+                    in: .whitespaces)
                 if !combinedText.isEmpty {
                     cleanLines.append(combinedText)
                 }

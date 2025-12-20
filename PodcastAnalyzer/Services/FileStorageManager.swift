@@ -80,13 +80,16 @@ actor FileStorageManager {
     
     private func createDirectories() {
         let directories = [audioDirectory, captionsDirectory, tempDirectory]
-        
+
         for directory in directories {
-            do {
-                try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-                logger.info("Created directory: \(directory.path)")
-            } catch {
-                logger.error("Failed to create directory \(directory.path): \(error.localizedDescription)")
+            // Only create if it doesn't exist
+            if !fileManager.fileExists(atPath: directory.path) {
+                do {
+                    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+                    logger.info("Created directory: \(directory.path)")
+                } catch {
+                    logger.error("Failed to create directory \(directory.path): \(error.localizedDescription)")
+                }
             }
         }
     }

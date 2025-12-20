@@ -7,7 +7,6 @@ import FeedKit
 import Foundation
 internal import XMLKit
 
-
 public actor PodcastRssService {
 
     /// Parses duration from iTunes duration field (FeedKit returns TimeInterval)
@@ -23,7 +22,7 @@ public actor PodcastRssService {
         guard let url = URL(string: urlString) else {
             throw PodcastServiceError.invalidURL
         }
-    
+
         // FeedKit auto-detects the format
         let feed = try await Feed(url: url)
 
@@ -55,7 +54,8 @@ public actor PodcastRssService {
             description: rssFeed.channel?.description,
             episodes: episodes,
             rssUrl: urlString,
-            imageURL: rssFeed.channel?.iTunes?.image?.attributes?.href ?? ""
+            imageURL: rssFeed.channel?.iTunes?.image?.attributes?.href ?? "",
+            language: rssFeed.channel?.language ?? "en-us"
         )
     }
 }

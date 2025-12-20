@@ -5,7 +5,6 @@
 //  Created by Bob on 2025/12/17.
 //
 
-
 import AVFoundation
 import Foundation
 import Speech
@@ -14,24 +13,98 @@ import os.log
 // Change availability to iOS and a more realistic version number (e.g., 17.0)
 @available(iOS 17.0, *)
 public actor TranscriptService {
-    private nonisolated let logger = Logger(subsystem: "com.podcast.analyzer", category: "TranscriptService")
+    private nonisolated let logger = Logger(
+        subsystem: "com.podcast.analyzer", category: "TranscriptService")
     private var censor: Bool = false
     private var needsAudioTimeRange: Bool = true
     private var targetLocale: Locale
+
+    /// Converts a podcast language code (e.g., "zh-tw") to a Locale identifier (e.g., "zh_TW")
+    /// - Parameter languageCode: The language code from podcast RSS feed (e.g., "zh-tw", "en-us", "ja")
+    /// - Returns: A Locale instance with the properly formatted identifier
+    ///
+    /// Examples:
+    /// - "zh-tw" → Locale(identifier: "zh_TW")
+    /// - "en-us" → Locale(identifier: "en_US")
+    /// - "en" → Locale(identifier: "en_US")  // Maps to default region
+    /// - "ja" → Locale(identifier: "ja_JP")  // Maps to default region
+    public static func locale(fromPodcastLanguage languageCode: String) -> Locale {
+        // Default region mappings for language-only codes
+        // Speech framework requires full locale identifiers (e.g., "en_US" not just "en")
+        let defaultRegions: [String: String] = [
+            "en": "US",
+            "zh": "TW",
+            "ja": "JP",
+            "ko": "KR",
+            "fr": "FR",
+            "de": "DE",
+            "es": "ES",
+            "it": "IT",
+            "pt": "BR",
+            "ru": "RU",
+            "ar": "SA",
+            "hi": "IN",
+            "th": "TH",
+            "vi": "VN",
+            "id": "ID",
+            "ms": "MY",
+            "nl": "NL",
+            "pl": "PL",
+            "tr": "TR",
+            "uk": "UA",
+            "cs": "CZ",
+            "el": "GR",
+            "he": "IL",
+            "ro": "RO",
+            "hu": "HU",
+            "sv": "SE",
+            "da": "DK",
+            "fi": "FI",
+            "nb": "NO",
+            "sk": "SK",
+            "ca": "ES",
+            "hr": "HR",
+        ]
+
+        // Replace hyphens with underscores and uppercase the region code
+        let parts = languageCode.lowercased().split(separator: "-")
+        if parts.count == 2 {
+            // Language and region: "zh-tw" -> "zh_TW"
+            let language = String(parts[0])
+            let region = String(parts[1]).uppercased()
+            return Locale(identifier: "\(language)_\(region)")
+        } else if parts.count == 1 {
+            // Language only: map to default region if available
+            let language = String(parts[0])
+            if let defaultRegion = defaultRegions[language] {
+                return Locale(identifier: "\(language)_\(defaultRegion)")
+            }
+            // Fallback: just use the language code
+            return Locale(identifier: language)
+        } else {
+            // Fallback: use the original string as-is
+            return Locale(identifier: languageCode)
+        }
+    }
 
     // 1. Store the transcriber instance
     private var transcriber: SpeechTranscriber?
     private var analyzer: SpeechAnalyzer?
     // Store the locale used for installation
 
-    // Designated initializer
+    /// Convenience initializer that accepts a podcast language string (e.g., "zh-tw", "en-us")
+    /// - Parameters:
+    ///   - language: The language code from podcast RSS feed (e.g., "zh-tw", "en-us", "ja")
+    ///   - censor: Whether to enable content filtering
+    ///   - needsAudioTimeRange: Whether to include audio time ranges in transcription
     public init(
-        censor: Bool = false, needsAudioTimeRange: Bool = true,
-        targetLocale: Locale = Locale(identifier: "en-US")
+        language: String,
+        censor: Bool = false,
+        needsAudioTimeRange: Bool = true
     ) {
         self.censor = censor
         self.needsAudioTimeRange = needsAudioTimeRange
-        self.targetLocale = targetLocale
+        self.targetLocale = Self.locale(fromPodcastLanguage: language)
     }
 
     // 2. The main setup function that returns an AsyncStream of progress
@@ -363,15 +436,15 @@ public actor TranscriptService {
             let text = String(sentence.characters).trimmingCharacters(in: .whitespacesAndNewlines)
             guard text.count > 0 else { return nil }
 
-            return """
-                \(index + 1)
-                \(formatSRTTime(range.start.seconds)) --> \(formatSRTTime(range.end.seconds))
-                \(text)
-
-                """
+            // Build SRT entry with explicit newlines
+            let entryNumber = index + 1
+            let startTime = formatSRTTime(range.start.seconds)
+            let endTime = formatSRTTime(range.end.seconds)
+            return "\(entryNumber)\n\(startTime) --> \(endTime)\n\(text)\n"
         }
 
-        return srtEntries.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        // Join with blank line between entries (standard SRT format)
+        return srtEntries.joined(separator: "\n")
     }
 
 }

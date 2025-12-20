@@ -5,7 +5,6 @@
 //  Created by Bob on 2025/12/17.
 //
 
-
 //
 //  TranscriptGenerationView.swift
 //  PodcastAnalyzer
@@ -13,32 +12,35 @@
 //  View for generating and displaying episode transcripts
 //
 
-import SwiftUI
 import Combine
+import SwiftData
+import SwiftUI
 import os.log
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "TranscriptGeneration")
 
 struct TranscriptGenerationView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel: TranscriptGenerationViewModel
-    
+
     init(episode: PodcastEpisodeInfo, podcastTitle: String, localAudioPath: String?) {
-        _viewModel = StateObject(wrappedValue: TranscriptGenerationViewModel(
-            episode: episode,
-            podcastTitle: podcastTitle,
-            localAudioPath: localAudioPath
-        ))
+        _viewModel = StateObject(
+            wrappedValue: TranscriptGenerationViewModel(
+                episode: episode,
+                podcastTitle: podcastTitle,
+                localAudioPath: localAudioPath
+            ))
     }
-    
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    
+
                     // MARK: - Status Section
                     statusSection
-                    
+
                     // MARK: - Transcript Content
                     if !viewModel.transcriptText.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
@@ -46,7 +48,7 @@ struct TranscriptGenerationView: View {
                                 Text("Transcript")
                                     .font(.headline)
                                 Spacer()
-                                
+
                                 // Copy button
                                 Button(action: {
                                     UIPasteboard.general.string = viewModel.transcriptText
@@ -56,7 +58,7 @@ struct TranscriptGenerationView: View {
                                         .font(.caption)
                                 }
                                 .buttonStyle(.bordered)
-                                
+
                                 // Share button
                                 if let url = viewModel.captionFileURL {
                                     ShareLink(item: url) {
@@ -66,7 +68,7 @@ struct TranscriptGenerationView: View {
                                     .buttonStyle(.bordered)
                                 }
                             }
-                            
+
                             Text(viewModel.transcriptText)
                                 .font(.body)
                                 .textSelection(.enabled)
@@ -88,18 +90,19 @@ struct TranscriptGenerationView: View {
                 }
             }
             .alert("Success", isPresented: $viewModel.showCopySuccess) {
-                Button("OK", role: .cancel) { }
+                Button("OK", role: .cancel) {}
             } message: {
                 Text("Transcript copied to clipboard")
             }
             .onAppear {
+                viewModel.setModelContext(modelContext)
                 viewModel.checkTranscriptStatus()
             }
         }
     }
-    
+
     // MARK: - Status Section
-    
+
     @ViewBuilder
     private var statusSection: some View {
         VStack(spacing: 16) {
@@ -109,17 +112,17 @@ struct TranscriptGenerationView: View {
                     Image(systemName: "waveform")
                         .font(.system(size: 50))
                         .foregroundColor(.blue)
-                    
+
                     Text("Ready to Generate Transcript")
                         .font(.headline)
-                    
+
                     if !viewModel.isModelReady {
                         Text("Speech recognition model will be downloaded on first use")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                     }
-                    
+
                     Button(action: {
                         viewModel.generateTranscript()
                     }) {
@@ -129,48 +132,48 @@ struct TranscriptGenerationView: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
-                
+
             case .downloadingModel(let progress):
                 VStack(spacing: 12) {
                     ProgressView(value: progress)
                         .frame(width: 200)
-                    
+
                     Text("Downloading Speech Model")
                         .font(.headline)
-                    
+
                     Text("\(Int(progress * 100))%")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                
+
             case .transcribing(let progress):
                 VStack(spacing: 12) {
                     ProgressView()
                         .scaleEffect(1.5)
-                    
+
                     Text("Generating Transcript...")
                         .font(.headline)
-                    
+
                     if progress > 0 {
                         Text("Processing audio...")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                 }
-                
+
             case .completed:
                 VStack(spacing: 12) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 50))
                         .foregroundColor(.green)
-                    
+
                     Text("Transcript Generated")
                         .font(.headline)
-                    
+
                     Text("Saved to Files app")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    
+
                     Button(action: {
                         viewModel.regenerateTranscript()
                     }) {
@@ -178,21 +181,21 @@ struct TranscriptGenerationView: View {
                     }
                     .buttonStyle(.bordered)
                 }
-                
+
             case .error(let message):
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 50))
                         .foregroundColor(.red)
-                    
+
                     Text("Error")
                         .font(.headline)
-                    
+
                     Text(message)
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
-                    
+
                     Button(action: {
                         viewModel.generateTranscript()
                     }) {
@@ -225,38 +228,64 @@ class TranscriptGenerationViewModel: ObservableObject {
     @Published var transcriptText: String = ""
     @Published var showCopySuccess: Bool = false
     @Published var isModelReady: Bool = false
-    
+
     private let episode: PodcastEpisodeInfo
     private let podcastTitle: String
     private let localAudioPath: String?
     private let fileStorage = FileStorageManager.shared
-    
+    private var modelContext: ModelContext?
+
     var captionFileURL: URL?
-    
+
     init(episode: PodcastEpisodeInfo, podcastTitle: String, localAudioPath: String?) {
         self.episode = episode
         self.podcastTitle = podcastTitle
         self.localAudioPath = localAudioPath
     }
-    
+
+    func setModelContext(_ context: ModelContext) {
+        self.modelContext = context
+    }
+
+    /// Gets the podcast language from SwiftData, falling back to "en" if not found
+    private func getPodcastLanguage() -> String {
+        guard let context = modelContext else { return "en" }
+
+        let descriptor = FetchDescriptor<PodcastInfoModel>(
+            predicate: #Predicate { $0.podcastInfo.title == podcastTitle }
+        )
+
+        do {
+            let results = try context.fetch(descriptor)
+            if let podcastModel = results.first {
+                return podcastModel.podcastInfo.language
+            }
+        } catch {
+            logger.error("Failed to fetch podcast language: \(error.localizedDescription)")
+        }
+
+        return "en"  // Default fallback
+    }
+
     func checkTranscriptStatus() {
         Task {
-            // Check if model is ready
-            let transcriptService = TranscriptService()
+            // Get podcast language and create transcript service
+            let language = getPodcastLanguage()
+            let transcriptService = TranscriptService(language: language)
             isModelReady = await transcriptService.isModelReady()
-            
+
             // Check if transcript already exists
             let exists = await fileStorage.captionFileExists(
                 for: episode.title,
                 podcastTitle: podcastTitle
             )
-            
+
             if exists {
                 await loadExistingTranscript()
             }
         }
     }
-    
+
     func generateTranscript() {
         guard let audioPath = localAudioPath else {
             state = .error("No local audio file available. Please download the episode first.")
@@ -266,7 +295,9 @@ class TranscriptGenerationViewModel: ObservableObject {
         Task {
             do {
                 let audioURL = URL(fileURLWithPath: audioPath)
-                let transcriptService = TranscriptService()
+                // Get podcast language and create transcript service
+                let language = getPodcastLanguage()
+                let transcriptService = TranscriptService(language: language)
 
                 // Always initialize transcriber/analyzer (even if model is already downloaded)
                 let modelReady = await transcriptService.isModelReady()
@@ -291,7 +322,9 @@ class TranscriptGenerationViewModel: ObservableObject {
                 guard await transcriptService.isInitialized() else {
                     throw NSError(
                         domain: "TranscriptService", code: 1,
-                        userInfo: [NSLocalizedDescriptionKey: "Failed to initialize transcription service"]
+                        userInfo: [
+                            NSLocalizedDescriptionKey: "Failed to initialize transcription service"
+                        ]
                     )
                 }
 
@@ -316,37 +349,40 @@ class TranscriptGenerationViewModel: ObservableObject {
             }
         }
     }
-    
+
     func regenerateTranscript() {
         // Delete existing transcript
         Task {
             do {
-                if await fileStorage.captionFileExists(for: episode.title, podcastTitle: podcastTitle) {
-                    try await fileStorage.deleteCaptionFile(for: episode.title, podcastTitle: podcastTitle)
+                if await fileStorage.captionFileExists(
+                    for: episode.title, podcastTitle: podcastTitle)
+                {
+                    try await fileStorage.deleteCaptionFile(
+                        for: episode.title, podcastTitle: podcastTitle)
                 }
             } catch {
                 logger.error("Failed to delete existing transcript: \(error.localizedDescription)")
             }
-            
+
             // Generate new transcript
             await MainActor.run {
                 generateTranscript()
             }
         }
     }
-    
+
     private func loadExistingTranscript() async {
         do {
             let content = try await fileStorage.loadCaptionFile(
                 for: episode.title,
                 podcastTitle: podcastTitle
             )
-            
+
             let captionURL = await fileStorage.captionFilePath(
                 for: episode.title,
                 podcastTitle: podcastTitle
             )
-            
+
             await MainActor.run {
                 self.transcriptText = content
                 self.captionFileURL = captionURL

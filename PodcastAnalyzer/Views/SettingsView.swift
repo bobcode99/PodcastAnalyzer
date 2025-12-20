@@ -101,6 +101,24 @@ struct SettingsView: View {
 
                 // MARK: - Transcript Section
                 Section {
+                    // Language picker
+                    Picker(selection: $viewModel.selectedTranscriptLocale) {
+                        ForEach(SettingsViewModel.availableTranscriptLocales) { locale in
+                            Text(locale.name).tag(locale.id)
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: "globe")
+                                .foregroundColor(.blue)
+                                .frame(width: 24)
+                            Text("Language")
+                        }
+                    }
+                    .onChange(of: viewModel.selectedTranscriptLocale) { _, newValue in
+                        viewModel.setSelectedTranscriptLocale(newValue)
+                    }
+
+                    // Speech model status
                     HStack {
                         Image(systemName: "text.bubble")
                             .foregroundColor(.blue)
@@ -118,7 +136,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Transcript")
                 } footer: {
-                    Text("Speech model is required for generating transcripts from audio")
+                    Text("Download speech models here. When generating transcripts, each podcast uses its own language from the RSS feed.")
                 }
 
                 // MARK: - About Section
