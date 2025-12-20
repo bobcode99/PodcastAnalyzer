@@ -22,12 +22,13 @@ struct EpisodeDetailView: View {
     @State private var refreshTrigger = false
     let playbackTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
-    init(episode: PodcastEpisodeInfo, podcastTitle: String, fallbackImageURL: String?) {
+    init(episode: PodcastEpisodeInfo, podcastTitle: String, fallbackImageURL: String?, podcastLanguage: String = "en") {
         _viewModel = State(
             initialValue: EpisodeDetailViewModel(
                 episode: episode,
                 podcastTitle: podcastTitle,
-                fallbackImageURL: fallbackImageURL
+                fallbackImageURL: fallbackImageURL,
+                podcastLanguage: podcastLanguage
             ))
     }
 
@@ -71,6 +72,19 @@ struct EpisodeDetailView: View {
                                 Label("Download Audio", systemImage: "arrow.down.circle")
                             }
                         }
+
+                        Divider()
+
+                        // Auto-transcript toggle
+                        Toggle(isOn: Binding(
+                            get: { DownloadManager.shared.autoTranscriptEnabled },
+                            set: { DownloadManager.shared.autoTranscriptEnabled = $0 }
+                        )) {
+                            Label("Auto-Generate Transcripts", systemImage: "text.bubble")
+                        }
+
+                        Divider()
+
                         Button(action: { viewModel.reportIssue() }) {
                             Label("Report Issue", systemImage: "exclamationmark.triangle")
                         }
@@ -209,6 +223,18 @@ struct EpisodeDetailView: View {
                 .padding(.horizontal, 12).padding(.vertical, 8)
             }
             .buttonStyle(.bordered).tint(.orange)
+        case .finishing:
+            HStack(spacing: 4) {
+                ProgressView().scaleEffect(0.6)
+                Text("Saving...").font(.caption).fontWeight(.medium)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Color.blue.opacity(0.1))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+            )
         case .downloaded:
             Button(action: { showDeleteConfirmation = true }) {
                 HStack(spacing: 4) {
@@ -426,11 +452,21 @@ struct EpisodeDetailView: View {
 
             case .transcribing(let progress):
                 VStack(spacing: 12) {
-                    ProgressView().scaleEffect(1.5)
+                    // Show progress bar with percentage
+                    ProgressView(value: progress)
+                        .frame(width: 200)
+                        .tint(.blue)
+
                     Text("Generating Transcript...").font(.headline)
-                    if progress > 0 {
-                        Text("Processing audio...").font(.caption).foregroundColor(.secondary)
-                    }
+
+                    Text("\(Int(progress * 100))%")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.blue)
+
+                    Text("Processing audio...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
 
             case .completed:
@@ -493,6 +529,14 @@ struct EpisodeDetailView: View {
                 ProgressView()
                     .scaleEffect(0.7)
                 Text("\(Int(progress * 100))%")
+            }
+            .font(.caption)
+            .foregroundColor(.blue)
+        case .finishing:
+            HStack(spacing: 4) {
+                ProgressView()
+                    .scaleEffect(0.7)
+                Text("Saving...")
             }
             .font(.caption)
             .foregroundColor(.blue)

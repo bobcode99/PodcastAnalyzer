@@ -8,6 +8,24 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - Episode Filter Enum
+
+enum EpisodeFilter: String, CaseIterable {
+    case all = "All"
+    case unplayed = "Unplayed"
+    case played = "Played"
+    case downloaded = "Downloaded"
+
+    var icon: String {
+        switch self {
+        case .all: return "list.bullet"
+        case .unplayed: return "circle"
+        case .played: return "checkmark.circle"
+        case .downloaded: return "arrow.down.circle.fill"
+        }
+    }
+}
+
 struct EpisodeListView: View {
     let podcastModel: PodcastInfoModel
     @Environment(\.modelContext) private var modelContext
@@ -20,7 +38,59 @@ struct EpisodeListView: View {
     @State private var isDescriptionExpanded = false
     @State private var refreshTimer: Timer?
 
+    // Filter and sort state
+    @State private var selectedFilter: EpisodeFilter = .all
+    @State private var sortOldestFirst: Bool = false
+
     private let rssService = PodcastRssService()
+
+    // MARK: - Filtered and Sorted Episodes
+
+    private var filteredEpisodes: [PodcastEpisodeInfo] {
+        var episodes = podcastModel.podcastInfo.episodes
+
+        // Apply filter
+        switch selectedFilter {
+        case .all:
+            break // No filtering
+        case .unplayed:
+            episodes = episodes.filter { episode in
+                let key = makeEpisodeKey(episode)
+                guard let model = episodeModels[key] else { return true } // Not played = unplayed
+                return !model.isCompleted && model.progress < 0.1
+            }
+        case .played:
+            episodes = episodes.filter { episode in
+                let key = makeEpisodeKey(episode)
+                guard let model = episodeModels[key] else { return false }
+                return model.isCompleted || model.progress >= 0.1
+            }
+        case .downloaded:
+            episodes = episodes.filter { episode in
+                let state = downloadManager.getDownloadState(
+                    episodeTitle: episode.title,
+                    podcastTitle: podcastModel.podcastInfo.title
+                )
+                if case .downloaded = state { return true }
+                return false
+            }
+        }
+
+        // Apply sort
+        if sortOldestFirst {
+            episodes = episodes.sorted { (e1, e2) in
+                guard let d1 = e1.pubDate, let d2 = e2.pubDate else { return false }
+                return d1 < d2
+            }
+        }
+        // Default is newest first (as returned by RSS)
+
+        return episodes
+    }
+
+    private var filteredEpisodeCount: Int {
+        filteredEpisodes.count
+    }
 
     var body: some View {
         List {
@@ -74,13 +144,59 @@ struct EpisodeListView: View {
             .listRowSeparator(.hidden)
             .padding(.bottom, 10)
 
+            // MARK: - Filter and Sort Bar
+            VStack(spacing: 12) {
+                // Filter chips
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(EpisodeFilter.allCases, id: \.self) { filter in
+                            FilterChip(
+                                title: filter.rawValue,
+                                icon: filter.icon,
+                                isSelected: selectedFilter == filter
+                            ) {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    selectedFilter = filter
+                                }
+                            }
+                        }
+
+                        Divider()
+                            .frame(height: 24)
+
+                        // Sort toggle
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                sortOldestFirst.toggle()
+                            }
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: sortOldestFirst ? "arrow.up" : "arrow.down")
+                                    .font(.system(size: 12))
+                                Text(sortOldestFirst ? "Oldest" : "Newest")
+                                    .font(.caption)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.gray.opacity(0.15))
+                            .foregroundColor(.primary)
+                            .cornerRadius(16)
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+            .listRowSeparator(.hidden)
+
             // MARK: - Episodes List
-            Section(header: Text("Episodes (\(podcastModel.podcastInfo.episodes.count))")) {
-                ForEach(podcastModel.podcastInfo.episodes, id: \.title) { episode in
+            Section(header: Text("Episodes (\(filteredEpisodeCount))")) {
+                ForEach(filteredEpisodes, id: \.title) { episode in
                     EpisodeRowView(
                         episode: episode,
                         podcastTitle: podcastModel.podcastInfo.title,
                         fallbackImageURL: podcastModel.podcastInfo.imageURL,
+                        podcastLanguage: podcastModel.podcastInfo.language,
                         downloadManager: downloadManager,
                         episodeModel: episodeModels[makeEpisodeKey(episode)],
                         onToggleStar: { toggleStar(for: episode) },
@@ -96,6 +212,27 @@ struct EpisodeListView: View {
         .listStyle(.plain)
         .navigationTitle(podcastModel.podcastInfo.title)
         .iosNavigationBarTitleDisplayModeInline()
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    // Auto-transcript toggle
+                    Toggle(isOn: $downloadManager.autoTranscriptEnabled) {
+                        Label("Auto-Generate Transcripts", systemImage: "text.bubble")
+                    }
+
+                    Divider()
+
+                    // Refresh podcast
+                    Button(action: {
+                        Task { await refreshPodcast() }
+                    }) {
+                        Label("Refresh Episodes", systemImage: "arrow.clockwise")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
         .onAppear {
             loadEpisodeModels()
             // Start periodic refresh for playback state updates
@@ -199,7 +336,11 @@ struct EpisodeListView: View {
     }
 
     private func downloadEpisode(_ episode: PodcastEpisodeInfo) {
-        downloadManager.downloadEpisode(episode: episode, podcastTitle: podcastModel.podcastInfo.title)
+        downloadManager.downloadEpisode(
+            episode: episode,
+            podcastTitle: podcastModel.podcastInfo.title,
+            language: podcastModel.podcastInfo.language
+        )
     }
 
     private func deleteDownload(_ episode: PodcastEpisodeInfo) {
@@ -213,6 +354,7 @@ struct EpisodeRowView: View {
     let episode: PodcastEpisodeInfo
     let podcastTitle: String
     let fallbackImageURL: String?
+    let podcastLanguage: String
     @ObservedObject var downloadManager: DownloadManager
     let episodeModel: EpisodeDownloadModel?
     let onToggleStar: () -> Void
@@ -301,7 +443,8 @@ struct EpisodeRowView: View {
         NavigationLink(destination: EpisodeDetailView(
             episode: episode,
             podcastTitle: podcastTitle,
-            fallbackImageURL: fallbackImageURL
+            fallbackImageURL: fallbackImageURL,
+            podcastLanguage: podcastLanguage
         )) {
             HStack(alignment: .top, spacing: 12) {
                 // Episode thumbnail
@@ -422,6 +565,14 @@ struct EpisodeRowView: View {
                                     .font(.caption2)
                             }
                             .foregroundColor(.orange)
+                        } else if case .finishing = downloadState {
+                            HStack(spacing: 4) {
+                                ProgressView()
+                                    .scaleEffect(0.5)
+                                Text("Saving...")
+                                    .font(.caption2)
+                            }
+                            .foregroundColor(.blue)
                         }
 
                         Spacer()
@@ -450,6 +601,9 @@ struct EpisodeRowView: View {
                 }) {
                     Label("Cancel Download", systemImage: "xmark.circle")
                 }
+            } else if case .finishing = downloadState {
+                // Show saving status - no action available
+                Label("Saving...", systemImage: "arrow.down.circle.dotted")
             } else {
                 Button(action: onDownload) {
                     Label("Download", systemImage: "arrow.down.circle")
@@ -482,6 +636,13 @@ struct EpisodeRowView: View {
                     Label("Cancel", systemImage: "xmark.circle")
                 }
                 .tint(.orange)
+            } else if case .finishing = downloadState {
+                // No swipe action while saving - show disabled state
+                Button(action: {}) {
+                    Label("Saving", systemImage: "arrow.down.circle.dotted")
+                }
+                .tint(.gray)
+                .disabled(true)
             } else if episode.audioURL != nil {
                 Button(action: onDownload) {
                     Label("Download", systemImage: "arrow.down.circle")
@@ -520,6 +681,32 @@ struct EpisodeRowView: View {
             imageURL: imageURL,
             useDefaultSpeed: useDefaultSpeed
         )
+    }
+}
+
+// MARK: - Filter Chip Component
+
+struct FilterChip: View {
+    let title: String
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(isSelected ? .semibold : .regular)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(isSelected ? Color.blue : Color.gray.opacity(0.15))
+            .foregroundColor(isSelected ? .white : .primary)
+            .cornerRadius(16)
+        }
     }
 }
 

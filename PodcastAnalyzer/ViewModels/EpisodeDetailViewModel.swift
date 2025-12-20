@@ -70,10 +70,14 @@ final class EpisodeDetailViewModel {
     // Cancellables for observation
     private var cancellables = Set<AnyCancellable>()
 
-    init(episode: PodcastEpisodeInfo, podcastTitle: String, fallbackImageURL: String?) {
+    // Podcast language for transcription
+    var podcastLanguage: String = "en"
+
+    init(episode: PodcastEpisodeInfo, podcastTitle: String, fallbackImageURL: String?, podcastLanguage: String = "en") {
         self.episode = episode
         self.podcastTitle = podcastTitle
         self.fallbackImageURL = fallbackImageURL
+        self.podcastLanguage = podcastLanguage
         parseDescription()
 
         // Initialize download state
@@ -228,7 +232,7 @@ final class EpisodeDetailViewModel {
     // MARK: - Download Management
 
     func startDownload() {
-        downloadManager.downloadEpisode(episode: episode, podcastTitle: podcastTitle)
+        downloadManager.downloadEpisode(episode: episode, podcastTitle: podcastTitle, language: podcastLanguage)
     }
 
     func cancelDownload() {
@@ -527,7 +531,27 @@ final class EpisodeDetailViewModel {
                     transcriptState = .transcribing(progress: 0)
                 }
 
-                let srtContent = try await transcriptService.audioToSRT(inputFile: audioURL)
+                // Use the new progress-reporting method
+                var finalSRTContent: String?
+
+                for try await progressUpdate in await transcriptService.audioToSRTWithProgress(inputFile: audioURL) {
+                    await MainActor.run {
+                        transcriptState = .transcribing(progress: progressUpdate.progress)
+                    }
+
+                    if progressUpdate.isComplete {
+                        finalSRTContent = progressUpdate.srtContent
+                    }
+                }
+
+                guard let srtContent = finalSRTContent else {
+                    throw NSError(
+                        domain: "TranscriptService", code: 3,
+                        userInfo: [
+                            NSLocalizedDescriptionKey: "Transcription completed but no content was generated"
+                        ]
+                    )
+                }
 
                 _ = try await fileStorage.saveCaptionFile(
                     content: srtContent,
@@ -615,61 +639,67 @@ final class EpisodeDetailViewModel {
             .replacingOccurrences(of: "\r", with: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Split by double newlines (standard SRT format)
-        let rawEntries = normalizedText.components(separatedBy: "\n\n")
+        // Use regex to split SRT into entries
+        // Pattern matches: index number at start of line, followed by timestamp line
+        let entryPattern = #"(?:^|\n)(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n"#
 
-        logger.info(
-            "Raw SRT text length: \(self.transcriptText.count), Found \(rawEntries.count) potential entries"
-        )
+        guard let regex = try? NSRegularExpression(pattern: entryPattern, options: []) else {
+            logger.error("Failed to create SRT regex pattern")
+            return
+        }
 
-        for (index, rawEntry) in rawEntries.enumerated() {
-            let entry = rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !entry.isEmpty else { continue }
+        let nsText = normalizedText as NSString
+        let matches = regex.matches(in: normalizedText, options: [], range: NSRange(location: 0, length: nsText.length))
 
-            // Split entry into lines
-            let lines = entry.components(separatedBy: "\n")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
+        logger.info("Raw SRT text length: \(self.transcriptText.count), Found \(matches.count) potential entries via regex")
 
-            guard lines.count >= 3 else {
-                logger.warning(
-                    "Entry \(index + 1): insufficient lines (\(lines.count)). First 200 chars: \(entry.prefix(200))"
-                )
+        for (index, match) in matches.enumerated() {
+            // Extract captured groups
+            guard match.numberOfRanges >= 4 else { continue }
+
+            let startTimeRange = match.range(at: 2)
+            let endTimeRange = match.range(at: 3)
+
+            guard startTimeRange.location != NSNotFound,
+                  endTimeRange.location != NSNotFound else { continue }
+
+            let startTimeStr = nsText.substring(with: startTimeRange)
+            let endTimeStr = nsText.substring(with: endTimeRange)
+
+            guard let startTime = parseSRTTime(startTimeStr),
+                  let endTime = parseSRTTime(endTimeStr) else {
+                logger.warning("Entry \(index + 1): failed to parse times '\(startTimeStr)' -> '\(endTimeStr)'")
                 continue
             }
 
-            // Find the timestamp line (contains " --> ")
-            var timeLineIndex: Int?
-            for (i, line) in lines.enumerated() {
-                if line.contains(" --> ") {
-                    timeLineIndex = i
-                    break
+            // Find text: starts after this match, ends at next match or end of string
+            let textStart = match.range.location + match.range.length
+            let textEnd: Int
+            if index + 1 < matches.count {
+                // Find the start of the next entry's index number
+                let nextMatch = matches[index + 1]
+                textEnd = nextMatch.range.location
+            } else {
+                textEnd = nsText.length
+            }
+
+            guard textStart < textEnd else { continue }
+
+            let textRange = NSRange(location: textStart, length: textEnd - textStart)
+            var text = nsText.substring(with: textRange)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "\n", with: " ")
+
+            // Remove any trailing index number that belongs to the next entry
+            if let lastNewlineIndex = text.lastIndex(of: "\n") {
+                let afterNewline = String(text[text.index(after: lastNewlineIndex)...])
+                if afterNewline.trimmingCharacters(in: .whitespaces).allSatisfy({ $0.isNumber }) {
+                    text = String(text[..<lastNewlineIndex])
                 }
             }
 
-            guard let timeIndex = timeLineIndex else {
-                logger.warning("Entry \(index + 1): no timestamp found. Lines: \(lines)")
-                continue
-            }
+            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let timeLine = lines[timeIndex]
-            let times = timeLine.components(separatedBy: " --> ")
-            guard times.count == 2 else {
-                logger.warning("Entry \(index + 1): invalid timestamp format '\(timeLine)'")
-                continue
-            }
-
-            guard let startTime = parseSRTTime(times[0].trimmingCharacters(in: .whitespaces)),
-                let endTime = parseSRTTime(times[1].trimmingCharacters(in: .whitespaces))
-            else {
-                logger.warning(
-                    "Entry \(index + 1): failed to parse times '\(times[0])' -> '\(times[1])'")
-                continue
-            }
-
-            // Get text (all lines after the timestamp)
-            let textLines = Array(lines[(timeIndex + 1)...])
-            let text = textLines.joined(separator: " ").trimmingCharacters(in: .whitespaces)
             guard !text.isEmpty else {
                 logger.warning("Entry \(index + 1): empty text")
                 continue
@@ -686,7 +716,7 @@ final class EpisodeDetailViewModel {
 
         transcriptSegments = segments
         logger.info(
-            "Successfully parsed \(segments.count) transcript segments from \(rawEntries.count) raw entries"
+            "Successfully parsed \(segments.count) transcript segments from \(matches.count) regex matches"
         )
 
         // Debug: log first few segments if we have any

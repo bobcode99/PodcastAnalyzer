@@ -248,28 +248,62 @@ class EnhancedAudioManager: NSObject {
 
     private func parseSRT(_ srtContent: String) -> [CaptionSegment] {
         var segments: [CaptionSegment] = []
-        let entries = srtContent.components(separatedBy: "\n\n")
 
-        for entry in entries {
-            let lines = entry.components(separatedBy: "\n")
-            guard lines.count >= 3 else { continue }
+        // Normalize line endings
+        let normalizedText = srtContent.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let timeLine = lines[1]
-            let textLines = Array(lines[2...])
-            let text = textLines.joined(separator: " ")
+        // Use regex to split SRT into entries (handles single or double newline separators)
+        // Pattern matches: index number at start of line, followed by timestamp line
+        let entryPattern = #"(?:^|\n)(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n"#
 
-            // Parse time format: 00:00:10,500 --> 00:00:13,250
-            let times = timeLine.components(separatedBy: " --> ")
-            guard times.count == 2 else { continue }
+        guard let regex = try? NSRegularExpression(pattern: entryPattern, options: []) else {
+            logger.error("Failed to create SRT regex pattern")
+            return segments
+        }
 
-            if let startTime = parseTimeString(times[0]),
-               let endTime = parseTimeString(times[1]) {
-                segments.append(CaptionSegment(
-                    startTime: startTime,
-                    endTime: endTime,
-                    text: text
-                ))
+        let nsText = normalizedText as NSString
+        let matches = regex.matches(in: normalizedText, options: [], range: NSRange(location: 0, length: nsText.length))
+
+        for (index, match) in matches.enumerated() {
+            guard match.numberOfRanges >= 4 else { continue }
+
+            let startTimeRange = match.range(at: 2)
+            let endTimeRange = match.range(at: 3)
+
+            guard startTimeRange.location != NSNotFound,
+                  endTimeRange.location != NSNotFound else { continue }
+
+            let startTimeStr = nsText.substring(with: startTimeRange)
+            let endTimeStr = nsText.substring(with: endTimeRange)
+
+            guard let startTime = parseTimeString(startTimeStr),
+                  let endTime = parseTimeString(endTimeStr) else { continue }
+
+            // Find text: starts after this match, ends at next match or end of string
+            let textStart = match.range.location + match.range.length
+            let textEnd: Int
+            if index + 1 < matches.count {
+                textEnd = matches[index + 1].range.location
+            } else {
+                textEnd = nsText.length
             }
+
+            guard textStart < textEnd else { continue }
+
+            let textRange = NSRange(location: textStart, length: textEnd - textStart)
+            let text = nsText.substring(with: textRange)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "\n", with: " ")
+
+            guard !text.isEmpty else { continue }
+
+            segments.append(CaptionSegment(
+                startTime: startTime,
+                endTime: endTime,
+                text: text
+            ))
         }
 
         return segments

@@ -305,6 +305,109 @@ public actor TranscriptService {
         return transcriptToSRT(transcript: transcript, maxLength: maxLength)
     }
 
+    /// Transcription progress update
+    public struct TranscriptionProgress {
+        public let progress: Double  // 0.0 to 1.0
+        public let currentTimeSeconds: TimeInterval
+        public let totalDurationSeconds: TimeInterval
+        public let isComplete: Bool
+        public let srtContent: String?  // Only set when isComplete = true
+    }
+
+    /// Converts audio file to SRT subtitle format with progress updates
+    /// - Parameter inputFile: The URL of the audio file to transcribe
+    /// - Parameter maxLength: Maximum length for each subtitle entry (optional, defaults to nil)
+    /// - Returns: AsyncStream of TranscriptionProgress updates
+    public func audioToSRTWithProgress(inputFile: URL, maxLength: Int? = nil) -> AsyncThrowingStream<TranscriptionProgress, Error> {
+        return AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    // Ensure transcriber and analyzer are initialized
+                    guard let transcriber = self.transcriber, let analyzer = self.analyzer else {
+                        throw NSError(
+                            domain: "TranscriptService", code: 1,
+                            userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "Transcriber or analyzer not initialized. Call setupAndInstallAssets() first."
+                            ])
+                    }
+
+                    guard self.needsAudioTimeRange else {
+                        throw NSError(
+                            domain: "TranscriptService", code: 2,
+                            userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "audioTimeRange must be enabled to generate SRT subtitles."
+                            ])
+                    }
+
+                    // Download if remote URL, otherwise use local file
+                    let audioURL = try await self.resolveAudioURL(inputFile)
+                    let audioFile = try AVAudioFile(forReading: audioURL)
+                    let audioFileDuration: TimeInterval =
+                        Double(audioFile.length) / audioFile.processingFormat.sampleRate
+
+                    self.logger.info("Audio file duration for SRT with progress: \(audioFileDuration) seconds")
+
+                    // Send initial progress
+                    continuation.yield(TranscriptionProgress(
+                        progress: 0.0,
+                        currentTimeSeconds: 0,
+                        totalDurationSeconds: audioFileDuration,
+                        isComplete: false,
+                        srtContent: nil
+                    ))
+
+                    // Start the analyzer
+                    try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+
+                    // Collect transcript results with progress
+                    var transcript: AttributedString = ""
+                    var lastReportedTime: TimeInterval = 0
+
+                    for try await result in transcriber.results {
+                        transcript += result.text
+
+                        // Extract the latest time from the result to calculate progress
+                        for run in result.text.runs {
+                            if let timeRange = run.audioTimeRange {
+                                let currentTime = timeRange.end.seconds
+                                if currentTime > lastReportedTime {
+                                    lastReportedTime = currentTime
+                                    let progress = min(currentTime / audioFileDuration, 0.99)  // Cap at 99% until complete
+
+                                    continuation.yield(TranscriptionProgress(
+                                        progress: progress,
+                                        currentTimeSeconds: currentTime,
+                                        totalDurationSeconds: audioFileDuration,
+                                        isComplete: false,
+                                        srtContent: nil
+                                    ))
+                                }
+                            }
+                        }
+                    }
+
+                    // Convert transcript to SRT format
+                    let srtContent = self.transcriptToSRT(transcript: transcript, maxLength: maxLength)
+
+                    // Send final progress with completed content
+                    continuation.yield(TranscriptionProgress(
+                        progress: 1.0,
+                        currentTimeSeconds: audioFileDuration,
+                        totalDurationSeconds: audioFileDuration,
+                        isComplete: true,
+                        srtContent: srtContent
+                    ))
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
     /// Formats a TimeInterval into SRT time format (HH:MM:SS,mmm)
     /// - Parameter timeInterval: The time interval in seconds
     /// - Returns: Formatted time string in SRT format
