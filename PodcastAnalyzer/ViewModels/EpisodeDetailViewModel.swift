@@ -13,6 +13,28 @@ import os.log
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "EpisodeDetailViewModel")
 
+/// Represents a single transcript segment with timing information
+struct TranscriptSegment: Identifiable, Equatable {
+    let id: Int
+    let startTime: TimeInterval
+    let endTime: TimeInterval
+    let text: String
+
+    /// Formatted start time string (MM:SS or HH:MM:SS)
+    var formattedStartTime: String {
+        let totalSeconds = Int(startTime)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            return String(format: "%d:%02d", minutes, seconds)
+        }
+    }
+}
+
 @Observable
 final class EpisodeDetailViewModel {
 
@@ -36,6 +58,10 @@ final class EpisodeDetailViewModel {
     var transcriptText: String = ""
     var isModelReady: Bool = false
     private let fileStorage = FileStorageManager.shared
+
+    // Parsed transcript segments for live captions
+    var transcriptSegments: [TranscriptSegment] = []
+    var transcriptSearchQuery: String = ""
 
     // Playback state from SwiftData
     private var episodeModel: EpisodeDownloadModel?
@@ -512,6 +538,7 @@ final class EpisodeDetailViewModel {
                 await MainActor.run {
                     transcriptText = srtContent
                     transcriptState = .completed
+                    parseTranscriptSegments()
                 }
 
             } catch {
@@ -536,6 +563,7 @@ final class EpisodeDetailViewModel {
             await MainActor.run {
                 transcriptText = content
                 transcriptState = .completed
+                parseTranscriptSegments()
             }
         } catch {
             logger.error("Failed to load transcript: \(error.localizedDescription)")
@@ -569,5 +597,157 @@ final class EpisodeDetailViewModel {
 
         // Join with newlines to preserve paragraph breaks
         return cleanLines.joined(separator: "\n\n")
+    }
+
+    // MARK: - Live Captions Methods
+
+    /// Parses SRT content into transcript segments
+    func parseTranscriptSegments() {
+        guard !transcriptText.isEmpty else {
+            transcriptSegments = []
+            return
+        }
+
+        var segments: [TranscriptSegment] = []
+
+        // Normalize line endings
+        let normalizedText = transcriptText.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Split by double newlines (standard SRT format)
+        let rawEntries = normalizedText.components(separatedBy: "\n\n")
+
+        logger.info(
+            "Raw SRT text length: \(self.transcriptText.count), Found \(rawEntries.count) potential entries"
+        )
+
+        for (index, rawEntry) in rawEntries.enumerated() {
+            let entry = rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !entry.isEmpty else { continue }
+
+            // Split entry into lines
+            let lines = entry.components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+
+            guard lines.count >= 3 else {
+                logger.warning(
+                    "Entry \(index + 1): insufficient lines (\(lines.count)). First 200 chars: \(entry.prefix(200))"
+                )
+                continue
+            }
+
+            // Find the timestamp line (contains " --> ")
+            var timeLineIndex: Int?
+            for (i, line) in lines.enumerated() {
+                if line.contains(" --> ") {
+                    timeLineIndex = i
+                    break
+                }
+            }
+
+            guard let timeIndex = timeLineIndex else {
+                logger.warning("Entry \(index + 1): no timestamp found. Lines: \(lines)")
+                continue
+            }
+
+            let timeLine = lines[timeIndex]
+            let times = timeLine.components(separatedBy: " --> ")
+            guard times.count == 2 else {
+                logger.warning("Entry \(index + 1): invalid timestamp format '\(timeLine)'")
+                continue
+            }
+
+            guard let startTime = parseSRTTime(times[0].trimmingCharacters(in: .whitespaces)),
+                let endTime = parseSRTTime(times[1].trimmingCharacters(in: .whitespaces))
+            else {
+                logger.warning(
+                    "Entry \(index + 1): failed to parse times '\(times[0])' -> '\(times[1])'")
+                continue
+            }
+
+            // Get text (all lines after the timestamp)
+            let textLines = Array(lines[(timeIndex + 1)...])
+            let text = textLines.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty else {
+                logger.warning("Entry \(index + 1): empty text")
+                continue
+            }
+
+            segments.append(
+                TranscriptSegment(
+                    id: index,
+                    startTime: startTime,
+                    endTime: endTime,
+                    text: text
+                ))
+        }
+
+        transcriptSegments = segments
+        logger.info(
+            "Successfully parsed \(segments.count) transcript segments from \(rawEntries.count) raw entries"
+        )
+
+        // Debug: log first few segments if we have any
+        if !segments.isEmpty {
+            logger.info("First segment: \(segments[0].text.prefix(50))...")
+            if segments.count > 1 {
+                logger.info("Second segment: \(segments[1].text.prefix(50))...")
+            }
+        }
+    }
+
+    /// Parses SRT time format (HH:MM:SS,mmm) to TimeInterval
+    private func parseSRTTime(_ timeString: String) -> TimeInterval? {
+        // Format: 00:00:10,500
+        let components = timeString.replacingOccurrences(of: ",", with: ".").components(
+            separatedBy: ":")
+        guard components.count == 3 else { return nil }
+
+        guard let hours = Double(components[0]),
+            let minutes = Double(components[1]),
+            let seconds = Double(components[2])
+        else {
+            return nil
+        }
+
+        return hours * 3600 + minutes * 60 + seconds
+    }
+
+    /// Returns filtered segments based on search query
+    var filteredTranscriptSegments: [TranscriptSegment] {
+        guard !transcriptSearchQuery.isEmpty else {
+            return transcriptSegments
+        }
+
+        let query = transcriptSearchQuery.lowercased()
+        return transcriptSegments.filter { segment in
+            segment.text.lowercased().contains(query)
+        }
+    }
+
+    /// Returns the currently playing segment based on playback time
+    var currentSegmentId: Int? {
+        guard isPlayingThisEpisode else { return nil }
+        let time = audioManager.currentTime
+
+        return transcriptSegments.first { segment in
+            time >= segment.startTime && time <= segment.endTime
+        }?.id
+    }
+
+    /// Seeks to the start of a transcript segment and starts playback if needed
+    func seekToSegment(_ segment: TranscriptSegment) {
+        // If not playing this episode, start playback first
+        if !isPlayingThisEpisode {
+            playAction()
+            // Give player time to initialize, then seek
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.audioManager.seek(to: segment.startTime)
+            }
+        } else {
+            audioManager.seek(to: segment.startTime)
+        }
     }
 }

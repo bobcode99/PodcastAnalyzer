@@ -440,11 +440,12 @@ public actor TranscriptService {
             let entryNumber = index + 1
             let startTime = formatSRTTime(range.start.seconds)
             let endTime = formatSRTTime(range.end.seconds)
-            return "\(entryNumber)\n\(startTime) --> \(endTime)\n\(text)\n"
+            // Standard SRT format: index, timestamp, text (no trailing newline - separator adds it)
+            return "\(entryNumber)\n\(startTime) --> \(endTime)\n\(text)"
         }
 
-        // Join with blank line between entries (standard SRT format)
-        return srtEntries.joined(separator: "\n")
+        // Join with double newline between entries (standard SRT format)
+        return srtEntries.joined(separator: "\n\n")
     }
 
 }

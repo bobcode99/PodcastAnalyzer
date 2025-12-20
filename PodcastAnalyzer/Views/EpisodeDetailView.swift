@@ -5,8 +5,10 @@
 //  Redesigned with tabs (Summary, Transcript, Keywords) and action buttons
 //
 
-import SwiftUI
+import Combine
+import Foundation
 import SwiftData
+import SwiftUI
 
 struct EpisodeDetailView: View {
     @State private var viewModel: EpisodeDetailViewModel
@@ -16,12 +18,17 @@ struct EpisodeDetailView: View {
     @State private var showCopySuccess = false
     @State private var showDeleteConfirmation = false
 
+    // Timer to refresh transcript highlighting during playback
+    @State private var refreshTrigger = false
+    let playbackTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+
     init(episode: PodcastEpisodeInfo, podcastTitle: String, fallbackImageURL: String?) {
-        _viewModel = State(initialValue: EpisodeDetailViewModel(
-            episode: episode,
-            podcastTitle: podcastTitle,
-            fallbackImageURL: fallbackImageURL
-        ))
+        _viewModel = State(
+            initialValue: EpisodeDetailViewModel(
+                episode: episode,
+                podcastTitle: podcastTitle,
+                fallbackImageURL: fallbackImageURL
+            ))
     }
 
     var body: some View {
@@ -105,7 +112,7 @@ struct EpisodeDetailView: View {
             }
         }
         .alert("Copied", isPresented: $showCopySuccess) {
-            Button("OK", role: .cancel) { }
+            Button("OK", role: .cancel) {}
         } message: {
             Text("Transcript copied to clipboard")
         }
@@ -117,9 +124,11 @@ struct EpisodeDetailView: View {
             Button("Delete", role: .destructive) {
                 viewModel.deleteDownload()
             }
-            Button("Cancel", role: .cancel) { }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Are you sure you want to delete this downloaded episode? You can download it again later.")
+            Text(
+                "Are you sure you want to delete this downloaded episode? You can download it again later."
+            )
         }
         .onAppear {
             viewModel.setModelContext(modelContext)
@@ -203,11 +212,17 @@ struct EpisodeDetailView: View {
                     viewModel.playAction()
                 }) {
                     HStack(spacing: 4) {
-                        Image(systemName: viewModel.isPlayingThisEpisode && viewModel.audioManager.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 12))
-                        Text(viewModel.isPlayingThisEpisode && viewModel.audioManager.isPlaying ? "Pause" : "Play")
-                            .font(.caption)
-                            .fontWeight(.medium)
+                        Image(
+                            systemName: viewModel.isPlayingThisEpisode
+                                && viewModel.audioManager.isPlaying ? "pause.fill" : "play.fill"
+                        )
+                        .font(.system(size: 12))
+                        Text(
+                            viewModel.isPlayingThisEpisode && viewModel.audioManager.isPlaying
+                                ? "Pause" : "Play"
+                        )
+                        .font(.caption)
+                        .fontWeight(.medium)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
@@ -352,40 +367,101 @@ struct EpisodeDetailView: View {
     // MARK: - Transcript Tab
 
     private var transcriptTab: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                // Status section
-                transcriptStatusSection
+        VStack(spacing: 0) {
+            // Status section (only show when no transcript)
+            if !viewModel.hasTranscript {
+                ScrollView {
+                    transcriptStatusSection
+                        .padding(.vertical)
+                }
+            } else {
+                // Live captions interface
+                liveCaptionsView
+            }
+        }
+        .onReceive(playbackTimer) { _ in
+            // Trigger refresh for highlighting current segment
+            if viewModel.isPlayingThisEpisode {
+                refreshTrigger.toggle()
+            }
+        }
+    }
 
-                // Transcript content
-                if viewModel.hasTranscript {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Transcript")
-                                .font(.headline)
-                            Spacer()
+    // MARK: - Live Captions View
 
-                            Button(action: {
-                                viewModel.copyTranscriptToClipboard()
-                                showCopySuccess = true
-                            }) {
-                                Label("Copy", systemImage: "doc.on.doc")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
+    private var liveCaptionsView: some View {
+        VStack(spacing: 0) {
+            // Header with search and copy
+            VStack(spacing: 12) {
+                // Search bar
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                    TextField("Search transcript...", text: $viewModel.transcriptSearchQuery)
+                        .textFieldStyle(.plain)
+                    if !viewModel.transcriptSearchQuery.isEmpty {
+                        Button(action: { viewModel.transcriptSearchQuery = "" }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.secondary)
                         }
-
-                        Text(viewModel.cleanTranscriptText)
-                            .font(.body)
-                            .textSelection(.enabled)
-                            .padding()
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(8)
                     }
-                    .padding(.horizontal)
+                }
+                .padding(10)
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(10)
+
+                // Stats and actions row
+                HStack {
+                    Text("\(viewModel.filteredTranscriptSegments.count) segments")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Spacer()
+
+                    Button(action: {
+                        viewModel.copyTranscriptToClipboard()
+                        showCopySuccess = true
+                    }) {
+                        Label("Copy All", systemImage: "doc.on.doc")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
             }
-            .padding(.vertical)
+            .padding(.horizontal)
+            .padding(.top, 12)
+
+            Divider()
+                .padding(.top, 12)
+
+            // Scrollable transcript segments
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(viewModel.filteredTranscriptSegments) { segment in
+                            TranscriptSegmentRow(
+                                segment: segment,
+                                isCurrentSegment: viewModel.currentSegmentId == segment.id,
+                                searchQuery: viewModel.transcriptSearchQuery,
+                                onTap: {
+                                    viewModel.seekToSegment(segment)
+                                }
+                            )
+                            .id(segment.id)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+                .onChange(of: viewModel.currentSegmentId) { _, newId in
+                    // Auto-scroll to current segment during playback
+                    if let id = newId, viewModel.transcriptSearchQuery.isEmpty {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -578,3 +654,129 @@ struct TabButton: View {
         .frame(maxWidth: .infinity)
     }
 }
+
+// MARK: - Transcript Segment Row Component
+
+struct TranscriptSegmentRow: View {
+    let segment: TranscriptSegment
+    let isCurrentSegment: Bool
+    let searchQuery: String
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(alignment: .top, spacing: 12) {
+                // Timestamp
+                Text(segment.formattedStartTime)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(isCurrentSegment ? .white : .blue)
+                    .frame(width: 50, alignment: .leading)
+
+                // Text content with highlighted search terms
+                highlightedText
+                    .font(.body)
+                    .foregroundColor(isCurrentSegment ? .white : .primary)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Play indicator for current segment
+                if isCurrentSegment {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .font(.caption)
+                        .foregroundColor(.white)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isCurrentSegment ? Color.blue : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var highlightedText: some View {
+        if searchQuery.isEmpty {
+            Text(segment.text)
+        } else {
+            highlightMatches(in: segment.text, query: searchQuery)
+        }
+    }
+
+    private func highlightMatches(in text: String, query: String) -> Text {
+        let lowercasedText = text.lowercased()
+        let lowercasedQuery = query.lowercased()
+
+        guard let range = lowercasedText.range(of: lowercasedQuery) else {
+            return Text(text)
+        }
+
+        let startIndex = text.distance(from: text.startIndex, to: range.lowerBound)
+        let endIndex = text.distance(from: text.startIndex, to: range.upperBound)
+
+        let before = String(text.prefix(startIndex))
+        let match = String(
+            text[
+                text.index(
+                    text.startIndex, offsetBy: startIndex)..<text.index(
+                        text.startIndex, offsetBy: endIndex)])
+        let after = String(text.suffix(text.count - endIndex))
+
+        // Use AttributedString for highlighting instead of Text concatenation
+        var attributedString = AttributedString(before)
+
+        var matchAttributed = AttributedString(match)
+        // Apply explicit attributes to avoid type ambiguity
+        var attrs = AttributeContainer()
+        attrs.foregroundColor = .yellow
+        attrs.font = .system(.body, design: .default).bold()
+        matchAttributed.mergeAttributes(attrs)
+        attributedString.append(matchAttributed)
+
+        // Recursively highlight remaining matches in the "after" portion
+        let afterAttributed = highlightMatchesAttributed(in: after, query: query)
+        attributedString.append(afterAttributed)
+
+        return Text(attributedString)
+    }
+
+    private func highlightMatchesAttributed(in text: String, query: String) -> AttributedString {
+        let lowercasedText = text.lowercased()
+        let lowercasedQuery = query.lowercased()
+
+        guard let range = lowercasedText.range(of: lowercasedQuery) else {
+            return AttributedString(text)
+        }
+
+        let startIndex = text.distance(from: text.startIndex, to: range.lowerBound)
+        let endIndex = text.distance(from: text.startIndex, to: range.upperBound)
+
+        let before = String(text.prefix(startIndex))
+        let match = String(
+            text[
+                text.index(
+                    text.startIndex, offsetBy: startIndex)..<text.index(
+                        text.startIndex, offsetBy: endIndex)])
+        let after = String(text.suffix(text.count - endIndex))
+
+        var attributedString = AttributedString(before)
+
+        var matchAttributed = AttributedString(match)
+        var attrs = AttributeContainer()
+        attrs.foregroundColor = .yellow
+        attrs.font = .system(.body, design: .default).bold()
+        matchAttributed.mergeAttributes(attrs)
+        attributedString.append(matchAttributed)
+
+        // Recursively highlight remaining matches
+        let afterAttributed = highlightMatchesAttributed(in: after, query: query)
+        attributedString.append(afterAttributed)
+
+        return attributedString
+    }
+}
+
