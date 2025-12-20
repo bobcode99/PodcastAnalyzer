@@ -14,6 +14,7 @@ struct EpisodeDetailView: View {
 
     @State private var selectedTab = 0
     @State private var showCopySuccess = false
+    @State private var showDeleteConfirmation = false
 
     init(episode: PodcastEpisodeInfo, podcastTitle: String, fallbackImageURL: String?) {
         _viewModel = State(initialValue: EpisodeDetailViewModel(
@@ -84,10 +85,12 @@ struct EpisodeDetailView: View {
                             Label("Add to List", systemImage: "plus")
                         }
 
-                        Button(action: {
-                            viewModel.downloadAudio()
-                        }) {
-                            Label("Download Audio", systemImage: "arrow.down.circle")
+                        if !viewModel.hasLocalAudio {
+                            Button(action: {
+                                viewModel.downloadAudio()
+                            }) {
+                                Label("Download Audio", systemImage: "arrow.down.circle")
+                            }
                         }
 
                         Button(action: {
@@ -106,6 +109,18 @@ struct EpisodeDetailView: View {
         } message: {
             Text("Transcript copied to clipboard")
         }
+        .confirmationDialog(
+            "Delete Download",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                viewModel.deleteDownload()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Are you sure you want to delete this downloaded episode? You can download it again later.")
+        }
         .onAppear {
             viewModel.setModelContext(modelContext)
             viewModel.checkTranscriptStatus()
@@ -115,56 +130,52 @@ struct EpisodeDetailView: View {
     // MARK: - Header Section
 
     private var headerSection: some View {
-        VStack(spacing: 12) {
-            HStack(alignment: .top, spacing: 16) {
-                // Artwork with play overlay
-                ZStack {
-                    if let url = URL(string: viewModel.imageURLString) {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image.resizable().scaledToFit()
-                            case .failure:
-                                Color.gray
-                            case .empty:
-                                ProgressView()
-                            @unknown default:
-                                Color.gray
-                            }
+        VStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                // Artwork (no play overlay)
+                if let url = URL(string: viewModel.imageURLString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFit()
+                        case .failure:
+                            Color.gray
+                        case .empty:
+                            ProgressView()
+                        @unknown default:
+                            Color.gray
                         }
-                        .frame(width: 100, height: 100)
-                        .cornerRadius(12)
-                        .shadow(radius: 3)
-                    } else {
-                        Color.gray.frame(width: 100, height: 100).cornerRadius(12)
                     }
-
-                    // Play button overlay
-                    Button(action: {
-                        viewModel.playAction()
-                    }) {
-                        Image(systemName: viewModel.isPlayingThisEpisode && viewModel.audioManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 44))
-                            .foregroundColor(.white)
-                            .shadow(radius: 2)
-                    }
-                    .disabled(viewModel.isPlayDisabled)
+                    .frame(width: 80, height: 80)
+                    .cornerRadius(10)
+                    .shadow(radius: 2)
+                } else {
+                    Color.gray.frame(width: 80, height: 80).cornerRadius(10)
                 }
 
                 // Episode info
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(viewModel.title)
-                        .font(.headline)
-                        .lineLimit(2)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Text(viewModel.title)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .lineLimit(2)
+
+                        if viewModel.isStarred {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(.yellow)
+                        }
+                    }
 
                     Text(viewModel.podcastTitle)
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
 
                     if let dateString = viewModel.pubDateString {
                         Text(dateString)
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundColor(.secondary)
                     }
 
@@ -180,10 +191,32 @@ struct EpisodeDetailView: View {
                             }
                         }
                     }
-
-                    // Download status
-                    downloadStatusBadge
                 }
+
+                Spacer()
+            }
+
+            // Action buttons row (Play + Download) - compact
+            HStack(spacing: 8) {
+                // Play button (compact)
+                Button(action: {
+                    viewModel.playAction()
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: viewModel.isPlayingThisEpisode && viewModel.audioManager.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 12))
+                        Text(viewModel.isPlayingThisEpisode && viewModel.audioManager.isPlaying ? "Pause" : "Play")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isPlayDisabled)
+
+                // Download button (compact)
+                downloadButton
 
                 Spacer()
             }
@@ -193,14 +226,89 @@ struct EpisodeDetailView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "wifi")
                         .font(.caption2)
-                    Text("Streaming - Download for offline playback")
+                    Text("Streaming")
                         .font(.caption2)
                 }
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding()
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Download Button (compact)
+
+    @ViewBuilder
+    private var downloadButton: some View {
+        switch viewModel.downloadState {
+        case .notDownloaded:
+            Button(action: {
+                viewModel.startDownload()
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 12))
+                    Text("Download")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.bordered)
+
+        case .downloading(let progress):
+            Button(action: {
+                viewModel.cancelDownload()
+            }) {
+                HStack(spacing: 4) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.bordered)
+            .tint(.orange)
+
+        case .downloaded:
+            Button(action: {
+                showDeleteConfirmation = true
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12))
+                    Text("Downloaded")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.bordered)
+            .tint(.green)
+
+        case .failed:
+            Button(action: {
+                viewModel.startDownload()
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.system(size: 12))
+                    Text("Retry")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+        }
     }
 
     // MARK: - Tab Selector
@@ -236,31 +344,6 @@ struct EpisodeDetailView: View {
                 // Episode description
                 viewModel.descriptionView
                     .padding(.horizontal)
-
-                Divider()
-                    .padding(.horizontal)
-
-                // Download management
-                if viewModel.hasLocalAudio {
-                    VStack(spacing: 12) {
-                        Text("Downloaded Audio")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Button(action: {
-                            viewModel.deleteDownload()
-                        }) {
-                            Label("Delete Download", systemImage: "trash")
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.red)
-                    }
-                    .padding(.horizontal)
-                } else {
-                    downloadSection
-                }
             }
             .padding(.vertical)
         }
@@ -331,8 +414,9 @@ struct EpisodeDetailView: View {
                             viewModel.generateTranscript()
                         }) {
                             Label("Generate Transcript", systemImage: "text.bubble")
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
+                                .font(.subheadline)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -446,60 +530,6 @@ struct EpisodeDetailView: View {
             }
             .padding()
         }
-    }
-
-    // MARK: - Download Section
-
-    private var downloadSection: some View {
-        VStack(spacing: 12) {
-            Text("Download Episode")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            switch viewModel.downloadState {
-            case .notDownloaded:
-                Button(action: {
-                    viewModel.startDownload()
-                }) {
-                    Label("Download Audio", systemImage: "arrow.down.circle")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                }
-                .buttonStyle(.bordered)
-                .tint(.blue)
-
-            case .downloading(let progress):
-                VStack(spacing: 8) {
-                    ProgressView(value: progress)
-                    Text("Downloading \(Int(progress * 100))%")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Button("Cancel") {
-                        viewModel.cancelDownload()
-                    }
-                    .font(.caption)
-                    .foregroundColor(.red)
-                }
-
-            case .downloaded:
-                Label("Downloaded", systemImage: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-
-            case .failed:
-                VStack(spacing: 8) {
-                    Text("Download Failed")
-                        .font(.caption)
-                        .foregroundColor(.red)
-                    Button("Retry") {
-                        viewModel.startDownload()
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-        }
-        .padding(.horizontal)
     }
 
     // MARK: - Download Status Badge

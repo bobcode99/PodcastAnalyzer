@@ -492,6 +492,7 @@ final class EpisodeDetailViewModel {
     }
 
     /// Parses SRT content and returns clean text without timestamps
+    /// Each subtitle entry is separated by a newline for readability
     var cleanTranscriptText: String {
         guard !transcriptText.isEmpty else { return "" }
 
@@ -503,10 +504,14 @@ final class EpisodeDetailViewModel {
             // Skip index and timestamp lines, get text
             if lines.count >= 3 {
                 let textLines = Array(lines[2...])
-                cleanLines.append(contentsOf: textLines)
+                let combinedText = textLines.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+                if !combinedText.isEmpty {
+                    cleanLines.append(combinedText)
+                }
             }
         }
 
-        return cleanLines.joined(separator: " ")
+        // Join with newlines to preserve paragraph breaks
+        return cleanLines.joined(separator: "\n\n")
     }
 }

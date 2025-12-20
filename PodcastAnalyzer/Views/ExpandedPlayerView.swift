@@ -211,7 +211,8 @@ struct ExpandedPlayerView: View {
                             podcastEpisodeDescription: nil,
                             pubDate: nil,
                             audioURL: episode.audioURL,
-                            imageURL: episode.imageURL
+                            imageURL: episode.imageURL,
+                            duration: nil
                         ),
                         podcastTitle: episode.podcastTitle,
                         fallbackImageURL: episode.imageURL

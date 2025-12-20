@@ -67,11 +67,17 @@ struct HomeView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button(action: {
-                        viewModel.loadPodcasts()
+                        Task {
+                            await viewModel.refreshAllPodcasts()
+                        }
                     }) {
                         Image(systemName: "arrow.clockwise")
                     }
+                    .disabled(viewModel.isLoading)
                 }
+            }
+            .refreshable {
+                await viewModel.refreshAllPodcasts()
             }
             
         }

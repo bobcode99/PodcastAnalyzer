@@ -28,21 +28,45 @@ class HomeViewModel: ObservableObject {
     }
     
     func loadPodcasts() {
+        loadPodcastFeeds()
+    }
+
+    /// Refresh all podcasts by fetching latest data from RSS feeds
+    func refreshAllPodcasts() async {
+        guard let context = modelContext else {
+            logger.warning("ModelContext is nil, cannot refresh")
+            return
+        }
+
         isLoading = true
         error = nil
 
-        logger.info("Starting to load podcasts from \(self.podcastInfoModelList.count) feeds")
+        logger.info("Starting to refresh \(self.podcastInfoModelList.count) podcast feeds")
 
-        Task { @MainActor [weak self] in
-            guard let self else { return }
+        for model in self.podcastInfoModelList {
+            let rssUrl = model.podcastInfo.rssUrl
+            logger.info("Fetching latest episodes from: \(rssUrl)")
 
-            for podcastInfoModel in podcastInfoModelList {
-                logger.info("Fetching podcast from URL: \(podcastInfoModel.podcastInfo.rssUrl)")
+            do {
+                let updatedPodcast = try await service.fetchPodcast(from: rssUrl)
+                // Update the model with new data
+                model.podcastInfo = updatedPodcast
+                logger.info("Updated \(updatedPodcast.title) with \(updatedPodcast.episodes.count) episodes")
+            } catch {
+                logger.error("Failed to refresh \(rssUrl): \(error.localizedDescription)")
             }
-
-            isLoading = false
-            logger.info("Finished loading all podcasts")
         }
+
+        // Save changes
+        do {
+            try context.save()
+            logger.info("Saved all podcast updates")
+        } catch {
+            logger.error("Failed to save updates: \(error.localizedDescription)")
+        }
+
+        isLoading = false
+        logger.info("Finished refreshing all podcasts")
     }
     
     // MARK: - SwiftData Operations

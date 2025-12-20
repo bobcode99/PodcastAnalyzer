@@ -190,8 +190,16 @@ class DownloadManager: NSObject, ObservableObject {
         let episodeKey = makeKey(episode: episodeTitle, podcast: podcastTitle)
 
         // If we don't have a state, check disk to restore it
+        // Use DispatchQueue.main.async to avoid publishing during view updates
         if downloadStates[episodeKey] == nil {
-            checkAndRestoreState(episodeTitle: episodeTitle, podcastTitle: podcastTitle)
+            // Do synchronous check only, defer async check
+            if let path = checkAudioFileExistsSynchronously(episodeTitle: episodeTitle, podcastTitle: podcastTitle) {
+                // Schedule the state update for next run loop to avoid "publishing during view update"
+                DispatchQueue.main.async { [weak self] in
+                    self?.downloadStates[episodeKey] = .downloaded(localPath: path)
+                }
+                return .downloaded(localPath: path)
+            }
         }
 
         return downloadStates[episodeKey] ?? .notDownloaded
