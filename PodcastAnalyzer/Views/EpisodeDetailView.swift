@@ -144,6 +144,7 @@ struct EpisodeDetailView: View {
                     HStack(spacing: 4) {
                         Text(viewModel.title)
                             .font(.subheadline).fontWeight(.semibold).lineLimit(2)
+                            .textSelection(.enabled)
                         if viewModel.isStarred {
                             Image(systemName: "star.fill").font(.system(size: 10)).foregroundColor(
                                 .yellow)
@@ -151,6 +152,7 @@ struct EpisodeDetailView: View {
                     }
                     Text(viewModel.podcastTitle).font(.caption).foregroundColor(.secondary)
                         .lineLimit(1)
+                        .textSelection(.enabled)
                     if let dateString = viewModel.pubDateString {
                         Text(dateString).font(.caption2).foregroundColor(.secondary)
                     }
@@ -276,7 +278,9 @@ struct EpisodeDetailView: View {
     private var summaryTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                viewModel.descriptionView.padding(.horizontal)
+                viewModel.descriptionView
+                    .textSelection(.enabled)
+                    .padding(.horizontal)
             }
             .padding(.vertical)
         }
@@ -594,6 +598,7 @@ struct TranscriptSegmentRow: View {
                     .foregroundColor(isCurrentSegment ? .white : .primary)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
 
                 // Play indicator for current segment
                 if isCurrentSegment {

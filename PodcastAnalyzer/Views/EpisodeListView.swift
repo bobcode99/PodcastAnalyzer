@@ -5,8 +5,8 @@
 //  Created by Bob on 2025/11/23.
 //
 
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 // MARK: - Episode Filter Enum
 
@@ -52,18 +52,19 @@ struct EpisodeListView: View {
         // Apply filter
         switch selectedFilter {
         case .all:
-            break // No filtering
+            break  // No filtering
         case .unplayed:
             episodes = episodes.filter { episode in
                 let key = makeEpisodeKey(episode)
-                guard let model = episodeModels[key] else { return true } // Not played = unplayed
+                guard let model = episodeModels[key] else { return true }  // Not played = unplayed
                 return !model.isCompleted && model.progress < 0.1
             }
         case .played:
             episodes = episodes.filter { episode in
                 let key = makeEpisodeKey(episode)
                 guard let model = episodeModels[key] else { return false }
-                return model.isCompleted || model.progress >= 0.1
+                // Only show fully completed episodes
+                return model.isCompleted
             }
         case .downloaded:
             episodes = episodes.filter { episode in
@@ -204,7 +205,8 @@ struct EpisodeListView: View {
                         onDeleteRequested: {
                             episodeToDelete = episode
                             showDeleteConfirmation = true
-                        }
+                        },
+                        onTogglePlayed: { togglePlayed(for: episode) }
                     )
                 }
             }
@@ -259,7 +261,9 @@ struct EpisodeListView: View {
                 episodeToDelete = nil
             }
         } message: {
-            Text("Are you sure you want to delete this downloaded episode? You can download it again later.")
+            Text(
+                "Are you sure you want to delete this downloaded episode? You can download it again later."
+            )
         }
     }
 
@@ -304,7 +308,8 @@ struct EpisodeListView: View {
         defer { isRefreshing = false }
 
         do {
-            let updatedPodcast = try await rssService.fetchPodcast(from: podcastModel.podcastInfo.rssUrl)
+            let updatedPodcast = try await rssService.fetchPodcast(
+                from: podcastModel.podcastInfo.rssUrl)
             await MainActor.run {
                 podcastModel.podcastInfo = updatedPodcast
                 try? modelContext.save()
@@ -344,7 +349,34 @@ struct EpisodeListView: View {
     }
 
     private func deleteDownload(_ episode: PodcastEpisodeInfo) {
-        downloadManager.deleteDownload(episodeTitle: episode.title, podcastTitle: podcastModel.podcastInfo.title)
+        downloadManager.deleteDownload(
+            episodeTitle: episode.title, podcastTitle: podcastModel.podcastInfo.title)
+    }
+
+    private func togglePlayed(for episode: PodcastEpisodeInfo) {
+        let key = makeEpisodeKey(episode)
+        if let model = episodeModels[key] {
+            model.isCompleted.toggle()
+            // Reset playback position if marking as unplayed
+            if !model.isCompleted {
+                model.lastPlaybackPosition = 0
+            }
+            try? modelContext.save()
+        } else {
+            // Create a new model and mark as played
+            guard let audioURL = episode.audioURL else { return }
+            let model = EpisodeDownloadModel(
+                episodeTitle: episode.title,
+                podcastTitle: podcastModel.podcastInfo.title,
+                audioURL: audioURL,
+                imageURL: episode.imageURL ?? podcastModel.podcastInfo.imageURL,
+                pubDate: episode.pubDate
+            )
+            model.isCompleted = true
+            modelContext.insert(model)
+            try? modelContext.save()
+            episodeModels[key] = model
+        }
     }
 }
 
@@ -356,10 +388,12 @@ struct EpisodeRowView: View {
     let fallbackImageURL: String?
     let podcastLanguage: String
     @ObservedObject var downloadManager: DownloadManager
+    @ObservedObject var transcriptManager = TranscriptManager.shared
     let episodeModel: EpisodeDownloadModel?
     let onToggleStar: () -> Void
     let onDownload: () -> Void
     let onDeleteRequested: () -> Void
+    let onTogglePlayed: () -> Void
 
     private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
 
@@ -372,6 +406,57 @@ struct EpisodeRowView: View {
             return true
         }
         return false
+    }
+
+    /// Check if caption file exists
+    private var hasCaptions: Bool {
+        let fm = FileManager.default
+        let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let captionsDir = docsDir.appendingPathComponent("Captions", isDirectory: true)
+
+        // Check for .srt file with sanitized filename
+        let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
+        let baseFileName = "\(podcastTitle)_\(episode.title)"
+            .components(separatedBy: invalidCharacters)
+            .joined(separator: "_")
+            .trimmingCharacters(in: .whitespaces)
+
+        let srtPath = captionsDir.appendingPathComponent("\(baseFileName).srt")
+        return fm.fileExists(atPath: srtPath.path)
+    }
+
+    /// Get transcript job status if active
+    private var transcriptJobStatus: TranscriptJobStatus? {
+        let jobId = "\(podcastTitle)|\(episode.title)"
+        return transcriptManager.activeJobs[jobId]?.status
+    }
+
+    /// Check if transcript is being generated
+    private var isTranscribing: Bool {
+        if let status = transcriptJobStatus {
+            switch status {
+            case .queued, .downloadingModel, .transcribing:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
+    }
+
+    /// Get transcript progress (0.0 to 1.0)
+    private var transcriptProgress: Double? {
+        guard let status = transcriptJobStatus else { return nil }
+        switch status {
+        case .queued:
+            return 0.0
+        case .downloadingModel(let progress):
+            return progress * 0.1  // Model download is 10% of total
+        case .transcribing(let progress):
+            return 0.1 + (progress * 0.9)  // Transcription is 90% of total
+        default:
+            return nil
+        }
     }
 
     private var isStarred: Bool {
@@ -400,7 +485,8 @@ struct EpisodeRowView: View {
 
     /// Duration text - show remaining time if partially played, otherwise full duration
     private var durationText: String? {
-        if let model = episodeModel, model.duration > 0 && model.progress > 0 && model.progress < 1 {
+        if let model = episodeModel, model.duration > 0 && model.progress > 0 && model.progress < 1
+        {
             // Show remaining time
             let remaining = model.duration - model.lastPlaybackPosition
             return formatDuration(Int(remaining))
@@ -417,14 +503,16 @@ struct EpisodeRowView: View {
     private var plainDescription: String? {
         guard let desc = episode.podcastEpisodeDescription else { return nil }
         // Simple HTML tag removal
-        let stripped = desc.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let stripped = desc.replacingOccurrences(
+            of: "<[^>]+>", with: "", options: .regularExpression
+        )
+        .replacingOccurrences(of: "&nbsp;", with: " ")
+        .replacingOccurrences(of: "&amp;", with: "&")
+        .replacingOccurrences(of: "&lt;", with: "<")
+        .replacingOccurrences(of: "&gt;", with: ">")
+        .replacingOccurrences(of: "&#39;", with: "'")
+        .replacingOccurrences(of: "&quot;", with: "\"")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
         return stripped.isEmpty ? nil : stripped
     }
 
@@ -440,12 +528,14 @@ struct EpisodeRowView: View {
     }
 
     var body: some View {
-        NavigationLink(destination: EpisodeDetailView(
-            episode: episode,
-            podcastTitle: podcastTitle,
-            fallbackImageURL: fallbackImageURL,
-            podcastLanguage: podcastLanguage
-        )) {
+        NavigationLink(
+            destination: EpisodeDetailView(
+                episode: episode,
+                podcastTitle: podcastTitle,
+                fallbackImageURL: fallbackImageURL,
+                podcastLanguage: podcastLanguage
+            )
+        ) {
             HStack(alignment: .top, spacing: 12) {
                 // Episode thumbnail
                 if let url = URL(string: episodeImageURL) {
@@ -491,6 +581,24 @@ struct EpisodeRowView: View {
                                 .font(.system(size: 8))
                                 .foregroundColor(.green)
                         }
+
+                        // Caption/Transcript indicator
+                        if hasCaptions {
+                            Image(systemName: "captions.bubble.fill")
+                                .font(.system(size: 8))
+                                .foregroundColor(.purple)
+                        } else if isTranscribing {
+                            // Show transcript generation progress
+                            HStack(spacing: 2) {
+                                ProgressView()
+                                    .scaleEffect(0.4)
+                                if let progress = transcriptProgress {
+                                    Text("\(Int(progress * 100))%")
+                                        .font(.system(size: 7))
+                                        .foregroundColor(.purple)
+                                }
+                            }
+                        }
                     }
 
                     // Title
@@ -513,13 +621,14 @@ struct EpisodeRowView: View {
                         // Duration badge with play button
                         Button(action: playAction) {
                             HStack(spacing: 4) {
-                                // Play/Pause/Completed icon
-                                if isCompleted {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 10, weight: .bold))
-                                } else if isPlayingThisEpisode && audioManager.isPlaying {
+                                // Play/Pause/Completed (Replay) icon
+                                if isPlayingThisEpisode && audioManager.isPlaying {
                                     Image(systemName: "pause.fill")
                                         .font(.system(size: 10))
+                                } else if isCompleted {
+                                    // Show replay icon for completed episodes
+                                    Image(systemName: "arrow.counterclockwise")
+                                        .font(.system(size: 10, weight: .bold))
                                 } else {
                                     Image(systemName: "play.fill")
                                         .font(.system(size: 10))
@@ -534,7 +643,9 @@ struct EpisodeRowView: View {
                                                 .frame(height: 3)
                                             Capsule()
                                                 .fill(Color.blue)
-                                                .frame(width: geo.size.width * playbackProgress, height: 3)
+                                                .frame(
+                                                    width: geo.size.width * playbackProgress,
+                                                    height: 3)
                                         }
                                     }
                                     .frame(width: 30, height: 3)
@@ -589,6 +700,13 @@ struct EpisodeRowView: View {
                 )
             }
 
+            Button(action: onTogglePlayed) {
+                Label(
+                    isCompleted ? "Mark as Unplayed" : "Mark as Played",
+                    systemImage: isCompleted ? "arrow.counterclockwise" : "checkmark.circle"
+                )
+            }
+
             Divider()
 
             if isDownloaded {
@@ -597,7 +715,8 @@ struct EpisodeRowView: View {
                 }
             } else if case .downloading = downloadState {
                 Button(action: {
-                    downloadManager.cancelDownload(episodeTitle: episode.title, podcastTitle: podcastTitle)
+                    downloadManager.cancelDownload(
+                        episodeTitle: episode.title, podcastTitle: podcastTitle)
                 }) {
                     Label("Cancel Download", systemImage: "xmark.circle")
                 }
@@ -614,9 +733,12 @@ struct EpisodeRowView: View {
             if let audioURL = episode.audioURL, let url = URL(string: audioURL) {
                 Divider()
                 Button(action: {
-                    let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                       let rootVC = windowScene.windows.first?.rootViewController {
+                    let activityVC = UIActivityViewController(
+                        activityItems: [url], applicationActivities: nil)
+                    if let windowScene = UIApplication.shared.connectedScenes.first
+                        as? UIWindowScene,
+                        let rootVC = windowScene.windows.first?.rootViewController
+                    {
                         rootVC.present(activityVC, animated: true)
                     }
                 }) {
@@ -631,7 +753,8 @@ struct EpisodeRowView: View {
                 }
             } else if case .downloading = downloadState {
                 Button(action: {
-                    downloadManager.cancelDownload(episodeTitle: episode.title, podcastTitle: podcastTitle)
+                    downloadManager.cancelDownload(
+                        episodeTitle: episode.title, podcastTitle: podcastTitle)
                 }) {
                     Label("Cancel", systemImage: "xmark.circle")
                 }
@@ -652,7 +775,9 @@ struct EpisodeRowView: View {
         }
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button(action: onToggleStar) {
-                Label(isStarred ? "Unstar" : "Star", systemImage: isStarred ? "star.slash" : "star.fill")
+                Label(
+                    isStarred ? "Unstar" : "Star",
+                    systemImage: isStarred ? "star.slash" : "star.fill")
             }
             .tint(.yellow)
         }

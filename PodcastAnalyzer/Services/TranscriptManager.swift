@@ -29,7 +29,7 @@ struct TranscriptJob: Identifiable {
     var status: TranscriptJobStatus = .queued
 }
 
-/// Manages background transcript generation
+/// Manages background transcript generation with parallel processing
 @available(iOS 17.0, *)
 class TranscriptManager: ObservableObject {
     static let shared = TranscriptManager()
@@ -41,10 +41,13 @@ class TranscriptManager: ObservableObject {
     @Published var activeJobs: [String: TranscriptJob] = [:]
     @Published var isProcessing: Bool = false
 
+    // Maximum concurrent transcript jobs
+    private let maxConcurrentJobs = 2
+
     // Queue for pending jobs
     private var pendingJobs: [TranscriptJob] = []
-    private var currentJob: TranscriptJob?
-    private var processingTask: Task<Void, Never>?
+    private var runningJobIds: Set<String> = []
+    private var processingTasks: [String: Task<Void, Never>] = [:]
 
     private init() {}
 
@@ -85,6 +88,13 @@ class TranscriptManager: ObservableObject {
     /// Checks if a transcript is being generated for an episode
     func isGenerating(episodeTitle: String, podcastTitle: String) -> Bool {
         let jobId = "\(podcastTitle)|\(episodeTitle)"
+
+        // Check if in pending queue or actively running
+        if pendingJobs.contains(where: { $0.id == jobId }) || runningJobIds.contains(jobId) {
+            return true
+        }
+
+        // Also check active jobs status
         if let job = activeJobs[jobId] {
             switch job.status {
             case .queued, .downloadingModel, .transcribing:
@@ -110,35 +120,38 @@ class TranscriptManager: ObservableObject {
         pendingJobs.removeAll { $0.id == jobId }
         activeJobs.removeValue(forKey: jobId)
 
-        // If this is the current job, we can't cancel the transcription itself
-        // but we can mark it as cancelled
-        if currentJob?.id == jobId {
-            logger.info("Cannot cancel active transcription, will complete but discard result")
+        // If this job is currently running, cancel the task
+        if runningJobIds.contains(jobId) {
+            processingTasks[jobId]?.cancel()
+            processingTasks.removeValue(forKey: jobId)
+            runningJobIds.remove(jobId)
+            logger.info("Cancelled running transcript job for: \(episodeTitle)")
+
+            // Update isProcessing flag
+            if runningJobIds.isEmpty && pendingJobs.isEmpty {
+                isProcessing = false
+            }
         }
     }
 
     // MARK: - Processing
 
     private func startProcessingIfNeeded() {
-        guard !isProcessing, !pendingJobs.isEmpty else { return }
+        // Start as many jobs as we can up to the concurrent limit
+        while runningJobIds.count < maxConcurrentJobs && !pendingJobs.isEmpty {
+            let job = pendingJobs.removeFirst()
+            runningJobIds.insert(job.id)
+            isProcessing = true
 
-        isProcessing = true
-        processingTask = Task { [weak self] in
-            await self?.processNextJob()
+            let task = Task { [weak self] in
+                guard let self = self else { return }
+                await self.processJob(job)
+            }
+            processingTasks[job.id] = task
         }
     }
 
-    private func processNextJob() async {
-        guard !pendingJobs.isEmpty else {
-            await MainActor.run {
-                isProcessing = false
-            }
-            return
-        }
-
-        let job = pendingJobs.removeFirst()
-        currentJob = job
-
+    private func processJob(_ job: TranscriptJob) async {
         await MainActor.run {
             var updatedJob = job
             updatedJob.status = .downloadingModel(progress: 0)
@@ -218,7 +231,7 @@ class TranscriptManager: ObservableObject {
 
             // Remove from active jobs after a short delay
             try? await Task.sleep(for: .seconds(3))
-            await MainActor.run {
+            _ = await MainActor.run {
                 self.activeJobs.removeValue(forKey: job.id)
             }
 
@@ -231,9 +244,18 @@ class TranscriptManager: ObservableObject {
             }
         }
 
-        currentJob = nil
+        // Job completed - clean up and check for more pending jobs
+        await MainActor.run {
+            self.runningJobIds.remove(job.id)
+            self.processingTasks.removeValue(forKey: job.id)
 
-        // Process next job
-        await processNextJob()
+            // Update isProcessing flag
+            if self.runningJobIds.isEmpty && self.pendingJobs.isEmpty {
+                self.isProcessing = false
+            }
+
+            // Start next job if there are pending ones
+            self.startProcessingIfNeeded()
+        }
     }
 }

@@ -85,6 +85,17 @@ final class EpisodeDetailViewModel {
 
         // Observe download state changes
         observeDownloadState()
+
+        // Check for active transcript job and start observing
+        checkAndObserveTranscriptJob()
+    }
+
+    /// Checks if there's an active transcript job and starts observing
+    private func checkAndObserveTranscriptJob() {
+        let jobId = "\(podcastTitle)|\(episode.title)"
+        if TranscriptManager.shared.activeJobs[jobId] != nil {
+            observeTranscriptManager()
+        }
     }
 
     func setModelContext(_ context: ModelContext) {
@@ -493,84 +504,47 @@ final class EpisodeDetailViewModel {
             return
         }
 
-        Task {
-            do {
-                let audioURL = URL(fileURLWithPath: audioPath)
-                // Get podcast language and create transcript service
-                let language = getPodcastLanguage()
-                let transcriptService = TranscriptService(language: language)
+        // Use TranscriptManager for background processing
+        let language = getPodcastLanguage()
+        TranscriptManager.shared.queueTranscript(
+            episodeTitle: episode.title,
+            podcastTitle: podcastTitle,
+            audioPath: audioPath,
+            language: language
+        )
 
-                let modelReady = await transcriptService.isModelReady()
+        // Start observing TranscriptManager state
+        observeTranscriptManager()
+    }
 
-                if !modelReady {
-                    await MainActor.run {
-                        transcriptState = .downloadingModel(progress: 0)
-                    }
+    /// Observes TranscriptManager for job status updates
+    private func observeTranscriptManager() {
+        TranscriptManager.shared.$activeJobs
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] jobs in
+                guard let self = self else { return }
+                let jobId = "\(self.podcastTitle)|\(self.episode.title)"
 
-                    for await progress in await transcriptService.setupAndInstallAssets() {
-                        await MainActor.run {
-                            transcriptState = .downloadingModel(progress: progress)
+                if let job = jobs[jobId] {
+                    // Update local state based on job status
+                    switch job.status {
+                    case .queued:
+                        self.transcriptState = .transcribing(progress: 0)
+                    case .downloadingModel(let progress):
+                        self.transcriptState = .downloadingModel(progress: progress)
+                    case .transcribing(let progress):
+                        self.transcriptState = .transcribing(progress: progress)
+                    case .completed:
+                        // Load the transcript from disk
+                        Task {
+                            await self.loadExistingTranscript()
                         }
+                    case .failed(let error):
+                        self.transcriptState = .error(error)
                     }
-                } else {
-                    for await _ in await transcriptService.setupAndInstallAssets() {
-                        // Silently consume progress
-                    }
-                }
-
-                guard await transcriptService.isInitialized() else {
-                    throw NSError(
-                        domain: "TranscriptService", code: 1,
-                        userInfo: [
-                            NSLocalizedDescriptionKey: "Failed to initialize transcription service"
-                        ]
-                    )
-                }
-
-                await MainActor.run {
-                    transcriptState = .transcribing(progress: 0)
-                }
-
-                // Use the new progress-reporting method
-                var finalSRTContent: String?
-
-                for try await progressUpdate in await transcriptService.audioToSRTWithProgress(inputFile: audioURL) {
-                    await MainActor.run {
-                        transcriptState = .transcribing(progress: progressUpdate.progress)
-                    }
-
-                    if progressUpdate.isComplete {
-                        finalSRTContent = progressUpdate.srtContent
-                    }
-                }
-
-                guard let srtContent = finalSRTContent else {
-                    throw NSError(
-                        domain: "TranscriptService", code: 3,
-                        userInfo: [
-                            NSLocalizedDescriptionKey: "Transcription completed but no content was generated"
-                        ]
-                    )
-                }
-
-                _ = try await fileStorage.saveCaptionFile(
-                    content: srtContent,
-                    episodeTitle: episode.title,
-                    podcastTitle: podcastTitle
-                )
-
-                await MainActor.run {
-                    transcriptText = srtContent
-                    transcriptState = .completed
-                    parseTranscriptSegments()
-                }
-
-            } catch {
-                await MainActor.run {
-                    transcriptState = .error(error.localizedDescription)
                 }
             }
-        }
+            .store(in: &cancellables)
     }
 
     func copyTranscriptToClipboard() {
