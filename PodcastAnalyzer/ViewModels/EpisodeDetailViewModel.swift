@@ -756,6 +756,16 @@ final class EpisodeDetailViewModel {
     }?.id
   }
 
+  /// Returns true if transcript is currently being processed (downloading model or transcribing)
+  var isTranscriptProcessing: Bool {
+    switch transcriptState {
+    case .downloadingModel, .transcribing:
+      return true
+    default:
+      return false
+    }
+  }
+
   /// Seeks to the start of a transcript segment and starts playback if needed
   func seekToSegment(_ segment: TranscriptSegment) {
     // If not playing this episode, start playback first

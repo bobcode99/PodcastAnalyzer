@@ -17,11 +17,4 @@ extension View {
     #endif
   }
 
-  func disableAutocapitalization() -> some View {
-    #if os(iOS)
-      return self.textInputAutocapitalization(.never)
-    #else
-      return self
-    #endif
-  }
 }

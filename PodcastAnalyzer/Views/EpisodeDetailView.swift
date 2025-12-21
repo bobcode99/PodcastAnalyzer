@@ -294,10 +294,7 @@ struct EpisodeDetailView: View {
   // MARK: - Transcript Tab (FIXED)
   private var transcriptTab: some View {
     VStack(spacing: 0) {
-      // Determine active state to prioritize progress views
-      let isProcessing = isTranscribingOrDownloadingModel(state: viewModel.transcriptState)
-
-      if isProcessing {
+      if viewModel.isTranscriptProcessing {
         // Case 1: Active Processing (Always show this if happening)
         transcriptStatusSection
       } else if viewModel.hasTranscript {
@@ -313,16 +310,6 @@ struct EpisodeDetailView: View {
     }
     .onReceive(playbackTimer) { _ in
       if viewModel.isPlayingThisEpisode { refreshTrigger.toggle() }
-    }
-  }
-
-  // Helper to check processing state
-  private func isTranscribingOrDownloadingModel(state: TranscriptState) -> Bool {
-    switch state {
-    case .downloadingModel, .transcribing:
-      return true
-    default:
-      return false
     }
   }
 
@@ -521,36 +508,6 @@ struct EpisodeDetailView: View {
           .font(.subheadline).foregroundColor(.secondary).multilineTextAlignment(.center)
       }
       .padding()
-    }
-  }
-
-  // MARK: - Download Status Badge
-
-  @ViewBuilder
-  private var downloadStatusBadge: some View {
-    switch viewModel.downloadState {
-    case .downloaded:
-      Label("Downloaded", systemImage: "checkmark.circle.fill")
-        .font(.caption)
-        .foregroundColor(.green)
-    case .downloading(let progress):
-      HStack(spacing: 4) {
-        ProgressView()
-          .scaleEffect(0.7)
-        Text("\(Int(progress * 100))%")
-      }
-      .font(.caption)
-      .foregroundColor(.blue)
-    case .finishing:
-      HStack(spacing: 4) {
-        ProgressView()
-          .scaleEffect(0.7)
-        Text("Saving...")
-      }
-      .font(.caption)
-      .foregroundColor(.blue)
-    default:
-      EmptyView()
     }
   }
 }

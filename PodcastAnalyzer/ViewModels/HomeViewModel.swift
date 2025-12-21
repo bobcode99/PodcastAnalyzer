@@ -31,7 +31,7 @@ class HomeViewModel: ObservableObject {
     loadPodcastFeeds()
   }
 
-  /// Refresh all podcasts by fetching latest data from RSS feeds
+  /// Refresh all podcasts by fetching latest data from RSS feeds using parallel TaskGroup
   func refreshAllPodcasts() async {
     guard let context = modelContext else {
       logger.warning("ModelContext is nil, cannot refresh")
@@ -41,24 +41,34 @@ class HomeViewModel: ObservableObject {
     isLoading = true
     error = nil
 
-    logger.info("Starting to refresh \(self.podcastInfoModelList.count) podcast feeds")
+    let podcastCount = self.podcastInfoModelList.count
+    logger.info("Starting parallel refresh of \(podcastCount) podcast feeds")
 
-    for model in self.podcastInfoModelList {
-      let rssUrl = model.podcastInfo.rssUrl
-      logger.info("Fetching latest episodes from: \(rssUrl)")
-
-      do {
-        let updatedPodcast = try await service.fetchPodcast(from: rssUrl)
-
-        logger.info("Language: \(updatedPodcast.language)")
-        // Update the model with new data
-        model.podcastInfo = updatedPodcast
-        logger.info(
-          "Updated \(updatedPodcast.title) with \(updatedPodcast.episodes.count) episodes"
-        )
-      } catch {
-        logger.error("Failed to refresh \(rssUrl): \(error.localizedDescription)")
+    // Use TaskGroup to fetch all podcasts in parallel
+    await withTaskGroup(of: (PodcastInfoModel, PodcastInfo?).self) { group in
+      for model in self.podcastInfoModelList {
+        group.addTask {
+          let rssUrl = model.podcastInfo.rssUrl
+          do {
+            let updatedPodcast = try await self.service.fetchPodcast(from: rssUrl)
+            return (model, updatedPodcast)
+          } catch {
+            self.logger.error("Failed to refresh \(rssUrl): \(error.localizedDescription)")
+            return (model, nil)
+          }
+        }
       }
+
+      // Collect results and update models
+      var successCount = 0
+      for await (model, updatedPodcast) in group {
+        if let podcast = updatedPodcast {
+          model.podcastInfo = podcast
+          successCount += 1
+          logger.info("Updated \(podcast.title) with \(podcast.episodes.count) episodes")
+        }
+      }
+      logger.info("Successfully refreshed \(successCount)/\(podcastCount) podcasts in parallel")
     }
 
     // Save changes
