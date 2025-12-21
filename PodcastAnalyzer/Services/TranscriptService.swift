@@ -13,559 +13,564 @@ import os.log
 // Change availability to iOS and a more realistic version number (e.g., 17.0)
 @available(iOS 17.0, *)
 public actor TranscriptService {
-    private nonisolated let logger = Logger(
-        subsystem: "com.podcast.analyzer", category: "TranscriptService")
-    private var censor: Bool = false
-    private var needsAudioTimeRange: Bool = true
-    private var targetLocale: Locale
+  private nonisolated let logger = Logger(
+    subsystem: "com.podcast.analyzer", category: "TranscriptService")
+  private var censor: Bool = false
+  private var needsAudioTimeRange: Bool = true
+  private var targetLocale: Locale
 
-    /// Converts a podcast language code (e.g., "zh-tw") to a Locale identifier (e.g., "zh_TW")
-    /// - Parameter languageCode: The language code from podcast RSS feed (e.g., "zh-tw", "en-us", "ja")
-    /// - Returns: A Locale instance with the properly formatted identifier
-    ///
-    /// Examples:
-    /// - "zh-tw" → Locale(identifier: "zh_TW")
-    /// - "en-us" → Locale(identifier: "en_US")
-    /// - "en" → Locale(identifier: "en_US")  // Maps to default region
-    /// - "ja" → Locale(identifier: "ja_JP")  // Maps to default region
-    public static func locale(fromPodcastLanguage languageCode: String) -> Locale {
-        // Default region mappings for language-only codes
-        // Speech framework requires full locale identifiers (e.g., "en_US" not just "en")
-        let defaultRegions: [String: String] = [
-            "en": "US",
-            "zh": "TW",
-            "ja": "JP",
-            "ko": "KR",
-            "fr": "FR",
-            "de": "DE",
-            "es": "ES",
-            "it": "IT",
-            "pt": "BR",
-            "ru": "RU",
-            "ar": "SA",
-            "hi": "IN",
-            "th": "TH",
-            "vi": "VN",
-            "id": "ID",
-            "ms": "MY",
-            "nl": "NL",
-            "pl": "PL",
-            "tr": "TR",
-            "uk": "UA",
-            "cs": "CZ",
-            "el": "GR",
-            "he": "IL",
-            "ro": "RO",
-            "hu": "HU",
-            "sv": "SE",
-            "da": "DK",
-            "fi": "FI",
-            "nb": "NO",
-            "sk": "SK",
-            "ca": "ES",
-            "hr": "HR",
-        ]
+  /// Converts a podcast language code (e.g., "zh-tw") to a Locale identifier (e.g., "zh_TW")
+  /// - Parameter languageCode: The language code from podcast RSS feed (e.g., "zh-tw", "en-us", "ja")
+  /// - Returns: A Locale instance with the properly formatted identifier
+  ///
+  /// Examples:
+  /// - "zh-tw" → Locale(identifier: "zh_TW")
+  /// - "en-us" → Locale(identifier: "en_US")
+  /// - "en" → Locale(identifier: "en_US")  // Maps to default region
+  /// - "ja" → Locale(identifier: "ja_JP")  // Maps to default region
+  public static func locale(fromPodcastLanguage languageCode: String) -> Locale {
+    // Default region mappings for language-only codes
+    // Speech framework requires full locale identifiers (e.g., "en_US" not just "en")
+    let defaultRegions: [String: String] = [
+      "en": "US",
+      "zh": "TW",
+      "ja": "JP",
+      "ko": "KR",
+      "fr": "FR",
+      "de": "DE",
+      "es": "ES",
+      "it": "IT",
+      "pt": "BR",
+      "ru": "RU",
+      "ar": "SA",
+      "hi": "IN",
+      "th": "TH",
+      "vi": "VN",
+      "id": "ID",
+      "ms": "MY",
+      "nl": "NL",
+      "pl": "PL",
+      "tr": "TR",
+      "uk": "UA",
+      "cs": "CZ",
+      "el": "GR",
+      "he": "IL",
+      "ro": "RO",
+      "hu": "HU",
+      "sv": "SE",
+      "da": "DK",
+      "fi": "FI",
+      "nb": "NO",
+      "sk": "SK",
+      "ca": "ES",
+      "hr": "HR",
+    ]
 
-        // Replace hyphens with underscores and uppercase the region code
-        let parts = languageCode.lowercased().split(separator: "-")
-        if parts.count == 2 {
-            // Language and region: "zh-tw" -> "zh_TW"
-            let language = String(parts[0])
-            let region = String(parts[1]).uppercased()
-            return Locale(identifier: "\(language)_\(region)")
-        } else if parts.count == 1 {
-            // Language only: map to default region if available
-            let language = String(parts[0])
-            if let defaultRegion = defaultRegions[language] {
-                return Locale(identifier: "\(language)_\(defaultRegion)")
-            }
-            // Fallback: just use the language code
-            return Locale(identifier: language)
-        } else {
-            // Fallback: use the original string as-is
-            return Locale(identifier: languageCode)
-        }
+    // Replace hyphens with underscores and uppercase the region code
+    let parts = languageCode.lowercased().split(separator: "-")
+    if parts.count == 2 {
+      // Language and region: "zh-tw" -> "zh_TW"
+      let language = String(parts[0])
+      let region = String(parts[1]).uppercased()
+      return Locale(identifier: "\(language)_\(region)")
+    } else if parts.count == 1 {
+      // Language only: map to default region if available
+      let language = String(parts[0])
+      if let defaultRegion = defaultRegions[language] {
+        return Locale(identifier: "\(language)_\(defaultRegion)")
+      }
+      // Fallback: just use the language code
+      return Locale(identifier: language)
+    } else {
+      // Fallback: use the original string as-is
+      return Locale(identifier: languageCode)
     }
+  }
 
-    // 1. Store the transcriber instance
-    private var transcriber: SpeechTranscriber?
-    private var analyzer: SpeechAnalyzer?
-    // Store the locale used for installation
+  // 1. Store the transcriber instance
+  private var transcriber: SpeechTranscriber?
+  private var analyzer: SpeechAnalyzer?
+  // Store the locale used for installation
 
-    /// Convenience initializer that accepts a podcast language string (e.g., "zh-tw", "en-us")
-    /// - Parameters:
-    ///   - language: The language code from podcast RSS feed (e.g., "zh-tw", "en-us", "ja")
-    ///   - censor: Whether to enable content filtering
-    ///   - needsAudioTimeRange: Whether to include audio time ranges in transcription
-    public init(
-        language: String,
-        censor: Bool = false,
-        needsAudioTimeRange: Bool = true
-    ) {
-        self.censor = censor
-        self.needsAudioTimeRange = needsAudioTimeRange
-        self.targetLocale = Self.locale(fromPodcastLanguage: language)
+  /// Convenience initializer that accepts a podcast language string (e.g., "zh-tw", "en-us")
+  /// - Parameters:
+  ///   - language: The language code from podcast RSS feed (e.g., "zh-tw", "en-us", "ja")
+  ///   - censor: Whether to enable content filtering
+  ///   - needsAudioTimeRange: Whether to include audio time ranges in transcription
+  public init(
+    language: String,
+    censor: Bool = false,
+    needsAudioTimeRange: Bool = true
+  ) {
+    self.censor = censor
+    self.needsAudioTimeRange = needsAudioTimeRange
+    self.targetLocale = Self.locale(fromPodcastLanguage: language)
+  }
+
+  // 2. The main setup function that returns an AsyncStream of progress
+  func setupAndInstallAssets() -> AsyncStream<Double> {
+    return AsyncStream { continuation in
+      // Create a task that will call the actor method
+      // The await ensures we're properly isolated to the actor
+      Task {
+        await self.setupAndInstallAssetsInternal(continuation: continuation)
+      }
     }
+  }
 
-    // 2. The main setup function that returns an AsyncStream of progress
-    func setupAndInstallAssets() -> AsyncStream<Double> {
-        return AsyncStream { continuation in
-            // Create a task that will call the actor method
-            // The await ensures we're properly isolated to the actor
-            Task {
-                await self.setupAndInstallAssetsInternal(continuation: continuation)
-            }
-        }
-    }
+  // Internal setup method that runs on the actor (isolated to this actor)
+  private func setupAndInstallAssetsInternal(continuation: AsyncStream<Double>.Continuation) async {
+    // Ensure we have an active transcriber instance
+    let newTranscriber = SpeechTranscriber(
+      locale: targetLocale,
+      transcriptionOptions: censor ? [.etiquetteReplacements] : [],
+      reportingOptions: [],
+      attributeOptions: needsAudioTimeRange ? [.audioTimeRange] : []
+    )
+    self.transcriber = newTranscriber
 
-    // Internal setup method that runs on the actor (isolated to this actor)
-    private func setupAndInstallAssetsInternal(continuation: AsyncStream<Double>.Continuation) async
+    // Release and reserve locales
+    await releaseAndReserveLocales()
+
+    let modules: [any SpeechModule] = [newTranscriber]
+    let installed = await Set(SpeechTranscriber.installedLocales)
+    logger.info("Installed locales: \(installed.map { $0.identifier }.joined(separator: ", "))")
+
+    // Check if assets are already installed
+    if installed.map({ $0.identifier(.bcp47) }).contains(
+      targetLocale.identifier(.bcp47))
     {
-        // Ensure we have an active transcriber instance
-        let newTranscriber = SpeechTranscriber(
-            locale: targetLocale,
-            transcriptionOptions: censor ? [.etiquetteReplacements] : [],
-            reportingOptions: [],
-            attributeOptions: needsAudioTimeRange ? [.audioTimeRange] : []
-        )
-        self.transcriber = newTranscriber
+      // Create analyzer even if assets are already installed
+      self.analyzer = SpeechAnalyzer(modules: modules)
 
-        // Release and reserve locales
-        await releaseAndReserveLocales()
+      // Verify analyzer was set (defensive check)
+      assert(self.analyzer != nil, "Analyzer should be set before finishing")
 
-        let modules: [any SpeechModule] = [newTranscriber]
-        let installed = await Set(SpeechTranscriber.installedLocales)
-        logger.info("Installed locales: \(installed.map { $0.identifier }.joined(separator: ", "))")
+      continuation.yield(1.0)  // Already installed, send 100%
+      continuation.finish()
+      return
+    }
 
-        // Check if assets are already installed
-        if installed.map({ $0.identifier(.bcp47) }).contains(
-            targetLocale.identifier(.bcp47))
-        {
-            // Create analyzer even if assets are already installed
-            self.analyzer = SpeechAnalyzer(modules: modules)
-
-            // Verify analyzer was set (defensive check)
-            assert(self.analyzer != nil, "Analyzer should be set before finishing")
-
-            continuation.yield(1.0)  // Already installed, send 100%
-            continuation.finish()
-            return
+    do {
+      // 3. Get the installation request
+      if let request = try await AssetInventory.assetInstallationRequest(
+        supporting: modules)
+      {
+        // 4. Start a nested Task to monitor progress
+        Task {
+          while !request.progress.isFinished {
+            continuation.yield(request.progress.fractionCompleted)
+            try? await Task.sleep(for: .milliseconds(100))
+          }
         }
 
+        // 6. Start the actual download and installation
+        try await request.downloadAndInstall()
+
+        // 7. Once finished, send 100% and end the stream
+        continuation.yield(1.0)
+      }
+    } catch {
+      logger.error("Asset setup failed: \(error.localizedDescription)")
+    }
+
+    // Always create analyzer after setup (even if installation failed, we still need it)
+    self.analyzer = SpeechAnalyzer(modules: modules)
+
+    // Verify analyzer was set (defensive check)
+    assert(self.analyzer != nil, "Analyzer should be set before finishing")
+
+    continuation.finish()
+  }
+
+  /// Checks if the Speech-to-Text model for the target locale is installed and ready to use.
+  ///
+  /// - Returns: `true` if the model is installed, `false` otherwise.
+  public func isModelReady() async -> Bool {
+    let installed = await Set(SpeechTranscriber.installedLocales)
+    return installed.map({ $0.identifier(.bcp47) }).contains(targetLocale.identifier(.bcp47))
+  }
+
+  /// Checks if the service is fully initialized and ready to transcribe audio.
+  ///
+  /// - Returns: `true` if both transcriber and analyzer are initialized, `false` otherwise.
+  public func isInitialized() async -> Bool {
+    return transcriber != nil && analyzer != nil
+  }
+
+  // Helper function for the locale logic (no longer needs 'locale' parameter)
+  private func releaseAndReserveLocales() async {
+    // Release existing reserved locales
+    for existingLocale in await AssetInventory.reservedLocales {
+      await AssetInventory.release(reservedLocale: existingLocale)
+    }
+
+    // Reserve the new locale
+    do {
+      try await AssetInventory.reserve(locale: targetLocale)
+    } catch {
+      logger.error("Failed to reserve locale: \(error.localizedDescription)")
+    }
+  }
+
+  public func audioToText(inputFile: URL) async throws -> String {
+    // Ensure transcriber and analyzer are initialized
+    guard let transcriber = transcriber, let analyzer = analyzer else {
+      throw NSError(
+        domain: "TranscriptService", code: 1,
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "Transcriber or analyzer not initialized. Call setupAndInstallAssets() first."
+        ])
+    }
+
+    // Download if remote URL, otherwise use local file
+    let audioURL = try await resolveAudioURL(inputFile)
+    let audioFile = try AVAudioFile(forReading: audioURL)
+    let audioFileDuration: TimeInterval =
+      Double(audioFile.length) / audioFile.processingFormat.sampleRate
+
+    logger.info("Audio file duration: \(audioFileDuration) seconds")
+
+    // Start the analyzer
+    try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+
+    // Collect transcript results
+    var transcript: AttributedString = ""
+
+    for try await result in transcriber.results {
+      transcript += result.text
+    }
+
+    // Convert AttributedString to String and return
+    return String(transcript.characters)
+  }
+
+  /// Resolves audio URL - downloads remote URLs to a temporary file, returns local URLs as-is
+  private func resolveAudioURL(_ url: URL) async throws -> URL {
+    // If it's a local file, return as-is
+    if url.isFileURL {
+      return url
+    }
+
+    // Download remote URL to temporary file
+    let (tempFileURL, _) = try await URLSession.shared.download(from: url)
+    return tempFileURL
+  }
+
+  /// Converts audio file to SRT subtitle format
+  /// - Parameter inputFile: The URL of the audio file to transcribe
+  /// - Parameter maxLength: Maximum length for each subtitle entry (optional, defaults to nil)
+  /// - Returns: SRT formatted subtitle string
+  public func audioToSRT(inputFile: URL, maxLength: Int? = nil) async throws -> String {
+    // Ensure transcriber and analyzer are initialized
+    guard let transcriber = transcriber, let analyzer = analyzer else {
+      throw NSError(
+        domain: "TranscriptService", code: 1,
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "Transcriber or analyzer not initialized. Call setupAndInstallAssets() first."
+        ])
+    }
+
+    guard needsAudioTimeRange else {
+      throw NSError(
+        domain: "TranscriptService", code: 2,
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "audioTimeRange must be enabled to generate SRT subtitles. Initialize TranscriptService with needsAudioTimeRange: true"
+        ])
+    }
+
+    // Download if remote URL, otherwise use local file
+    let audioURL = try await resolveAudioURL(inputFile)
+    let audioFile = try AVAudioFile(forReading: audioURL)
+    let audioFileDuration: TimeInterval =
+      Double(audioFile.length) / audioFile.processingFormat.sampleRate
+
+    logger.info("Audio file duration for SRT: \(audioFileDuration) seconds")
+
+    // Start the analyzer
+    try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+
+    // Collect transcript results
+    var transcript: AttributedString = ""
+
+    for try await result in transcriber.results {
+      transcript += result.text
+    }
+
+    // Convert transcript to SRT format
+    return transcriptToSRT(transcript: transcript, maxLength: maxLength)
+  }
+
+  /// Transcription progress update
+  public struct TranscriptionProgress {
+    public let progress: Double  // 0.0 to 1.0
+    public let currentTimeSeconds: TimeInterval
+    public let totalDurationSeconds: TimeInterval
+    public let isComplete: Bool
+    public let srtContent: String?  // Only set when isComplete = true
+  }
+
+  /// Converts audio file to SRT subtitle format with progress updates
+  /// - Parameter inputFile: The URL of the audio file to transcribe
+  /// - Parameter maxLength: Maximum length for each subtitle entry (optional, defaults to nil)
+  /// - Returns: AsyncStream of TranscriptionProgress updates
+  public func audioToSRTWithProgress(inputFile: URL, maxLength: Int? = nil) -> AsyncThrowingStream<
+    TranscriptionProgress, Error
+  > {
+    return AsyncThrowingStream { continuation in
+      Task {
         do {
-            // 3. Get the installation request
-            if let request = try await AssetInventory.assetInstallationRequest(
-                supporting: modules)
-            {
-                // 4. Start a nested Task to monitor progress
-                Task {
-                    while !request.progress.isFinished {
-                        continuation.yield(request.progress.fractionCompleted)
-                        try? await Task.sleep(for: .milliseconds(100))
-                    }
-                }
-
-                // 6. Start the actual download and installation
-                try await request.downloadAndInstall()
-
-                // 7. Once finished, send 100% and end the stream
-                continuation.yield(1.0)
-            }
-        } catch {
-            logger.error("Asset setup failed: \(error.localizedDescription)")
-        }
-
-        // Always create analyzer after setup (even if installation failed, we still need it)
-        self.analyzer = SpeechAnalyzer(modules: modules)
-
-        // Verify analyzer was set (defensive check)
-        assert(self.analyzer != nil, "Analyzer should be set before finishing")
-
-        continuation.finish()
-    }
-
-    /// Checks if the Speech-to-Text model for the target locale is installed and ready to use.
-    ///
-    /// - Returns: `true` if the model is installed, `false` otherwise.
-    public func isModelReady() async -> Bool {
-        let installed = await Set(SpeechTranscriber.installedLocales)
-        return installed.map({ $0.identifier(.bcp47) }).contains(targetLocale.identifier(.bcp47))
-    }
-
-    /// Checks if the service is fully initialized and ready to transcribe audio.
-    ///
-    /// - Returns: `true` if both transcriber and analyzer are initialized, `false` otherwise.
-    public func isInitialized() async -> Bool {
-        return transcriber != nil && analyzer != nil
-    }
-
-    // Helper function for the locale logic (no longer needs 'locale' parameter)
-    private func releaseAndReserveLocales() async {
-        // Release existing reserved locales
-        for existingLocale in await AssetInventory.reservedLocales {
-            await AssetInventory.release(reservedLocale: existingLocale)
-        }
-
-        // Reserve the new locale
-        do {
-            try await AssetInventory.reserve(locale: targetLocale)
-        } catch {
-            logger.error("Failed to reserve locale: \(error.localizedDescription)")
-        }
-    }
-
-    public func audioToText(inputFile: URL) async throws -> String {
-        // Ensure transcriber and analyzer are initialized
-        guard let transcriber = transcriber, let analyzer = analyzer else {
+          // Ensure transcriber and analyzer are initialized
+          guard let transcriber = self.transcriber, let analyzer = self.analyzer else {
             throw NSError(
-                domain: "TranscriptService", code: 1,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "Transcriber or analyzer not initialized. Call setupAndInstallAssets() first."
-                ])
-        }
+              domain: "TranscriptService", code: 1,
+              userInfo: [
+                NSLocalizedDescriptionKey:
+                  "Transcriber or analyzer not initialized. Call setupAndInstallAssets() first."
+              ])
+          }
 
-        // Download if remote URL, otherwise use local file
-        let audioURL = try await resolveAudioURL(inputFile)
-        let audioFile = try AVAudioFile(forReading: audioURL)
-        let audioFileDuration: TimeInterval =
+          guard self.needsAudioTimeRange else {
+            throw NSError(
+              domain: "TranscriptService", code: 2,
+              userInfo: [
+                NSLocalizedDescriptionKey:
+                  "audioTimeRange must be enabled to generate SRT subtitles."
+              ])
+          }
+
+          // Download if remote URL, otherwise use local file
+          let audioURL = try await self.resolveAudioURL(inputFile)
+          let audioFile = try AVAudioFile(forReading: audioURL)
+          let audioFileDuration: TimeInterval =
             Double(audioFile.length) / audioFile.processingFormat.sampleRate
 
-        logger.info("Audio file duration: \(audioFileDuration) seconds")
+          self.logger.info(
+            "Audio file duration for SRT with progress: \(audioFileDuration) seconds")
 
-        // Start the analyzer
-        try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+          // Send initial progress
+          continuation.yield(
+            TranscriptionProgress(
+              progress: 0.0,
+              currentTimeSeconds: 0,
+              totalDurationSeconds: audioFileDuration,
+              isComplete: false,
+              srtContent: nil
+            ))
 
-        // Collect transcript results
-        var transcript: AttributedString = ""
+          // Start the analyzer
+          try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
 
-        for try await result in transcriber.results {
+          // Collect transcript results with progress
+          var transcript: AttributedString = ""
+          var lastReportedTime: TimeInterval = 0
+
+          for try await result in transcriber.results {
             transcript += result.text
-        }
 
-        // Convert AttributedString to String and return
-        return String(transcript.characters)
-    }
+            // Extract the latest time from the result to calculate progress
+            for run in result.text.runs {
+              if let timeRange = run.audioTimeRange {
+                let currentTime = timeRange.end.seconds
+                if currentTime > lastReportedTime {
+                  lastReportedTime = currentTime
+                  let progress = min(currentTime / audioFileDuration, 0.99)  // Cap at 99% until complete
 
-    /// Resolves audio URL - downloads remote URLs to a temporary file, returns local URLs as-is
-    private func resolveAudioURL(_ url: URL) async throws -> URL {
-        // If it's a local file, return as-is
-        if url.isFileURL {
-            return url
-        }
-
-        // Download remote URL to temporary file
-        let (tempFileURL, _) = try await URLSession.shared.download(from: url)
-        return tempFileURL
-    }
-
-    /// Converts audio file to SRT subtitle format
-    /// - Parameter inputFile: The URL of the audio file to transcribe
-    /// - Parameter maxLength: Maximum length for each subtitle entry (optional, defaults to nil)
-    /// - Returns: SRT formatted subtitle string
-    public func audioToSRT(inputFile: URL, maxLength: Int? = nil) async throws -> String {
-        // Ensure transcriber and analyzer are initialized
-        guard let transcriber = transcriber, let analyzer = analyzer else {
-            throw NSError(
-                domain: "TranscriptService", code: 1,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "Transcriber or analyzer not initialized. Call setupAndInstallAssets() first."
-                ])
-        }
-
-        guard needsAudioTimeRange else {
-            throw NSError(
-                domain: "TranscriptService", code: 2,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "audioTimeRange must be enabled to generate SRT subtitles. Initialize TranscriptService with needsAudioTimeRange: true"
-                ])
-        }
-
-        // Download if remote URL, otherwise use local file
-        let audioURL = try await resolveAudioURL(inputFile)
-        let audioFile = try AVAudioFile(forReading: audioURL)
-        let audioFileDuration: TimeInterval =
-            Double(audioFile.length) / audioFile.processingFormat.sampleRate
-
-        logger.info("Audio file duration for SRT: \(audioFileDuration) seconds")
-
-        // Start the analyzer
-        try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
-
-        // Collect transcript results
-        var transcript: AttributedString = ""
-
-        for try await result in transcriber.results {
-            transcript += result.text
-        }
-
-        // Convert transcript to SRT format
-        return transcriptToSRT(transcript: transcript, maxLength: maxLength)
-    }
-
-    /// Transcription progress update
-    public struct TranscriptionProgress {
-        public let progress: Double  // 0.0 to 1.0
-        public let currentTimeSeconds: TimeInterval
-        public let totalDurationSeconds: TimeInterval
-        public let isComplete: Bool
-        public let srtContent: String?  // Only set when isComplete = true
-    }
-
-    /// Converts audio file to SRT subtitle format with progress updates
-    /// - Parameter inputFile: The URL of the audio file to transcribe
-    /// - Parameter maxLength: Maximum length for each subtitle entry (optional, defaults to nil)
-    /// - Returns: AsyncStream of TranscriptionProgress updates
-    public func audioToSRTWithProgress(inputFile: URL, maxLength: Int? = nil) -> AsyncThrowingStream<TranscriptionProgress, Error> {
-        return AsyncThrowingStream { continuation in
-            Task {
-                do {
-                    // Ensure transcriber and analyzer are initialized
-                    guard let transcriber = self.transcriber, let analyzer = self.analyzer else {
-                        throw NSError(
-                            domain: "TranscriptService", code: 1,
-                            userInfo: [
-                                NSLocalizedDescriptionKey:
-                                    "Transcriber or analyzer not initialized. Call setupAndInstallAssets() first."
-                            ])
-                    }
-
-                    guard self.needsAudioTimeRange else {
-                        throw NSError(
-                            domain: "TranscriptService", code: 2,
-                            userInfo: [
-                                NSLocalizedDescriptionKey:
-                                    "audioTimeRange must be enabled to generate SRT subtitles."
-                            ])
-                    }
-
-                    // Download if remote URL, otherwise use local file
-                    let audioURL = try await self.resolveAudioURL(inputFile)
-                    let audioFile = try AVAudioFile(forReading: audioURL)
-                    let audioFileDuration: TimeInterval =
-                        Double(audioFile.length) / audioFile.processingFormat.sampleRate
-
-                    self.logger.info("Audio file duration for SRT with progress: \(audioFileDuration) seconds")
-
-                    // Send initial progress
-                    continuation.yield(TranscriptionProgress(
-                        progress: 0.0,
-                        currentTimeSeconds: 0,
-                        totalDurationSeconds: audioFileDuration,
-                        isComplete: false,
-                        srtContent: nil
+                  continuation.yield(
+                    TranscriptionProgress(
+                      progress: progress,
+                      currentTimeSeconds: currentTime,
+                      totalDurationSeconds: audioFileDuration,
+                      isComplete: false,
+                      srtContent: nil
                     ))
-
-                    // Start the analyzer
-                    try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
-
-                    // Collect transcript results with progress
-                    var transcript: AttributedString = ""
-                    var lastReportedTime: TimeInterval = 0
-
-                    for try await result in transcriber.results {
-                        transcript += result.text
-
-                        // Extract the latest time from the result to calculate progress
-                        for run in result.text.runs {
-                            if let timeRange = run.audioTimeRange {
-                                let currentTime = timeRange.end.seconds
-                                if currentTime > lastReportedTime {
-                                    lastReportedTime = currentTime
-                                    let progress = min(currentTime / audioFileDuration, 0.99)  // Cap at 99% until complete
-
-                                    continuation.yield(TranscriptionProgress(
-                                        progress: progress,
-                                        currentTimeSeconds: currentTime,
-                                        totalDurationSeconds: audioFileDuration,
-                                        isComplete: false,
-                                        srtContent: nil
-                                    ))
-                                }
-                            }
-                        }
-                    }
-
-                    // Convert transcript to SRT format
-                    let srtContent = self.transcriptToSRT(transcript: transcript, maxLength: maxLength)
-
-                    // Send final progress with completed content
-                    continuation.yield(TranscriptionProgress(
-                        progress: 1.0,
-                        currentTimeSeconds: audioFileDuration,
-                        totalDurationSeconds: audioFileDuration,
-                        isComplete: true,
-                        srtContent: srtContent
-                    ))
-
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
                 }
+              }
             }
+          }
+
+          // Convert transcript to SRT format
+          let srtContent = self.transcriptToSRT(transcript: transcript, maxLength: maxLength)
+
+          // Send final progress with completed content
+          continuation.yield(
+            TranscriptionProgress(
+              progress: 1.0,
+              currentTimeSeconds: audioFileDuration,
+              totalDurationSeconds: audioFileDuration,
+              isComplete: true,
+              srtContent: srtContent
+            ))
+
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
         }
+      }
     }
+  }
 
-    /// Formats a TimeInterval into SRT time format (HH:MM:SS,mmm)
-    /// - Parameter timeInterval: The time interval in seconds
-    /// - Returns: Formatted time string in SRT format
-    private func formatSRTTime(_ timeInterval: TimeInterval) -> String {
-        let ms = Int(timeInterval.truncatingRemainder(dividingBy: 1) * 1000)
-        let s = Int(timeInterval) % 60
-        let m = (Int(timeInterval) / 60) % 60
-        let h = Int(timeInterval) / 60 / 60
-        return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
+  /// Formats a TimeInterval into SRT time format (HH:MM:SS,mmm)
+  /// - Parameter timeInterval: The time interval in seconds
+  /// - Returns: Formatted time string in SRT format
+  private func formatSRTTime(_ timeInterval: TimeInterval) -> String {
+    let ms = Int(timeInterval.truncatingRemainder(dividingBy: 1) * 1000)
+    let s = Int(timeInterval) % 60
+    let m = (Int(timeInterval) / 60) % 60
+    let h = Int(timeInterval) / 60 / 60
+    return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
+  }
+
+  /// Helper to check for sentence endings in various languages
+  private func isSentenceEnd(_ text: String) -> Bool {
+    // Includes:
+    // English/European: . ! ?
+    // Chinese/CJK: 。 (IDEOGRAPHIC FULL STOP), ！ (FULLWIDTH EXCLAMATION MARK), ？ (FULLWIDTH QUESTION MARK)
+    let terminators: Set<Character> = [".", "!", "?", "。", "！", "？"]
+
+    // Check the last character (trimming whitespace/newlines first just in case)
+    guard let lastChar = text.trimmingCharacters(in: .whitespacesAndNewlines).last else {
+      return false
     }
+    return terminators.contains(lastChar)
+  }
 
-    /// Helper to check for sentence endings in various languages
-    private func isSentenceEnd(_ text: String) -> Bool {
-        // Includes:
-        // English/European: . ! ?
-        // Chinese/CJK: 。 (IDEOGRAPHIC FULL STOP), ！ (FULLWIDTH EXCLAMATION MARK), ？ (FULLWIDTH QUESTION MARK)
-        let terminators: Set<Character> = [".", "!", "?", "。", "！", "？"]
+  /// Converts an AttributedString transcript to SRT subtitle format
+  private func transcriptToSRT(transcript: AttributedString, maxLength: Int?) -> String {
+    var sentences: [(text: AttributedString, timeRange: CMTimeRange?)] = []
 
-        // Check the last character (trimming whitespace/newlines first just in case)
-        guard let lastChar = text.trimmingCharacters(in: .whitespacesAndNewlines).last else {
-            return false
-        }
-        return terminators.contains(lastChar)
-    }
+    if let maxLength = maxLength {
+      // --- Logic for Max Length Split ---
+      var currentSentence: AttributedString = ""
+      var currentTimeRange: CMTimeRange?
 
-    /// Converts an AttributedString transcript to SRT subtitle format
-    private func transcriptToSRT(transcript: AttributedString, maxLength: Int?) -> String {
-        var sentences: [(text: AttributedString, timeRange: CMTimeRange?)] = []
+      for run in transcript.runs {
+        let runSubstring = transcript[run.range]
+        let runText = AttributedString(runSubstring)
+        let runLength = runText.characters.count
 
-        if let maxLength = maxLength {
-            // --- Logic for Max Length Split ---
-            var currentSentence: AttributedString = ""
-            var currentTimeRange: CMTimeRange?
+        // Get audioTimeRange
+        let runTimeRange = run.audioTimeRange
 
-            for run in transcript.runs {
-                let runSubstring = transcript[run.range]
-                let runText = AttributedString(runSubstring)
-                let runLength = runText.characters.count
+        // If adding this run keeps us under maxLength
+        if currentSentence.characters.count + runLength <= maxLength {
+          currentSentence += runText
 
-                // Get audioTimeRange
-                let runTimeRange = run.audioTimeRange
-
-                // If adding this run keeps us under maxLength
-                if currentSentence.characters.count + runLength <= maxLength {
-                    currentSentence += runText
-
-                    // Update time range logic
-                    if let range = runTimeRange {
-                        if let current = currentTimeRange {
-                            let start = min(current.start.seconds, range.start.seconds)
-                            let end = max(current.end.seconds, range.end.seconds)
-                            currentTimeRange = CMTimeRange(
-                                start: CMTime(seconds: start, preferredTimescale: 600),
-                                duration: CMTime(seconds: end - start, preferredTimescale: 600)
-                            )
-                        } else {
-                            currentTimeRange = range
-                        }
-                    }
-
-                    // OPTIONAL: Even in max length mode, if we hit a period, we should probably split
-                    // to avoid cutting sentences in weird places, but strictly following maxLength logic:
-                    if isSentenceEnd(String(runText.characters)) {
-                        sentences.append((currentSentence, currentTimeRange))
-                        currentSentence = ""
-                        currentTimeRange = nil
-                    }
-
-                } else {
-                    // Length exceeded, push current and start new
-                    if currentSentence.characters.count > 0 {
-                        sentences.append((currentSentence, currentTimeRange))
-                    }
-                    currentSentence = runText
-                    currentTimeRange = runTimeRange
-                }
+          // Update time range logic
+          if let range = runTimeRange {
+            if let current = currentTimeRange {
+              let start = min(current.start.seconds, range.start.seconds)
+              let end = max(current.end.seconds, range.end.seconds)
+              currentTimeRange = CMTimeRange(
+                start: CMTime(seconds: start, preferredTimescale: 600),
+                duration: CMTime(seconds: end - start, preferredTimescale: 600)
+              )
+            } else {
+              currentTimeRange = range
             }
-            if currentSentence.characters.count > 0 {
-                sentences.append((currentSentence, currentTimeRange))
-            }
+          }
+
+          // OPTIONAL: Even in max length mode, if we hit a period, we should probably split
+          // to avoid cutting sentences in weird places, but strictly following maxLength logic:
+          if isSentenceEnd(String(runText.characters)) {
+            sentences.append((currentSentence, currentTimeRange))
+            currentSentence = ""
+            currentTimeRange = nil
+          }
+
         } else {
-            // --- Logic for Natural Sentence Boundaries (The Fix is Here) ---
-            var currentSentence: AttributedString = ""
-            var currentTimeRange: CMTimeRange?
+          // Length exceeded, push current and start new
+          if currentSentence.characters.count > 0 {
+            sentences.append((currentSentence, currentTimeRange))
+          }
+          currentSentence = runText
+          currentTimeRange = runTimeRange
+        }
+      }
+      if currentSentence.characters.count > 0 {
+        sentences.append((currentSentence, currentTimeRange))
+      }
+    } else {
+      // --- Logic for Natural Sentence Boundaries (The Fix is Here) ---
+      var currentSentence: AttributedString = ""
+      var currentTimeRange: CMTimeRange?
 
-            for run in transcript.runs {
-                let runSubstring = transcript[run.range]
-                let runText = AttributedString(runSubstring)
-                currentSentence += runText
+      for run in transcript.runs {
+        let runSubstring = transcript[run.range]
+        let runText = AttributedString(runSubstring)
+        currentSentence += runText
 
-                // 1. Expand the Time Range for the current sentence
-                if let audioTimeRange = run.audioTimeRange {
-                    if let existingRange = currentTimeRange {
-                        let start = min(existingRange.start.seconds, audioTimeRange.start.seconds)
-                        let end = max(existingRange.end.seconds, audioTimeRange.end.seconds)
-                        currentTimeRange = CMTimeRange(
-                            start: CMTime(seconds: start, preferredTimescale: 600),
-                            duration: CMTime(seconds: end - start, preferredTimescale: 600)
-                        )
-                    } else {
-                        currentTimeRange = audioTimeRange
-                    }
-                }
-
-                // 2. Check for sentence ending (Support English & Chinese)
-                let text = String(runText.characters)
-
-                // FIXED: Use the helper that checks for "。" "！" "？"
-                if isSentenceEnd(text) {
-                    if currentSentence.characters.count > 0 {
-                        sentences.append((currentSentence, currentTimeRange))
-                    }
-                    currentSentence = ""
-                    currentTimeRange = nil
-                }
-            }
-            // Catch any remaining text
-            if currentSentence.characters.count > 0 {
-                sentences.append((currentSentence, currentTimeRange))
-            }
+        // 1. Expand the Time Range for the current sentence
+        if let audioTimeRange = run.audioTimeRange {
+          if let existingRange = currentTimeRange {
+            let start = min(existingRange.start.seconds, audioTimeRange.start.seconds)
+            let end = max(existingRange.end.seconds, audioTimeRange.end.seconds)
+            currentTimeRange = CMTimeRange(
+              start: CMTime(seconds: start, preferredTimescale: 600),
+              duration: CMTime(seconds: end - start, preferredTimescale: 600)
+            )
+          } else {
+            currentTimeRange = audioTimeRange
+          }
         }
 
-        // --- Convert to SRT String ---
-        let srtEntries = sentences.enumerated().compactMap { index, entry -> String? in
-            let (sentence, timeRange) = entry
+        // 2. Check for sentence ending (Support English & Chinese)
+        let text = String(runText.characters)
 
-            // Fallback: if sentence-level time range is missing, scan runs again
-            var finalTimeRange = timeRange
-            if finalTimeRange == nil {
-                for run in sentence.runs {
-                    if let audioTimeRange = run.audioTimeRange {
-                        if finalTimeRange == nil {
-                            finalTimeRange = audioTimeRange
-                        } else {
-                            let start = min(
-                                finalTimeRange!.start.seconds, audioTimeRange.start.seconds)
-                            let end = max(finalTimeRange!.end.seconds, audioTimeRange.end.seconds)
-                            finalTimeRange = CMTimeRange(
-                                start: CMTime(seconds: start, preferredTimescale: 600),
-                                duration: CMTime(seconds: end - start, preferredTimescale: 600)
-                            )
-                        }
-                    }
-                }
-            }
-
-            guard let range = finalTimeRange else { return nil }
-
-            let text = String(sentence.characters).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { return nil }
-
-            let entryNumber = index + 1
-            let startTime = formatSRTTime(range.start.seconds)
-            let endTime = formatSRTTime(range.end.seconds)
-
-            return "\(entryNumber)\n\(startTime) --> \(endTime)\n\(text)"
+        // FIXED: Use the helper that checks for "。" "！" "？"
+        if isSentenceEnd(text) {
+          if currentSentence.characters.count > 0 {
+            sentences.append((currentSentence, currentTimeRange))
+          }
+          currentSentence = ""
+          currentTimeRange = nil
         }
-
-        return srtEntries.joined(separator: "\n\n")
+      }
+      // Catch any remaining text
+      if currentSentence.characters.count > 0 {
+        sentences.append((currentSentence, currentTimeRange))
+      }
     }
+
+    // --- Convert to SRT String ---
+    let srtEntries = sentences.enumerated().compactMap { index, entry -> String? in
+      let (sentence, timeRange) = entry
+
+      // Fallback: if sentence-level time range is missing, scan runs again
+      var finalTimeRange = timeRange
+      if finalTimeRange == nil {
+        for run in sentence.runs {
+          if let audioTimeRange = run.audioTimeRange {
+            if finalTimeRange == nil {
+              finalTimeRange = audioTimeRange
+            } else {
+              let start = min(
+                finalTimeRange!.start.seconds, audioTimeRange.start.seconds)
+              let end = max(finalTimeRange!.end.seconds, audioTimeRange.end.seconds)
+              finalTimeRange = CMTimeRange(
+                start: CMTime(seconds: start, preferredTimescale: 600),
+                duration: CMTime(seconds: end - start, preferredTimescale: 600)
+              )
+            }
+          }
+        }
+      }
+
+      guard let range = finalTimeRange else { return nil }
+
+      let text = String(sentence.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !text.isEmpty else { return nil }
+
+      let entryNumber = index + 1
+      let startTime = formatSRTTime(range.start.seconds)
+      let endTime = formatSRTTime(range.end.seconds)
+
+      return "\(entryNumber)\n\(startTime) --> \(endTime)\n\(text)"
+    }
+
+    return srtEntries.joined(separator: "\n\n")
+  }
 }

@@ -1,3 +1,4 @@
+import Foundation
 //
 //  ExtensionView.swift
 //  PodcastAnalyzer
@@ -6,22 +7,21 @@
 //
 import SwiftUI
 
-import Foundation
 extension View {
-    @ViewBuilder
-    func iosNavigationBarTitleDisplayModeInline() -> some View {
-        #if os(iOS)
-        self.navigationBarTitleDisplayMode(.inline)
-        #else
-        self // Do nothing on macOS
-        #endif
-    }
-    
-    func disableAutocapitalization() -> some View {
-            #if os(iOS)
-            return self.textInputAutocapitalization(.never)
-            #else
-            return self
-            #endif
-        }
+  @ViewBuilder
+  func iosNavigationBarTitleDisplayModeInline() -> some View {
+    #if os(iOS)
+      self.navigationBarTitleDisplayMode(.inline)
+    #else
+      self  // Do nothing on macOS
+    #endif
+  }
+
+  func disableAutocapitalization() -> some View {
+    #if os(iOS)
+      return self.textInputAutocapitalization(.never)
+    #else
+      return self
+    #endif
+  }
 }

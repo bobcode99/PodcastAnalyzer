@@ -3,18 +3,18 @@ import SwiftData
 
 @Model
 class PodcastInfoModel {
-    @Attribute(.unique)
-    var id: UUID
+  @Attribute(.unique)
+  var id: UUID
 
-    var podcastInfo: PodcastInfo
+  var podcastInfo: PodcastInfo
 
-    var dateAdded: Date
-    var lastUpdated: Date
+  var dateAdded: Date
+  var lastUpdated: Date
 
-    init(podcastInfo: PodcastInfo, lastUpdated: Date) {
-        self.id = UUID()
-        self.podcastInfo = podcastInfo
-        self.dateAdded = Date()
-        self.lastUpdated = lastUpdated
-    }
+  init(podcastInfo: PodcastInfo, lastUpdated: Date) {
+    self.id = UUID()
+    self.podcastInfo = podcastInfo
+    self.dateAdded = Date()
+    self.lastUpdated = lastUpdated
+  }
 }
