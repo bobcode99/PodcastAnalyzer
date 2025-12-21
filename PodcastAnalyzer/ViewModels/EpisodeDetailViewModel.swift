@@ -95,7 +95,9 @@ final class EpisodeDetailViewModel {
 
   /// Checks if there's an active transcript job and starts observing
   private func checkAndObserveTranscriptJob() {
-    let jobId = "\(podcastTitle)|\(episode.title)"
+    // Use Unit Separator (U+001F) as delimiter - same as TranscriptManager
+    let delimiter = "\u{1F}"
+    let jobId = "\(podcastTitle)\(delimiter)\(episode.title)"
     if TranscriptManager.shared.activeJobs[jobId] != nil {
       observeTranscriptManager()
     }
@@ -527,7 +529,9 @@ final class EpisodeDetailViewModel {
       .receive(on: DispatchQueue.main)
       .sink { [weak self] jobs in
         guard let self = self else { return }
-        let jobId = "\(self.podcastTitle)|\(self.episode.title)"
+        // Use Unit Separator (U+001F) as delimiter - same as TranscriptManager
+        let delimiter = "\u{1F}"
+        let jobId = "\(self.podcastTitle)\(delimiter)\(self.episode.title)"
 
         if let job = jobs[jobId] {
           // Update local state based on job status

@@ -245,8 +245,31 @@ class DownloadManager: NSObject, ObservableObject {
 
   // MARK: - Helpers
 
+  // Use Unit Separator (U+001F) as delimiter - a control character that won't appear in episode titles
+  private static let episodeKeyDelimiter = "\u{1F}"
+  
   private func makeKey(episode: String, podcast: String) -> String {
-    return "\(podcast)|\(episode)"
+    return "\(podcast)\(Self.episodeKeyDelimiter)\(episode)"
+  }
+  
+  // Parse episode key, supporting both new format (Unit Separator) and old format (|) for backward compatibility
+  private func parseEpisodeKey(_ episodeKey: String) -> (podcastTitle: String, episodeTitle: String)? {
+    // Try new format first (Unit Separator)
+    if let delimiterIndex = episodeKey.range(of: Self.episodeKeyDelimiter) {
+      let podcastTitle = String(episodeKey[..<delimiterIndex.lowerBound])
+      let episodeTitle = String(episodeKey[delimiterIndex.upperBound...])
+      return (podcastTitle, episodeTitle)
+    }
+    
+    // Fall back to old format (|) for backward compatibility
+    // Split from the end to handle cases where episode title contains |
+    if let lastPipeIndex = episodeKey.lastIndex(of: "|") {
+      let podcastTitle = String(episodeKey[..<lastPipeIndex])
+      let episodeTitle = String(episodeKey[episodeKey.index(after: lastPipeIndex)...])
+      return (podcastTitle, episodeTitle)
+    }
+    
+    return nil
   }
 }
 
@@ -265,14 +288,10 @@ extension DownloadManager: URLSessionDownloadDelegate {
       return
     }
 
-    let components = episodeKey.split(separator: "|")
-    guard components.count == 2 else {
+    guard let (podcastTitle, episodeTitle) = parseEpisodeKey(episodeKey) else {
       logger.error("Invalid episode key format: \(episodeKey)")
       return
     }
-
-    let podcastTitle = String(components[0])
-    let episodeTitle = String(components[1])
 
     logger.info("Download finished for: \(episodeTitle), starting file processing...")
 

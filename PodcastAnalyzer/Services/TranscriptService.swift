@@ -7,6 +7,7 @@
 
 import AVFoundation
 import Foundation
+import NaturalLanguage
 import Speech
 import os.log
 
@@ -438,135 +439,127 @@ public actor TranscriptService {
     return terminators.contains(lastChar)
   }
 
-  /// Converts an AttributedString transcript to SRT subtitle format
-  private func transcriptToSRT(transcript: AttributedString, maxLength: Int?) -> String {
-    var sentences: [(text: AttributedString, timeRange: CMTimeRange?)] = []
+  /// Splits an AttributedString transcript into segments using NLTokenizer with maxLength constraint
+  /// This creates segments of approximately 5-6 seconds duration, similar to yap CLI tool
+  /// - Parameters:
+  ///   - transcript: The full transcript as AttributedString with audioTimeRange attributes
+  ///   - maxLength: Maximum character length per segment (default: 40)
+  /// - Returns: Array of AttributedString segments with proper time ranges
+  private func splitTranscriptIntoSegments(
+    transcript: AttributedString, maxLength: Int
+  ) -> [AttributedString] {
+    let tokenizer = NLTokenizer(unit: .sentence)
+    let string = String(transcript.characters)
+    tokenizer.string = string
 
-    if let maxLength = maxLength {
-      // --- Logic for Max Length Split ---
-      var currentSentence: AttributedString = ""
-      var currentTimeRange: CMTimeRange?
-
-      for run in transcript.runs {
-        let runSubstring = transcript[run.range]
-        let runText = AttributedString(runSubstring)
-        let runLength = runText.characters.count
-
-        // Get audioTimeRange
-        let runTimeRange = run.audioTimeRange
-
-        // If adding this run keeps us under maxLength
-        if currentSentence.characters.count + runLength <= maxLength {
-          currentSentence += runText
-
-          // Update time range logic
-          if let range = runTimeRange {
-            if let current = currentTimeRange {
-              let start = min(current.start.seconds, range.start.seconds)
-              let end = max(current.end.seconds, range.end.seconds)
-              currentTimeRange = CMTimeRange(
-                start: CMTime(seconds: start, preferredTimescale: 600),
-                duration: CMTime(seconds: end - start, preferredTimescale: 600)
-              )
-            } else {
-              currentTimeRange = range
-            }
-          }
-
-          // OPTIONAL: Even in max length mode, if we hit a period, we should probably split
-          // to avoid cutting sentences in weird places, but strictly following maxLength logic:
-          if isSentenceEnd(String(runText.characters)) {
-            sentences.append((currentSentence, currentTimeRange))
-            currentSentence = ""
-            currentTimeRange = nil
-          }
-
-        } else {
-          // Length exceeded, push current and start new
-          if currentSentence.characters.count > 0 {
-            sentences.append((currentSentence, currentTimeRange))
-          }
-          currentSentence = runText
-          currentTimeRange = runTimeRange
-        }
-      }
-      if currentSentence.characters.count > 0 {
-        sentences.append((currentSentence, currentTimeRange))
-      }
-    } else {
-      // --- Logic for Natural Sentence Boundaries (The Fix is Here) ---
-      var currentSentence: AttributedString = ""
-      var currentTimeRange: CMTimeRange?
-
-      for run in transcript.runs {
-        let runSubstring = transcript[run.range]
-        let runText = AttributedString(runSubstring)
-        currentSentence += runText
-
-        // 1. Expand the Time Range for the current sentence
-        if let audioTimeRange = run.audioTimeRange {
-          if let existingRange = currentTimeRange {
-            let start = min(existingRange.start.seconds, audioTimeRange.start.seconds)
-            let end = max(existingRange.end.seconds, audioTimeRange.end.seconds)
-            currentTimeRange = CMTimeRange(
-              start: CMTime(seconds: start, preferredTimescale: 600),
-              duration: CMTime(seconds: end - start, preferredTimescale: 600)
-            )
-          } else {
-            currentTimeRange = audioTimeRange
-          }
-        }
-
-        // 2. Check for sentence ending (Support English & Chinese)
-        let text = String(runText.characters)
-
-        // FIXED: Use the helper that checks for "。" "！" "？"
-        if isSentenceEnd(text) {
-          if currentSentence.characters.count > 0 {
-            sentences.append((currentSentence, currentTimeRange))
-          }
-          currentSentence = ""
-          currentTimeRange = nil
-        }
-      }
-      // Catch any remaining text
-      if currentSentence.characters.count > 0 {
-        sentences.append((currentSentence, currentTimeRange))
-      }
+    // Get all sentence ranges
+    let sentenceRanges = tokenizer.tokens(for: string.startIndex..<string.endIndex).compactMap {
+      stringRange -> (Range<String.Index>, Range<AttributedString.Index>)? in
+      guard
+        let attrLower = AttributedString.Index(stringRange.lowerBound, within: transcript),
+        let attrUpper = AttributedString.Index(stringRange.upperBound, within: transcript)
+      else { return nil }
+      return (stringRange, attrLower..<attrUpper)
     }
 
-    // --- Convert to SRT String ---
-    let srtEntries = sentences.enumerated().compactMap { index, entry -> String? in
-      let (sentence, timeRange) = entry
+    // Process each sentence and split if needed
+    let allRanges: [Range<AttributedString.Index>] = sentenceRanges.flatMap {
+      sentenceStringRange, sentenceAttrRange -> [Range<AttributedString.Index>] in
+      let sentence = transcript[sentenceAttrRange]
 
-      // Fallback: if sentence-level time range is missing, scan runs again
-      var finalTimeRange = timeRange
-      if finalTimeRange == nil {
-        for run in sentence.runs {
-          if let audioTimeRange = run.audioTimeRange {
-            if finalTimeRange == nil {
-              finalTimeRange = audioTimeRange
-            } else {
-              let start = min(
-                finalTimeRange!.start.seconds, audioTimeRange.start.seconds)
-              let end = max(finalTimeRange!.end.seconds, audioTimeRange.end.seconds)
-              finalTimeRange = CMTimeRange(
-                start: CMTime(seconds: start, preferredTimescale: 600),
-                duration: CMTime(seconds: end - start, preferredTimescale: 600)
-              )
-            }
-          }
+      // If sentence is within maxLength, keep it as-is
+      guard sentence.characters.count > maxLength else {
+        return [sentenceAttrRange]
+      }
+
+      // Sentence exceeds maxLength - split by words
+      let wordTokenizer = NLTokenizer(unit: .word)
+      wordTokenizer.string = string
+
+      var wordRanges: [Range<AttributedString.Index>] = wordTokenizer.tokens(
+        for: sentenceStringRange
+      ).compactMap { wordStringRange -> Range<AttributedString.Index>? in
+        guard
+          let attrLower = AttributedString.Index(wordStringRange.lowerBound, within: transcript),
+          let attrUpper = AttributedString.Index(wordStringRange.upperBound, within: transcript)
+        else { return nil }
+        return attrLower..<attrUpper
+      }
+
+      guard !wordRanges.isEmpty else { return [sentenceAttrRange] }
+
+      // Extend first word to include leading whitespace/punctuation
+      wordRanges[0] = sentenceAttrRange.lowerBound..<wordRanges[0].upperBound
+      // Extend last word to include trailing whitespace/punctuation
+      wordRanges[wordRanges.count - 1] =
+        wordRanges[wordRanges.count - 1].lowerBound..<sentenceAttrRange.upperBound
+
+      // Accumulate words into segments respecting maxLength
+      var segmentRanges: [Range<AttributedString.Index>] = []
+      for wordRange in wordRanges {
+        if let lastRange = segmentRanges.last,
+          transcript[lastRange].characters.count + transcript[wordRange].characters.count
+            <= maxLength
+        {
+          // Extend the last segment
+          segmentRanges[segmentRanges.count - 1] = lastRange.lowerBound..<wordRange.upperBound
+        } else {
+          // Start a new segment
+          segmentRanges.append(wordRange)
         }
       }
 
-      guard let range = finalTimeRange else { return nil }
+      return segmentRanges
+    }
 
-      let text = String(sentence.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+    // Convert ranges to AttributedStrings with proper time ranges
+    return allRanges.compactMap { range -> AttributedString? in
+      let segment = transcript[range]
+
+      // Collect time ranges from non-empty runs
+      let audioTimeRanges = segment.runs.filter {
+        !String(transcript[$0.range].characters)
+          .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      }.compactMap(\.audioTimeRange)
+
+      guard !audioTimeRanges.isEmpty else { return nil }
+
+      // Calculate combined time range (start of first, end of last)
+      let start = audioTimeRanges.first!.start
+      let end = audioTimeRanges.last!.end
+
+      // Create new AttributedString with the combined time range
+      var attributes = AttributeContainer()
+      attributes[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] = CMTimeRange(
+        start: start,
+        end: end
+      )
+      return AttributedString(segment.characters, attributes: attributes)
+    }
+  }
+
+  /// Converts an AttributedString transcript to SRT subtitle format
+  /// Uses NLTokenizer for smart sentence detection and splits long sentences by word
+  /// - Parameters:
+  ///   - transcript: The full transcript as AttributedString
+  ///   - maxLength: Maximum character length per segment (default: 40 for ~5 second segments)
+  /// - Returns: SRT formatted string
+  private func transcriptToSRT(transcript: AttributedString, maxLength: Int?) -> String {
+    // Default to 40 characters if not specified (creates ~5 second segments)
+    let effectiveMaxLength = maxLength ?? 40
+
+    let segments = splitTranscriptIntoSegments(
+      transcript: transcript, maxLength: effectiveMaxLength)
+
+    let srtEntries = segments.enumerated().compactMap { index, segment -> String? in
+      guard let timeRange = segment.audioTimeRange else { return nil }
+
+      let text = String(segment.characters).trimmingCharacters(in: .whitespacesAndNewlines)
       guard !text.isEmpty else { return nil }
 
       let entryNumber = index + 1
-      let startTime = formatSRTTime(range.start.seconds)
-      let endTime = formatSRTTime(range.end.seconds)
+      let startTime = formatSRTTime(timeRange.start.seconds)
+      let endTime = formatSRTTime(timeRange.end.seconds)
 
       return "\(entryNumber)\n\(startTime) --> \(endTime)\n\(text)"
     }

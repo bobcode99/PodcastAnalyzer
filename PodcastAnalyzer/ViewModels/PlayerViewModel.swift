@@ -18,6 +18,9 @@ private let logger = Logger(subsystem: "com.podcast.analyzer", category: "Player
 @available(*, deprecated, message: "Use ExpandedPlayerViewModel instead")
 class PlayerViewModel: ObservableObject {
 
+  // Use Unit Separator (U+001F) as delimiter - same as DownloadManager for consistency
+  private static let episodeKeyDelimiter = "\u{1F}"
+
   // MARK: - Published Properties (like @Published in ObservableObject)
 
   @Published var isPlaying: Bool = false
@@ -92,7 +95,7 @@ class PlayerViewModel: ObservableObject {
 
   func startPlayback() {
     let playbackEpisode = PlaybackEpisode(
-      id: "\(podcastTitle)|\(episodeTitle)",
+      id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episodeTitle)",
       title: episodeTitle,
       podcastTitle: podcastTitle,
       audioURL: audioURL,

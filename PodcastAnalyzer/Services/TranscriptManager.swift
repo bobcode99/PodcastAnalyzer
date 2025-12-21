@@ -21,7 +21,7 @@ enum TranscriptJobStatus: Equatable {
 
 /// Represents a transcript generation job
 struct TranscriptJob: Identifiable {
-  let id: String  // podcastTitle|episodeTitle
+  let id: String  // podcastTitle + Unit Separator + episodeTitle (same format as episode keys)
   let episodeTitle: String
   let podcastTitle: String
   let audioPath: String
@@ -34,8 +34,16 @@ struct TranscriptJob: Identifiable {
 class TranscriptManager: ObservableObject {
   static let shared = TranscriptManager()
 
+  // Use Unit Separator (U+001F) as delimiter - same as DownloadManager for consistency
+  private static let episodeKeyDelimiter = "\u{1F}"
+
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "TranscriptManager")
   private let fileStorage = FileStorageManager.shared
+  
+  // Helper to create job ID matching episode key format
+  private func makeJobId(podcastTitle: String, episodeTitle: String) -> String {
+    return "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episodeTitle)"
+  }
 
   // Published state for UI observation
   @Published var activeJobs: [String: TranscriptJob] = [:]
@@ -62,7 +70,7 @@ class TranscriptManager: ObservableObject {
   func queueTranscript(
     episodeTitle: String, podcastTitle: String, audioPath: String, language: String
   ) {
-    let jobId = "\(podcastTitle)|\(episodeTitle)"
+    let jobId = makeJobId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
 
     // Check if already queued or processing
     if activeJobs[jobId] != nil {
@@ -89,7 +97,7 @@ class TranscriptManager: ObservableObject {
 
   /// Checks if a transcript is being generated for an episode
   func isGenerating(episodeTitle: String, podcastTitle: String) -> Bool {
-    let jobId = "\(podcastTitle)|\(episodeTitle)"
+    let jobId = makeJobId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
 
     // Check if in pending queue or actively running
     if pendingJobs.contains(where: { $0.id == jobId }) || runningJobIds.contains(jobId) {
@@ -110,13 +118,13 @@ class TranscriptManager: ObservableObject {
 
   /// Gets the current status of a transcript job
   func getJobStatus(episodeTitle: String, podcastTitle: String) -> TranscriptJobStatus? {
-    let jobId = "\(podcastTitle)|\(episodeTitle)"
+    let jobId = makeJobId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
     return activeJobs[jobId]?.status
   }
 
   /// Cancels a pending or active transcript job
   func cancelJob(episodeTitle: String, podcastTitle: String) {
-    let jobId = "\(podcastTitle)|\(episodeTitle)"
+    let jobId = makeJobId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
 
     // Remove from pending
     pendingJobs.removeAll { $0.id == jobId }

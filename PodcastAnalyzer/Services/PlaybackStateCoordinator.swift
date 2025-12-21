@@ -14,10 +14,18 @@ import os.log
 class PlaybackStateCoordinator: ObservableObject {
   static var shared: PlaybackStateCoordinator?
 
+  // Use Unit Separator (U+001F) as delimiter - same as DownloadManager for consistency
+  private static let episodeKeyDelimiter = "\u{1F}"
+
   private var modelContext: ModelContext?
   private var cancellables = Set<AnyCancellable>()
   private let logger = Logger(
     subsystem: "com.podcast.analyzer", category: "PlaybackStateCoordinator")
+  
+  // Helper to create episode ID matching episode key format
+  private func makeEpisodeId(podcastTitle: String, episodeTitle: String) -> String {
+    return "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episodeTitle)"
+  }
 
   init(modelContext: ModelContext) {
     self.modelContext = modelContext
@@ -39,7 +47,7 @@ class PlaybackStateCoordinator: ObservableObject {
   private func savePlaybackPosition(update: PlaybackPositionUpdate) {
     guard let context = modelContext else { return }
 
-    let id = "\(update.podcastTitle)|\(update.episodeTitle)"
+    let id = makeEpisodeId(podcastTitle: update.podcastTitle, episodeTitle: update.episodeTitle)
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
       predicate: #Predicate { $0.id == id }
     )

@@ -297,7 +297,9 @@ struct EpisodeListView: View {
   // MARK: - Helper Methods
 
   private func makeEpisodeKey(_ episode: PodcastEpisodeInfo) -> String {
-    "\(podcastModel.podcastInfo.title)|\(episode.title)"
+    // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
+    let delimiter = "\u{1F}"
+    return "\(podcastModel.podcastInfo.title)\(delimiter)\(episode.title)"
   }
 
   private func startRefreshTimer() {
@@ -454,7 +456,9 @@ struct EpisodeRowView: View {
 
   /// Get transcript job status if active
   private var transcriptJobStatus: TranscriptJobStatus? {
-    let jobId = "\(podcastTitle)|\(episode.title)"
+    // Use Unit Separator (U+001F) as delimiter - same as TranscriptManager
+    let delimiter = "\u{1F}"
+    let jobId = "\(podcastTitle)\(delimiter)\(episode.title)"
     return transcriptManager.activeJobs[jobId]?.status
   }
 
@@ -773,6 +777,15 @@ struct EpisodeRowView: View {
       }
     }
     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+      // Star action (always available)
+      Button(action: onToggleStar) {
+        Label(
+          isStarred ? "Unstar" : "Star",
+          systemImage: isStarred ? "star.slash" : "star.fill")
+      }
+      .tint(.yellow)
+
+      // Download/Delete/Cancel action
       if isDownloaded {
         Button(role: .destructive, action: onDeleteRequested) {
           Label("Delete", systemImage: "trash")
@@ -800,12 +813,13 @@ struct EpisodeRowView: View {
       }
     }
     .swipeActions(edge: .leading, allowsFullSwipe: true) {
-      Button(action: onToggleStar) {
+      // Mark as played/unplayed action
+      Button(action: onTogglePlayed) {
         Label(
-          isStarred ? "Unstar" : "Star",
-          systemImage: isStarred ? "star.slash" : "star.fill")
+          isCompleted ? "Unplayed" : "Played",
+          systemImage: isCompleted ? "arrow.counterclockwise" : "checkmark.circle")
       }
-      .tint(.yellow)
+      .tint(.green)
     }
   }
 

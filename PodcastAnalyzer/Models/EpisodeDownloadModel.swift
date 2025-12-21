@@ -62,7 +62,10 @@ class EpisodeDownloadModel {
     imageURL: String? = nil,
     pubDate: Date? = nil
   ) {
-    self.id = "\(podcastTitle)|\(episodeTitle)"
+    // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
+    // Fall back to | for backward compatibility with existing data
+    let delimiter = "\u{1F}"
+    self.id = "\(podcastTitle)\(delimiter)\(episodeTitle)"
     self.episodeTitle = episodeTitle
     self.podcastTitle = podcastTitle
     self.audioURL = audioURL
