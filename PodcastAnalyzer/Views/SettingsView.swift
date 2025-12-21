@@ -156,6 +156,7 @@ struct SettingsView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Settings")
+            .toolbarTitleDisplayMode(.inlineLarge)
             .sheet(isPresented: $showAddFeedSheet) {
                 AddFeedView(viewModel: viewModel, modelContext: modelContext) {
                     showAddFeedSheet = false

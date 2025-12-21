@@ -76,6 +76,7 @@ struct HomeView: View {
                     .disabled(viewModel.isLoading)
                 }
             }
+            .toolbarTitleDisplayMode(.inlineLarge)
             .refreshable {
                 await viewModel.refreshAllPodcasts()
             }

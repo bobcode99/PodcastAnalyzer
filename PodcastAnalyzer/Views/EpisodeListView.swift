@@ -56,8 +56,8 @@ struct EpisodeListView: View {
         if !searchText.isEmpty {
             let query = searchText.lowercased()
             episodes = episodes.filter { episode in
-                episode.title.lowercased().contains(query) ||
-                (episode.podcastEpisodeDescription?.lowercased().contains(query) ?? false)
+                episode.title.lowercased().contains(query)
+                    || (episode.podcastEpisodeDescription?.lowercased().contains(query) ?? false)
             }
         }
 
