@@ -10,13 +10,23 @@ import FeedKit
 import Foundation
 internal import XMLKit
 
-public struct PodcastEpisodeInfo: Sendable, Codable {
+public struct PodcastEpisodeInfo: Sendable, Codable, Identifiable {
     public let title: String
     public let podcastEpisodeDescription: String?
     public let pubDate: Date?
     public let audioURL: String?
     public let imageURL: String?
     public let duration: Int? // Duration in seconds from itunes:duration
+
+    /// Unique identifier for this episode (uses audioURL or title+pubDate combo)
+    public var id: String {
+        if let audioURL = audioURL {
+            return audioURL
+        }
+        // Fallback: combine title with pubDate for uniqueness
+        let dateString = pubDate?.timeIntervalSince1970.description ?? "unknown"
+        return "\(title)_\(dateString)"
+    }
 
     /// Formatted duration string (e.g., "1h 5m", "48m", "3m 20s")
     public var formattedDuration: String? {

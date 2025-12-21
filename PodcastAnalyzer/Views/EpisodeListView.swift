@@ -42,6 +42,9 @@ struct EpisodeListView: View {
     @State private var selectedFilter: EpisodeFilter = .all
     @State private var sortOldestFirst: Bool = false
 
+    // Search state
+    @State private var searchText: String = ""
+
     private let rssService = PodcastRssService()
 
     // MARK: - Filtered and Sorted Episodes
@@ -49,7 +52,16 @@ struct EpisodeListView: View {
     private var filteredEpisodes: [PodcastEpisodeInfo] {
         var episodes = podcastModel.podcastInfo.episodes
 
-        // Apply filter
+        // Apply search filter first
+        if !searchText.isEmpty {
+            let query = searchText.lowercased()
+            episodes = episodes.filter { episode in
+                episode.title.lowercased().contains(query) ||
+                (episode.podcastEpisodeDescription?.lowercased().contains(query) ?? false)
+            }
+        }
+
+        // Apply category filter
         switch selectedFilter {
         case .all:
             break  // No filtering
@@ -94,124 +106,138 @@ struct EpisodeListView: View {
     }
 
     var body: some View {
-        List {
-            // MARK: - Header Section
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top) {
-                    // Podcast Image
-                    if let url = URL(string: podcastModel.podcastInfo.imageURL) {
-                        AsyncImage(url: url) { phase in
-                            if let image = phase.image {
-                                image.resizable().scaledToFit()
-                            } else if phase.error != nil {
-                                Color.gray
-                            } else {
-                                ProgressView()
+        ScrollView {
+            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                // MARK: - Header Section
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top) {
+                        // Podcast Image
+                        if let url = URL(string: podcastModel.podcastInfo.imageURL) {
+                            AsyncImage(url: url) { phase in
+                                if let image = phase.image {
+                                    image.resizable().scaledToFit()
+                                } else if phase.error != nil {
+                                    Color.gray
+                                } else {
+                                    ProgressView()
+                                }
                             }
+                            .frame(width: 100, height: 100)
+                            .cornerRadius(8)
+                        } else {
+                            Color.gray.frame(width: 100, height: 100).cornerRadius(8)
                         }
-                        .frame(width: 100, height: 100)
-                        .cornerRadius(8)
-                    } else {
-                        Color.gray.frame(width: 100, height: 100).cornerRadius(8)
-                    }
 
-                    // Title and Summary with expandable description
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(podcastModel.podcastInfo.title)
-                            .font(.headline)
+                        // Title and Summary with expandable description
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(podcastModel.podcastInfo.title)
+                                .font(.headline)
 
-                        if let summary = podcastModel.podcastInfo.podcastInfoDescription {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(summary)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(isDescriptionExpanded ? nil : 3)
-
-                                Button(action: {
-                                    withAnimation {
-                                        isDescriptionExpanded.toggle()
-                                    }
-                                }) {
-                                    Text(isDescriptionExpanded ? "Show less" : "More")
+                            if let summary = podcastModel.podcastInfo.podcastInfoDescription {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(summary)
                                         .font(.caption)
-                                        .fontWeight(.medium)
-                                        .foregroundColor(.blue)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(isDescriptionExpanded ? nil : 3)
+
+                                    Button(action: {
+                                        withAnimation {
+                                            isDescriptionExpanded.toggle()
+                                        }
+                                    }) {
+                                        Text(isDescriptionExpanded ? "Show less" : "More")
+                                            .font(.caption)
+                                            .fontWeight(.medium)
+                                            .foregroundColor(.blue)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            .listRowSeparator(.hidden)
-            .padding(.bottom, 10)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
 
-            // MARK: - Filter and Sort Bar
-            VStack(spacing: 12) {
-                // Filter chips
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(EpisodeFilter.allCases, id: \.self) { filter in
-                            FilterChip(
-                                title: filter.rawValue,
-                                icon: filter.icon,
-                                isSelected: selectedFilter == filter
-                            ) {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    selectedFilter = filter
+                // MARK: - Filter and Sort Bar
+                VStack(spacing: 12) {
+                    // Filter chips
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(EpisodeFilter.allCases, id: \.self) { filter in
+                                FilterChip(
+                                    title: filter.rawValue,
+                                    icon: filter.icon,
+                                    isSelected: selectedFilter == filter
+                                ) {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        selectedFilter = filter
+                                    }
                                 }
                             }
+
+                            Divider()
+                                .frame(height: 24)
+
+                            // Sort toggle
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    sortOldestFirst.toggle()
+                                }
+                            }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: sortOldestFirst ? "arrow.up" : "arrow.down")
+                                        .font(.system(size: 12))
+                                    Text(sortOldestFirst ? "Oldest" : "Newest")
+                                        .font(.caption)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.gray.opacity(0.15))
+                                .foregroundColor(.primary)
+                                .cornerRadius(16)
+                            }
                         }
+                        .padding(.horizontal, 4)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
+                // MARK: - Episodes List
+                Section {
+                    ForEach(filteredEpisodes) { episode in
+                        EpisodeRowView(
+                            episode: episode,
+                            podcastTitle: podcastModel.podcastInfo.title,
+                            fallbackImageURL: podcastModel.podcastInfo.imageURL,
+                            podcastLanguage: podcastModel.podcastInfo.language,
+                            downloadManager: downloadManager,
+                            episodeModel: episodeModels[makeEpisodeKey(episode)],
+                            onToggleStar: { toggleStar(for: episode) },
+                            onDownload: { downloadEpisode(episode) },
+                            onDeleteRequested: {
+                                episodeToDelete = episode
+                                showDeleteConfirmation = true
+                            },
+                            onTogglePlayed: { togglePlayed(for: episode) }
+                        )
+                        .padding(.horizontal, 16)
 
                         Divider()
-                            .frame(height: 24)
-
-                        // Sort toggle
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                sortOldestFirst.toggle()
-                            }
-                        }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: sortOldestFirst ? "arrow.up" : "arrow.down")
-                                    .font(.system(size: 12))
-                                Text(sortOldestFirst ? "Oldest" : "Newest")
-                                    .font(.caption)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.gray.opacity(0.15))
-                            .foregroundColor(.primary)
-                            .cornerRadius(16)
-                        }
+                            .padding(.leading, 108)
                     }
-                    .padding(.horizontal, 4)
-                }
-            }
-            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
-            .listRowSeparator(.hidden)
-
-            // MARK: - Episodes List
-            Section(header: Text("Episodes (\(filteredEpisodeCount))")) {
-                ForEach(filteredEpisodes, id: \.title) { episode in
-                    EpisodeRowView(
-                        episode: episode,
-                        podcastTitle: podcastModel.podcastInfo.title,
-                        fallbackImageURL: podcastModel.podcastInfo.imageURL,
-                        podcastLanguage: podcastModel.podcastInfo.language,
-                        downloadManager: downloadManager,
-                        episodeModel: episodeModels[makeEpisodeKey(episode)],
-                        onToggleStar: { toggleStar(for: episode) },
-                        onDownload: { downloadEpisode(episode) },
-                        onDeleteRequested: {
-                            episodeToDelete = episode
-                            showDeleteConfirmation = true
-                        },
-                        onTogglePlayed: { togglePlayed(for: episode) }
-                    )
+                } header: {
+                    Text("Episodes (\(filteredEpisodeCount))")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color(uiColor: .systemBackground))
                 }
             }
         }
-        .listStyle(.plain)
         .navigationTitle(podcastModel.podcastInfo.title)
         .iosNavigationBarTitleDisplayModeInline()
         .toolbar {
@@ -246,6 +272,7 @@ struct EpisodeListView: View {
         .refreshable {
             await refreshPodcast()
         }
+        .searchable(text: $searchText, prompt: "Search episodes")
         .confirmationDialog(
             "Delete Download",
             isPresented: $showDeleteConfirmation,

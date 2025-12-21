@@ -2,67 +2,40 @@
 //  ContentView.swift
 //  PodcastAnalyzer
 //
-//  Main app view with mini player overlay
 //
 
 import SwiftUI
 import SwiftData
 import Combine
 
-// Mini player height constant
-let miniPlayerHeight: CGFloat = 64
-
 struct ContentView: View {
     @State private var audioManager = EnhancedAudioManager.shared
-    @State private var selectedTab = 0
 
     private var showMiniPlayer: Bool {
         audioManager.currentEpisode != nil
     }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            HomeView()
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    miniPlayerSpacer
-                }
-                .tabItem {
-                    Label(Constants.homeString, systemImage: Constants.homeIconName)
-                }
-                .tag(0)
+        TabView() {
+            
+            Tab(Constants.homeString, systemImage: Constants.homeIconName) {
+                HomeView()
+            }
 
-            SettingsView()
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    miniPlayerSpacer
-                }
-                .tabItem {
-                    Label(Constants.settingsString, systemImage: Constants.settingsIconName)
-                }
-                .tag(1)
+            Tab(Constants.settingsString, systemImage: Constants.settingsIconName) {
+                SettingsView()
+            }
 
-            SearchView()
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    miniPlayerSpacer
-                }
-                .tabItem {
-                    Label(Constants.searchString, systemImage: Constants.searchIconName)
-                }
-                .tag(2)
-        }
-        .overlay(alignment: .bottom) {
-            if showMiniPlayer {
-                MiniPlayerBar()
-                    .frame(height: miniPlayerHeight)
-                    .padding(.bottom, 50) // Tab bar height offset
+            Tab(role: .search) {
+                SearchView()
             }
         }
-    }
-
-    @ViewBuilder
-    private var miniPlayerSpacer: some View {
-        if showMiniPlayer {
-            Color.clear.frame(height: miniPlayerHeight)
+        .tabViewBottomAccessory {
+            if showMiniPlayer {
+                MiniPlayerBar()
+            }
         }
+        .tabBarMinimizeBehavior(.onScrollDown)
     }
 }
 

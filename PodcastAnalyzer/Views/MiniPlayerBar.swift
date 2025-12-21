@@ -9,6 +9,9 @@ import SwiftUI
 import Combine
 
 struct MiniPlayerBar: View {
+    @Environment(\.tabViewBottomAccessoryPlacement)
+    var placement
+    
     @State private var audioManager = EnhancedAudioManager.shared
     @State private var showExpandedPlayer = false
 
