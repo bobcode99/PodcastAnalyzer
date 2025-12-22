@@ -54,39 +54,24 @@ struct EpisodeDetailView: View {
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         HStack(spacing: 16) {
-          Button(action: { viewModel.shareEpisode() }) {
-            Image(systemName: "square.and.arrow.up")
-          }
           Button(action: { viewModel.translateDescription() }) {
             Image(systemName: "character.bubble")
           }
           Menu {
-            Button(action: { viewModel.toggleStar() }) {
-              Label(
-                viewModel.isStarred ? "Unstar" : "Star",
-                systemImage: viewModel.isStarred ? "star.fill" : "star"
-              )
-            }
-            Button(action: { viewModel.addToList() }) {
-              Label("Add to List", systemImage: "plus")
-            }
-            if !viewModel.hasLocalAudio {
-              Button(action: { viewModel.downloadAudio() }) {
-                Label("Download Audio", systemImage: "arrow.down.circle")
-              }
-            }
-
-            Divider()
-
-            // Auto-transcript toggle
-            Toggle(
-              isOn: Binding(
-                get: { DownloadManager.shared.autoTranscriptEnabled },
-                set: { DownloadManager.shared.autoTranscriptEnabled = $0 }
-              )
-            ) {
-              Label("Auto-Generate Transcripts", systemImage: "text.bubble")
-            }
+            EpisodeMenuActions(
+              isStarred: viewModel.isStarred,
+              isCompleted: viewModel.isCompleted,
+              hasLocalAudio: viewModel.hasLocalAudio,
+              downloadState: viewModel.downloadState,
+              audioURL: viewModel.audioURL,
+              onToggleStar: { viewModel.toggleStar() },
+              onTogglePlayed: { viewModel.togglePlayed() },
+              onDownload: { viewModel.startDownload() },
+              onCancelDownload: { viewModel.cancelDownload() },
+              onDeleteDownload: { showDeleteConfirmation = true },
+              onShare: { viewModel.shareEpisode() },
+              onPlayNext: { viewModel.addToPlayNext() }
+            )
 
             Divider()
 
@@ -94,7 +79,7 @@ struct EpisodeDetailView: View {
               Label("Report Issue", systemImage: "exclamationmark.triangle")
             }
           } label: {
-            Image(systemName: "ellipsis")
+            Image(systemName: "ellipsis.circle")
           }
         }
       }

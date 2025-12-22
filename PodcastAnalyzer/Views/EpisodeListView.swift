@@ -175,6 +175,19 @@ struct EpisodeListView: View {
           Text(viewModel.podcastInfo.title)
             .font(.headline)
 
+          // Language badge
+          HStack(spacing: 4) {
+            Image(systemName: "globe")
+              .font(.system(size: 10))
+            Text(languageDisplayName(for: viewModel.podcastInfo.language))
+              .font(.caption2)
+          }
+          .foregroundColor(.secondary)
+          .padding(.horizontal, 6)
+          .padding(.vertical, 2)
+          .background(Color.gray.opacity(0.15))
+          .cornerRadius(4)
+
           if let summary = viewModel.podcastInfo.podcastInfoDescription {
             VStack(alignment: .leading, spacing: 2) {
               Text(summary)
@@ -199,6 +212,15 @@ struct EpisodeListView: View {
     }
     .padding(.horizontal, 16)
     .padding(.bottom, 10)
+  }
+
+  /// Convert language code to display name
+  private func languageDisplayName(for code: String) -> String {
+    let locale = Locale(identifier: code)
+    if let name = locale.localizedString(forLanguageCode: code) {
+      return name.capitalized
+    }
+    return code.uppercased()
   }
 
   @ViewBuilder
@@ -524,51 +546,40 @@ struct EpisodeRowView: View {
 
   @ViewBuilder
   private var contextMenuContent: some View {
-    Button(action: onToggleStar) {
-      Label(isStarred ? "Unstar" : "Star", systemImage: isStarred ? "star.fill" : "star")
-    }
-
-    Button(action: onTogglePlayed) {
-      Label(
-        isCompleted ? "Mark as Unplayed" : "Mark as Played",
-        systemImage: isCompleted ? "arrow.counterclockwise" : "checkmark.circle"
-      )
-    }
-
-    Divider()
-
-    if isDownloaded {
-      Button(role: .destructive, action: onDeleteRequested) {
-        Label("Delete Download", systemImage: "trash")
-      }
-    } else if case .downloading = downloadState {
-      Button(action: {
+    EpisodeMenuActions(
+      isStarred: isStarred,
+      isCompleted: isCompleted,
+      hasLocalAudio: isDownloaded,
+      downloadState: downloadState,
+      audioURL: episode.audioURL,
+      onToggleStar: onToggleStar,
+      onTogglePlayed: onTogglePlayed,
+      onDownload: onDownload,
+      onCancelDownload: {
         downloadManager.cancelDownload(episodeTitle: episode.title, podcastTitle: podcastTitle)
-      }) {
-        Label("Cancel Download", systemImage: "xmark.circle")
-      }
-    } else if case .finishing = downloadState {
-      Label("Saving...", systemImage: "arrow.down.circle.dotted")
-    } else {
-      Button(action: onDownload) {
-        Label("Download", systemImage: "arrow.down.circle")
-      }
-      .disabled(episode.audioURL == nil)
-    }
-
-    if let audioURL = episode.audioURL, let url = URL(string: audioURL) {
-      Divider()
-      Button(action: {
+      },
+      onDeleteDownload: onDeleteRequested,
+      onShare: {
+        guard let audioURL = episode.audioURL, let url = URL(string: audioURL) else { return }
         let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
           let rootVC = windowScene.windows.first?.rootViewController
         {
           rootVC.present(activityVC, animated: true)
         }
-      }) {
-        Label("Share Episode", systemImage: "square.and.arrow.up")
+      },
+      onPlayNext: {
+        guard let audioURL = episode.audioURL else { return }
+        let playbackEpisode = PlaybackEpisode(
+          id: "\(podcastTitle)|\(episode.title)",
+          title: episode.title,
+          podcastTitle: podcastTitle,
+          audioURL: audioURL,
+          imageURL: episode.imageURL ?? fallbackImageURL
+        )
+        audioManager.playNext(playbackEpisode)
       }
-    }
+    )
   }
 
   @ViewBuilder

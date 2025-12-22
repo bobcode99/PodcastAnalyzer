@@ -2,7 +2,7 @@
 //  ExpandedPlayerViewModel.swift
 //  PodcastAnalyzer
 //
-//  ViewModel for expanded player view
+//  ViewModel for expanded player view - supports Apple Podcasts style UI
 //
 
 import Combine
@@ -18,6 +18,10 @@ class ExpandedPlayerViewModel: ObservableObject {
   @Published var duration: TimeInterval = 1
   @Published var playbackSpeed: Float = 1.0
   @Published var currentEpisode: PlaybackEpisode?
+  @Published var episodeDate: Date?
+  @Published var isStarred: Bool = false
+  @Published var isCompleted: Bool = false
+  @Published var queue: [PlaybackEpisode] = []
 
   private let audioManager = EnhancedAudioManager.shared
   private var updateTimer: Timer?
@@ -50,6 +54,9 @@ class ExpandedPlayerViewModel: ObservableObject {
       if duration > 0 {
         progress = currentTime / duration
       }
+
+      // Update queue
+      queue = audioManager.queue
     }
   }
 
@@ -64,7 +71,7 @@ class ExpandedPlayerViewModel: ObservableObject {
     return "-" + formatTime(remaining)
   }
 
-  // MARK: - Actions
+  // MARK: - Playback Actions
 
   func togglePlayPause() {
     if isPlaying {
@@ -75,7 +82,7 @@ class ExpandedPlayerViewModel: ObservableObject {
   }
 
   func skipForward() {
-    audioManager.skipForward(seconds: 15)
+    audioManager.skipForward(seconds: 30)
   }
 
   func skipBackward() {
@@ -89,6 +96,50 @@ class ExpandedPlayerViewModel: ObservableObject {
 
   func setPlaybackSpeed(_ speed: Float) {
     audioManager.setPlaybackRate(speed)
+  }
+
+  // MARK: - Episode Actions
+
+  func toggleStar() {
+    isStarred.toggle()
+    // TODO: Persist to SwiftData via EpisodeDownloadModel
+  }
+
+  func togglePlayed() {
+    isCompleted.toggle()
+    // TODO: Persist to SwiftData via EpisodeDownloadModel
+  }
+
+  func shareEpisode() {
+    guard let episode = currentEpisode,
+      let url = URL(string: episode.audioURL)
+    else { return }
+
+    let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+      let rootVC = windowScene.windows.first?.rootViewController
+    {
+      rootVC.present(activityVC, animated: true)
+    }
+  }
+
+  func playNextCurrentEpisode() {
+    guard let episode = currentEpisode else { return }
+    audioManager.playNext(episode)
+  }
+
+  // MARK: - Queue Actions
+
+  func skipToQueueItem(at index: Int) {
+    audioManager.skipToQueueItem(at: index)
+  }
+
+  func removeFromQueue(at index: Int) {
+    audioManager.removeFromQueue(at: index)
+  }
+
+  func moveInQueue(from source: IndexSet, to destination: Int) {
+    audioManager.moveInQueue(from: source, to: destination)
   }
 
   // MARK: - Helpers

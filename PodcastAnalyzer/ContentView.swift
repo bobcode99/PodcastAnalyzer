@@ -36,6 +36,10 @@ struct ContentView: View {
       }
     }
     .tabBarMinimizeBehavior(.onScrollDown)
+    .onAppear {
+      // Restore last played episode on app launch
+      audioManager.restoreLastEpisode()
+    }
   }
 }
 

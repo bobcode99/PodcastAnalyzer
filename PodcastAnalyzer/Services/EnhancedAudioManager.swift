@@ -45,6 +45,10 @@ class EnhancedAudioManager: NSObject {
   var currentCaption: String = ""
   var captionSegments: [CaptionSegment] = []
 
+  // Queue management
+  var queue: [PlaybackEpisode] = []
+  var hasRestoredLastEpisode: Bool = false
+
   private var timeObserver: Any?
   private var cancellables = Set<AnyCancellable>()
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "AudioManager")
@@ -223,6 +227,126 @@ class EnhancedAudioManager: NSObject {
     UserDefaults.standard.set(rate, forKey: Keys.playbackRate)
     updateNowPlayingPlaybackRate()
     logger.info("Playback rate set to \(rate)x")
+  }
+
+  // MARK: - Queue Management
+
+  /// Add an episode to the end of the queue
+  func addToQueue(_ episode: PlaybackEpisode) {
+    // Don't add if already in queue or is current episode
+    guard !queue.contains(where: { $0.id == episode.id }),
+      currentEpisode?.id != episode.id
+    else {
+      logger.info("Episode already in queue or currently playing")
+      return
+    }
+    queue.append(episode)
+    logger.info("Added to queue: \(episode.title)")
+  }
+
+  /// Add an episode to play next (first position in queue)
+  func playNext(_ episode: PlaybackEpisode) {
+    // Remove if already in queue
+    queue.removeAll { $0.id == episode.id }
+    // Don't add if currently playing
+    guard currentEpisode?.id != episode.id else {
+      logger.info("Episode is currently playing")
+      return
+    }
+    queue.insert(episode, at: 0)
+    logger.info("Play next: \(episode.title)")
+  }
+
+  /// Remove an episode from the queue
+  func removeFromQueue(_ episode: PlaybackEpisode) {
+    queue.removeAll { $0.id == episode.id }
+    logger.info("Removed from queue: \(episode.title)")
+  }
+
+  /// Remove episode at specific index
+  func removeFromQueue(at index: Int) {
+    guard index >= 0 && index < queue.count else { return }
+    let episode = queue.remove(at: index)
+    logger.info("Removed from queue at index \(index): \(episode.title)")
+  }
+
+  /// Move episode in queue
+  func moveInQueue(from source: IndexSet, to destination: Int) {
+    // Manual implementation of move since Array.move(fromOffsets:toOffset:) requires SwiftUI import
+    var items = queue
+    let sourceIndices = Array(source).sorted(by: >)
+
+    // Remove items from source positions (in reverse to preserve indices)
+    var movedItems: [PlaybackEpisode] = []
+    for index in sourceIndices {
+      movedItems.insert(items.remove(at: index), at: 0)
+    }
+
+    // Calculate adjusted destination
+    let adjustedDestination = destination - source.filter { $0 < destination }.count
+
+    // Insert at destination
+    for (offset, item) in movedItems.enumerated() {
+      items.insert(item, at: adjustedDestination + offset)
+    }
+
+    queue = items
+  }
+
+  /// Clear the entire queue
+  func clearQueue() {
+    queue.removeAll()
+    logger.info("Queue cleared")
+  }
+
+  /// Play the next episode in queue
+  func playNextInQueue() {
+    guard !queue.isEmpty else {
+      logger.info("Queue is empty")
+      return
+    }
+
+    let nextEpisode = queue.removeFirst()
+    play(
+      episode: nextEpisode,
+      audioURL: nextEpisode.audioURL,
+      startTime: 0,
+      imageURL: nextEpisode.imageURL,
+      useDefaultSpeed: false
+    )
+    logger.info("Playing next in queue: \(nextEpisode.title)")
+  }
+
+  /// Skip to a specific episode in the queue
+  func skipToQueueItem(at index: Int) {
+    guard index >= 0 && index < queue.count else { return }
+
+    // Remove all items before the selected one
+    let episodesToRemove = Array(queue.prefix(index))
+    queue.removeFirst(index)
+
+    // Play the selected episode
+    playNextInQueue()
+
+    logger.info("Skipped \(episodesToRemove.count) episodes in queue")
+  }
+
+  /// Restore the last played episode on app launch (without playing)
+  func restoreLastEpisode() {
+    guard !hasRestoredLastEpisode else { return }
+    hasRestoredLastEpisode = true
+
+    guard let state = loadLastPlaybackState() else {
+      logger.info("No previous playback state to restore")
+      return
+    }
+
+    // Just set the current episode info without playing
+    currentEpisode = state.episode
+    currentTime = state.time
+    duration = 0  // Will be updated when user plays
+
+    logger.info("Restored last episode: \(state.episode.title) at \(state.time)s")
   }
 
   // MARK: - Caption Management
@@ -541,7 +665,14 @@ class EnhancedAudioManager: NSObject {
     logger.info("Playback ended")
     isPlaying = false
     currentTime = 0
-    clearPlaybackState()
+
+    // Check if there's a next episode in queue
+    if !queue.isEmpty {
+      logger.info("Playing next episode from queue")
+      playNextInQueue()
+    } else {
+      clearPlaybackState()
+    }
   }
 
   // MARK: - Cleanup

@@ -118,8 +118,8 @@ struct MiniPlayerBar: View {
     }
     .sheet(isPresented: $showExpandedPlayer) {
       ExpandedPlayerView()
-        .presentationDetents([.height(300), .large])
-        .presentationDragIndicator(.visible)
+//        .presentationDetents([.height(300), .large])
+//        .presentationDragIndicator(.visible)
     }
   }
 }

@@ -177,6 +177,10 @@ final class EpisodeDetailViewModel {
     episodeModel?.isStarred ?? false
   }
 
+  var isCompleted: Bool {
+    episodeModel?.isCompleted ?? false
+  }
+
   var savedDuration: TimeInterval {
     episodeModel?.duration ?? 0
   }
@@ -438,7 +442,15 @@ final class EpisodeDetailViewModel {
   }
 
   func toggleStar() {
-    guard let model = episodeModel else { return }
+    // Create model if it doesn't exist
+    if episodeModel == nil, let context = modelContext {
+      createEpisodeModel(context: context)
+    }
+
+    guard let model = episodeModel else {
+      logger.warning("Cannot toggle star: no episode model available")
+      return
+    }
     model.isStarred.toggle()
 
     do {
@@ -448,9 +460,49 @@ final class EpisodeDetailViewModel {
     }
   }
 
+  func togglePlayed() {
+    // Create model if it doesn't exist
+    if episodeModel == nil, let context = modelContext {
+      createEpisodeModel(context: context)
+    }
+
+    guard let model = episodeModel else {
+      logger.warning("Cannot toggle played: no episode model available")
+      return
+    }
+    model.isCompleted.toggle()
+    if !model.isCompleted {
+      model.lastPlaybackPosition = 0
+    }
+
+    do {
+      try modelContext?.save()
+    } catch {
+      logger.error("Failed to save played state: \(error.localizedDescription)")
+    }
+  }
+
   func addToList() {
     // TODO: Implement add to list functionality
     logger.debug("Add to list: \(self.episode.title)")
+  }
+
+  func addToPlayNext() {
+    guard let audioURLString = episode.audioURL else {
+      logger.warning("Cannot add to play next: no audio URL")
+      return
+    }
+
+    let playbackEpisode = PlaybackEpisode(
+      id: "\(podcastTitle)|\(episode.title)",
+      title: episode.title,
+      podcastTitle: podcastTitle,
+      audioURL: audioURLString,
+      imageURL: imageURLString
+    )
+
+    audioManager.playNext(playbackEpisode)
+    logger.info("Added to play next: \(self.episode.title)")
   }
 
   func downloadAudio() {

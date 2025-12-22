@@ -1,0 +1,107 @@
+//
+//  EpisodeMenuActions.swift
+//  PodcastAnalyzer
+//
+//  Shared menu actions for episode ellipsis menus - used by both EpisodeListView and EpisodeDetailView
+//
+
+import SwiftUI
+
+/// Shared menu content for episode actions - ensures consistent behavior across EpisodeListView and EpisodeDetailView
+struct EpisodeMenuActions: View {
+  let isStarred: Bool
+  let isCompleted: Bool
+  let hasLocalAudio: Bool
+  let downloadState: DownloadState
+  let audioURL: String?
+
+  let onToggleStar: () -> Void
+  let onTogglePlayed: () -> Void
+  let onDownload: () -> Void
+  let onCancelDownload: () -> Void
+  let onDeleteDownload: () -> Void
+  let onShare: () -> Void
+  var onPlayNext: (() -> Void)? = nil
+
+  var body: some View {
+    // Star/Unstar
+    Button(action: onToggleStar) {
+      Label(
+        isStarred ? "Unstar" : "Star",
+        systemImage: isStarred ? "star.fill" : "star"
+      )
+    }
+
+    // Mark as Played/Unplayed
+    Button(action: onTogglePlayed) {
+      Label(
+        isCompleted ? "Mark as Unplayed" : "Mark as Played",
+        systemImage: isCompleted ? "arrow.counterclockwise" : "checkmark.circle"
+      )
+    }
+
+    Divider()
+
+    // Play Next option
+    if let onPlayNext = onPlayNext, audioURL != nil {
+      Button(action: onPlayNext) {
+        Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+      }
+
+      Divider()
+    }
+
+    // Download actions based on state
+    downloadActions
+
+    Divider()
+
+    // Auto-transcript toggle
+    Toggle(
+      isOn: Binding(
+        get: { DownloadManager.shared.autoTranscriptEnabled },
+        set: { DownloadManager.shared.autoTranscriptEnabled = $0 }
+      )
+    ) {
+      Label("Auto-Generate Transcripts", systemImage: "text.bubble")
+    }
+
+    Divider()
+
+    // Share action
+    if audioURL != nil {
+      Button(action: onShare) {
+        Label("Share Episode", systemImage: "square.and.arrow.up")
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var downloadActions: some View {
+    switch downloadState {
+    case .notDownloaded:
+      Button(action: onDownload) {
+        Label("Download", systemImage: "arrow.down.circle")
+      }
+      .disabled(audioURL == nil)
+
+    case .downloading:
+      Button(action: onCancelDownload) {
+        Label("Cancel Download", systemImage: "xmark.circle")
+      }
+
+    case .finishing:
+      Label("Saving...", systemImage: "arrow.down.circle.dotted")
+
+    case .downloaded:
+      Button(role: .destructive, action: onDeleteDownload) {
+        Label("Delete Download", systemImage: "trash")
+      }
+
+    case .failed:
+      Button(action: onDownload) {
+        Label("Retry Download", systemImage: "arrow.clockwise")
+      }
+    }
+  }
+}
