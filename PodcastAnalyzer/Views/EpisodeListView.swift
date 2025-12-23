@@ -299,6 +299,11 @@ struct EpisodeRowView: View {
   }
 
   private var hasCaptions: Bool {
+    // First check if there's an active job that's completed
+    if let status = transcriptJobStatus, case .completed = status {
+      return true
+    }
+
     let fm = FileManager.default
     let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
     let captionsDir = docsDir.appendingPathComponent("Captions", isDirectory: true)
@@ -313,8 +318,11 @@ struct EpisodeRowView: View {
     return fm.fileExists(atPath: srtPath.path)
   }
 
+  private var jobId: String {
+    "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
+  }
+
   private var transcriptJobStatus: TranscriptJobStatus? {
-    let jobId = "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
     return transcriptManager.activeJobs[jobId]?.status
   }
 
@@ -571,7 +579,7 @@ struct EpisodeRowView: View {
       onPlayNext: {
         guard let audioURL = episode.audioURL else { return }
         let playbackEpisode = PlaybackEpisode(
-          id: "\(podcastTitle)|\(episode.title)",
+          id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)",
           title: episode.title,
           podcastTitle: podcastTitle,
           audioURL: audioURL,
@@ -631,7 +639,7 @@ struct EpisodeRowView: View {
     let imageURL = episode.imageURL ?? fallbackImageURL ?? ""
 
     let playbackEpisode = PlaybackEpisode(
-      id: "\(podcastTitle)|\(episode.title)",
+      id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)",
       title: episode.title,
       podcastTitle: podcastTitle,
       audioURL: playbackURL,

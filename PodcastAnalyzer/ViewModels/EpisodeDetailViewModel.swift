@@ -207,7 +207,7 @@ final class EpisodeDetailViewModel {
     }
 
     let playbackEpisode = PlaybackEpisode(
-      id: "\(podcastTitle)|\(episode.title)",
+      id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)",
       title: episode.title,
       podcastTitle: podcastTitle,
       audioURL: playbackURL,
@@ -294,7 +294,7 @@ final class EpisodeDetailViewModel {
   private func refreshEpisodeModel() {
     guard let context = modelContext else { return }
 
-    let id = "\(podcastTitle)|\(episode.title)"
+    let id = "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
       predicate: #Predicate { $0.id == id }
     )
@@ -309,12 +309,15 @@ final class EpisodeDetailViewModel {
     }
   }
 
+  // Use Unit Separator (U+001F) as delimiter - same as EpisodeDownloadModel
+  private static let episodeKeyDelimiter = "\u{1F}"
+
   // MARK: - SwiftData Persistence
 
   private func loadEpisodeModel() {
     guard let context = modelContext else { return }
 
-    let id = "\(podcastTitle)|\(episode.title)"
+    let id = "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
       predicate: #Predicate { $0.id == id }
     )
@@ -494,7 +497,7 @@ final class EpisodeDetailViewModel {
     }
 
     let playbackEpisode = PlaybackEpisode(
-      id: "\(podcastTitle)|\(episode.title)",
+      id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)",
       title: episode.title,
       podcastTitle: podcastTitle,
       audioURL: audioURLString,

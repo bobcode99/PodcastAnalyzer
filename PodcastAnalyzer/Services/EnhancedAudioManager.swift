@@ -53,6 +53,9 @@ class EnhancedAudioManager: NSObject {
   private var cancellables = Set<AnyCancellable>()
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "AudioManager")
 
+  // Use Unit Separator (U+001F) as delimiter - same as EpisodeDownloadModel
+  private static let episodeKeyDelimiter = "\u{1F}"
+
   private enum Keys {
     static let lastEpisodeTitle = "lastEpisodeTitle"
     static let lastPodcastTitle = "lastPodcastTitle"
@@ -183,6 +186,18 @@ class EnhancedAudioManager: NSObject {
   }
 
   func resume() {
+    // If we have a restored episode but no player, start playback
+    if player == nil, let episode = currentEpisode {
+      play(
+        episode: episode,
+        audioURL: episode.audioURL,
+        startTime: currentTime,
+        imageURL: episode.imageURL,
+        useDefaultSpeed: false
+      )
+      return
+    }
+
     player?.play()
     player?.rate = playbackRate
     isPlaying = true
@@ -579,7 +594,7 @@ class EnhancedAudioManager: NSObject {
     let imageURL = UserDefaults.standard.string(forKey: Keys.lastImageURL)
 
     let episode = PlaybackEpisode(
-      id: "\(podcastTitle)|\(title)",
+      id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(title)",
       title: title,
       podcastTitle: podcastTitle,
       audioURL: audioURL,
