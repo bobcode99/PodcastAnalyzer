@@ -5,6 +5,7 @@
 //  Created by Bob on 2025/11/23.
 //
 
+import Combine
 import SwiftData
 import SwiftUI
 
@@ -285,6 +286,8 @@ struct EpisodeRowView: View {
   let onTogglePlayed: () -> Void
 
   private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
+  private let applePodcastService = ApplePodcastService()
+  @State private var shareCancellable: AnyCancellable?
 
   // Use Unit Separator (U+001F) as delimiter
   private static let episodeKeyDelimiter = "\u{1F}"
@@ -568,13 +571,7 @@ struct EpisodeRowView: View {
       },
       onDeleteDownload: onDeleteRequested,
       onShare: {
-        guard let audioURL = episode.audioURL, let url = URL(string: audioURL) else { return }
-        let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-          let rootVC = windowScene.windows.first?.rootViewController
-        {
-          rootVC.present(activityVC, animated: true)
-        }
+        shareEpisode()
       },
       onPlayNext: {
         guard let audioURL = episode.audioURL else { return }
@@ -583,7 +580,10 @@ struct EpisodeRowView: View {
           title: episode.title,
           podcastTitle: podcastTitle,
           audioURL: audioURL,
-          imageURL: episode.imageURL ?? fallbackImageURL
+          imageURL: episode.imageURL ?? fallbackImageURL,
+          episodeDescription: episode.podcastEpisodeDescription,
+          pubDate: episode.pubDate,
+          duration: episode.duration
         )
         audioManager.playNext(playbackEpisode)
       }
@@ -643,7 +643,10 @@ struct EpisodeRowView: View {
       title: episode.title,
       podcastTitle: podcastTitle,
       audioURL: playbackURL,
-      imageURL: imageURL
+      imageURL: imageURL,
+      episodeDescription: episode.podcastEpisodeDescription,
+      pubDate: episode.pubDate,
+      duration: episode.duration
     )
 
     let startTime = episodeModel?.lastPlaybackPosition ?? 0
@@ -656,6 +659,38 @@ struct EpisodeRowView: View {
       imageURL: imageURL,
       useDefaultSpeed: useDefaultSpeed
     )
+  }
+
+  private func shareEpisode() {
+    // Try to find Apple Podcast URL first
+    shareCancellable = applePodcastService.findAppleEpisodeUrl(
+      episodeTitle: episode.title,
+      podcastCollectionId: 0  // Search by title only
+    )
+    .timeout(.seconds(5), scheduler: DispatchQueue.main)
+    .sink(
+      receiveCompletion: { completion in
+        if case .failure = completion {
+          // On error, fall back to audio URL
+          shareWithURL(episode.audioURL)
+        }
+      },
+      receiveValue: { appleUrl in
+        // Use Apple URL if found, otherwise fall back to audio URL
+        shareWithURL(appleUrl ?? episode.audioURL)
+      }
+    )
+  }
+
+  private func shareWithURL(_ urlString: String?) {
+    guard let urlString = urlString, let url = URL(string: urlString) else { return }
+
+    let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+       let rootVC = windowScene.windows.first?.rootViewController
+    {
+      rootVC.present(activityVC, animated: true)
+    }
   }
 }
 

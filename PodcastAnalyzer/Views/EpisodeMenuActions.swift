@@ -5,6 +5,7 @@
 //  Shared menu actions for episode ellipsis menus - used by both EpisodeListView and EpisodeDetailView
 //
 
+import Combine
 import SwiftUI
 
 /// Shared menu content for episode actions - ensures consistent behavior across EpisodeListView and EpisodeDetailView
@@ -22,6 +23,10 @@ struct EpisodeMenuActions: View {
   let onDeleteDownload: () -> Void
   let onShare: () -> Void
   var onPlayNext: (() -> Void)? = nil
+
+  // For Apple Podcast URL sharing
+  var episodeTitle: String? = nil
+  var podcastCollectionId: Int? = nil
 
   var body: some View {
     // Star/Unstar
