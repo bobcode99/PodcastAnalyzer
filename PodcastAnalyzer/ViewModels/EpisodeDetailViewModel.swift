@@ -211,7 +211,10 @@ final class EpisodeDetailViewModel {
       title: episode.title,
       podcastTitle: podcastTitle,
       audioURL: playbackURL,
-      imageURL: imageURLString
+      imageURL: imageURLString,
+      episodeDescription: episode.podcastEpisodeDescription,
+      pubDate: episode.pubDate,
+      duration: episode.duration
     )
 
     // Resume from saved position if available
@@ -434,9 +437,44 @@ final class EpisodeDetailViewModel {
 
   // MARK: - Action Methods
 
+  private let applePodcastService = ApplePodcastService()
+  private var shareCancellable: AnyCancellable?
+
   func shareEpisode() {
-    // TODO: Implement share functionality
     logger.debug("Share episode: \(self.episode.title)")
+
+    // Try to find Apple Podcast URL first
+    shareCancellable = applePodcastService.findAppleEpisodeUrl(
+      episodeTitle: episode.title,
+      podcastCollectionId: 0  // We don't have collectionId in this context, search by title only
+    )
+    .timeout(.seconds(5), scheduler: DispatchQueue.main)
+    .sink(
+      receiveCompletion: { [weak self] completion in
+        if case .failure = completion {
+          // On error, fall back to audio URL
+          self?.shareWithURL(self?.episode.audioURL)
+        }
+      },
+      receiveValue: { [weak self] appleUrl in
+        // Use Apple URL if found, otherwise fall back to audio URL
+        self?.shareWithURL(appleUrl ?? self?.episode.audioURL)
+      }
+    )
+  }
+
+  private func shareWithURL(_ urlString: String?) {
+    guard let urlString = urlString, let url = URL(string: urlString) else {
+      logger.warning("No URL available for sharing")
+      return
+    }
+
+    let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+       let rootVC = windowScene.windows.first?.rootViewController
+    {
+      rootVC.present(activityVC, animated: true)
+    }
   }
 
   func translateDescription() {
@@ -501,7 +539,10 @@ final class EpisodeDetailViewModel {
       title: episode.title,
       podcastTitle: podcastTitle,
       audioURL: audioURLString,
-      imageURL: imageURLString
+      imageURL: imageURLString,
+      episodeDescription: episode.podcastEpisodeDescription,
+      pubDate: episode.pubDate,
+      duration: episode.duration
     )
 
     audioManager.playNext(playbackEpisode)

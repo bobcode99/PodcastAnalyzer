@@ -5,6 +5,11 @@ struct SearchResponse: Decodable {
     let resultCount: Int
     let results: [Podcast]
 }
+
+struct EpisodeSearchResponse: Decodable {
+    let resultCount: Int
+    let results: [Episode]
+}
 // Podcast struct - unchanged, from search with direct fields
 struct Podcast: Decodable, Identifiable, Sendable {
     var id: UUID { UUID() }  // ← computed, no warning
@@ -54,7 +59,34 @@ struct Episode: Decodable, Identifiable, Sendable {
 class ApplePodcastService {
 
     private let baseURL = "https://itunes.apple.com"
-
+    func findAppleEpisodeUrl(
+        episodeTitle: String,
+        podcastCollectionId: Int,
+        country: String = "tw"  // For /tw/ links
+    ) -> AnyPublisher<String?, Error> {
+        let encodedTitle = episodeTitle.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let urlString = "https://itunes.apple.com/search?term=\(encodedTitle)&entity=podcastEpisode&limit=10&country=\(country)"
+        
+        guard let url = URL(string: urlString) else {
+            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+        }
+        
+        return URLSession.shared.dataTaskPublisher(for: url)
+            .map { $0.data }
+            .decode(type: EpisodeSearchResponse.self, decoder: JSONDecoder())
+            .map { response in
+                // If collectionId is 0, just return the first result
+                if podcastCollectionId == 0 {
+                    return response.results.first?.trackViewUrl
+                }
+                // Otherwise, filter by podcast collectionId
+                return response.results
+                    .first { $0.collectionId == podcastCollectionId }?
+                    .trackViewUrl
+            }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
     // Search podcasts - unchanged
     func searchPodcasts(term: String, limit: Int = 20) -> AnyPublisher<[Podcast], Error> {
         let encoded = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""

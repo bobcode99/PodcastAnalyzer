@@ -22,17 +22,24 @@ class ExpandedPlayerViewModel: ObservableObject {
   @Published var isStarred: Bool = false
   @Published var isCompleted: Bool = false
   @Published var queue: [PlaybackEpisode] = []
+  @Published var episodeDescription: String?
 
   private let audioManager = EnhancedAudioManager.shared
   private var updateTimer: Timer?
+  private let applePodcastService = ApplePodcastService()
+  private var shareCancellable: AnyCancellable?
 
   init() {
+    // Update state immediately before setting up timer
+    updateState()
     setupUpdateTimer()
   }
 
   private func setupUpdateTimer() {
     updateTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-      self?.updateState()
+      Task { @MainActor in
+        self?.updateState()
+      }
     }
   }
 
@@ -111,13 +118,34 @@ class ExpandedPlayerViewModel: ObservableObject {
   }
 
   func shareEpisode() {
-    guard let episode = currentEpisode,
-      let url = URL(string: episode.audioURL)
-    else { return }
+    guard let episode = currentEpisode else { return }
+
+    // Try to find Apple Podcast URL first
+    shareCancellable = applePodcastService.findAppleEpisodeUrl(
+      episodeTitle: episode.title,
+      podcastCollectionId: 0  // Search by title only
+    )
+    .timeout(.seconds(5), scheduler: DispatchQueue.main)
+    .sink(
+      receiveCompletion: { [weak self] completion in
+        if case .failure = completion {
+          // On error, fall back to audio URL
+          self?.shareWithURL(episode.audioURL)
+        }
+      },
+      receiveValue: { [weak self] appleUrl in
+        // Use Apple URL if found, otherwise fall back to audio URL
+        self?.shareWithURL(appleUrl ?? episode.audioURL)
+      }
+    )
+  }
+
+  private func shareWithURL(_ urlString: String?) {
+    guard let urlString = urlString, let url = URL(string: urlString) else { return }
 
     let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
     if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-      let rootVC = windowScene.windows.first?.rootViewController
+       let rootVC = windowScene.windows.first?.rootViewController
     {
       rootVC.present(activityVC, animated: true)
     }

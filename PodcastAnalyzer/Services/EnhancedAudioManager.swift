@@ -716,6 +716,9 @@ struct PlaybackEpisode: Identifiable, Codable {
   let podcastTitle: String
   let audioURL: String
   var imageURL: String?
+  var episodeDescription: String?
+  var pubDate: Date?
+  var duration: Int?
 }
 
 struct CaptionSegment: Identifiable {
