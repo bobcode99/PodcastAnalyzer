@@ -13,8 +13,11 @@ import os.log
 /// Tracks the status of a transcript generation job
 enum TranscriptJobStatus: Equatable {
   case queued
+  case checkingCloudKit                        // NEW: Checking if transcript exists in CloudKit
+  case downloadingFromCloudKit(progress: Double)  // NEW: Downloading from CloudKit
   case downloadingModel(progress: Double)
   case transcribing(progress: Double)
+  case uploadingToCloudKit(progress: Double)    // NEW: Uploading to CloudKit
   case completed
   case failed(error: String)
 }
@@ -25,8 +28,10 @@ struct TranscriptJob: Identifiable {
   let episodeTitle: String
   let podcastTitle: String
   let audioPath: String
+  let audioURL: String? // Episode audio URL for CloudKit lookup
   let language: String
   var status: TranscriptJobStatus = .queued
+  var source: TranscriptCacheMetadata.TranscriptSource = .localGeneration
 }
 
 /// Manages background transcript generation with parallel processing
@@ -39,7 +44,10 @@ class TranscriptManager: ObservableObject {
 
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "TranscriptManager")
   private let fileStorage = FileStorageManager.shared
-  
+
+  // CloudKit integration (optional - check availability at runtime)
+  private let cloudKitService = CloudKitTranscriptService()
+
   // Helper to create job ID matching episode key format
   private func makeJobId(podcastTitle: String, episodeTitle: String) -> String {
     return "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episodeTitle)"
@@ -48,6 +56,7 @@ class TranscriptManager: ObservableObject {
   // Published state for UI observation
   @Published var activeJobs: [String: TranscriptJob] = [:]
   @Published var isProcessing: Bool = false
+  @Published var cloudKitEnabled: Bool = UserDefaults.standard.bool(forKey: "CloudKitTranscriptSyncEnabled")
 
   // Maximum concurrent transcript jobs
   private let maxConcurrentJobs = 2
@@ -66,9 +75,14 @@ class TranscriptManager: ObservableObject {
   ///   - episodeTitle: Title of the episode
   ///   - podcastTitle: Title of the podcast
   ///   - audioPath: Local path to the audio file
+  ///   - audioURL: Episode audio URL for CloudKit lookup (optional)
   ///   - language: Language code for transcription
   func queueTranscript(
-    episodeTitle: String, podcastTitle: String, audioPath: String, language: String
+    episodeTitle: String,
+    podcastTitle: String,
+    audioPath: String,
+    audioURL: String? = nil,
+    language: String
   ) {
     let jobId = makeJobId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
 
@@ -83,6 +97,7 @@ class TranscriptManager: ObservableObject {
       episodeTitle: episodeTitle,
       podcastTitle: podcastTitle,
       audioPath: audioPath,
+      audioURL: audioURL,
       language: language
     )
 
@@ -93,6 +108,18 @@ class TranscriptManager: ObservableObject {
 
     // Start processing if not already running
     startProcessingIfNeeded()
+  }
+
+  /// Enable or disable CloudKit sync
+  func setCloudKitEnabled(_ enabled: Bool) {
+    cloudKitEnabled = enabled
+    UserDefaults.standard.set(enabled, forKey: "CloudKitTranscriptSyncEnabled")
+    logger.info("CloudKit sync \(enabled ? "enabled" : "disabled")")
+  }
+
+  /// Get CloudKit statistics
+  func getCloudKitStats() async -> CloudKitTranscriptStats {
+    await cloudKitService.getStats()
   }
 
   /// Checks if a transcript is being generated for an episode
@@ -162,13 +189,61 @@ class TranscriptManager: ObservableObject {
   }
 
   private func processJob(_ job: TranscriptJob) async {
-    await MainActor.run {
-      var updatedJob = job
-      updatedJob.status = .downloadingModel(progress: 0)
-      activeJobs[job.id] = updatedJob
-    }
+    var updatedJob = job
 
     do {
+      // STEP 1: Check CloudKit first if enabled and audioURL available
+      if cloudKitEnabled, let episodeURL = job.audioURL {
+        await MainActor.run {
+          updatedJob.status = .checkingCloudKit
+          activeJobs[job.id] = updatedJob
+        }
+
+        logger.info("Checking CloudKit for existing transcript: \(job.episodeTitle)")
+
+        // Check if transcript exists in CloudKit
+        if let sharedTranscript = try? await cloudKitService.findTranscript(forEpisodeURL: episodeURL) {
+          logger.info("Found transcript in CloudKit! Downloading...")
+
+          // Download from CloudKit
+          for try await progress in await cloudKitService.downloadTranscript(sharedTranscript) {
+            await MainActor.run {
+              updatedJob.status = .downloadingFromCloudKit(progress: progress.progress)
+              activeJobs[job.id] = updatedJob
+            }
+
+            // Download complete
+            if progress.progress >= 1.0, let content = progress.content {
+              // Save to local storage
+              _ = try await fileStorage.saveCaptionFile(
+                content: content,
+                episodeTitle: job.episodeTitle,
+                podcastTitle: job.podcastTitle
+              )
+
+              await MainActor.run {
+                updatedJob.status = .completed
+                updatedJob.source = .cloudKitDownload
+                activeJobs[job.id] = updatedJob
+                logger.info("Downloaded transcript from CloudKit: \(job.episodeTitle)")
+              }
+
+              // Early return - no need to generate locally!
+              await finishJob(updatedJob)
+              return
+            }
+          }
+        } else {
+          logger.info("No transcript found in CloudKit, generating locally")
+        }
+      }
+
+      // STEP 2: Generate locally (only if CloudKit didn't provide it)
+      await MainActor.run {
+        updatedJob.status = .downloadingModel(progress: 0)
+        activeJobs[job.id] = updatedJob
+      }
+
       let audioURL = URL(fileURLWithPath: job.audioPath)
       let transcriptService = TranscriptService(language: job.language)
 
@@ -229,38 +304,83 @@ class TranscriptManager: ObservableObject {
         )
       }
 
-      // Save the transcript
+      // Save the transcript locally
       _ = try await fileStorage.saveCaptionFile(
         content: srtContent,
         episodeTitle: job.episodeTitle,
         podcastTitle: job.podcastTitle
       )
 
+      // STEP 3: Upload to CloudKit if enabled and audioURL available
+      if cloudKitEnabled, let episodeURL = job.audioURL {
+        logger.info("Uploading transcript to CloudKit: \(job.episodeTitle)")
+
+        await MainActor.run {
+          updatedJob.status = .uploadingToCloudKit(progress: 0)
+          activeJobs[job.id] = updatedJob
+        }
+
+        // Get audio duration for validation (estimate from file if needed)
+        let audioDuration: TimeInterval = 0 // TODO: Get from episode metadata if available
+
+        let sharedTranscript = SharedTranscript(
+          episodeAudioURL: episodeURL,
+          episodeTitle: job.episodeTitle,
+          podcastTitle: job.podcastTitle,
+          language: job.language,
+          transcriptContent: srtContent,
+          audioDuration: audioDuration
+        )
+
+        // Upload to CloudKit (non-blocking, fire and forget)
+        Task {
+          do {
+            for try await uploadProgress in await cloudKitService.uploadTranscript(sharedTranscript) {
+              await MainActor.run {
+                updatedJob.status = .uploadingToCloudKit(progress: uploadProgress.progress)
+                activeJobs[job.id] = updatedJob
+              }
+
+              if uploadProgress.progress >= 1.0 {
+                logger.info("Successfully uploaded transcript to CloudKit")
+              }
+            }
+          } catch {
+            logger.warning("Failed to upload to CloudKit: \(error.localizedDescription)")
+            // Don't fail the job - local transcript is already saved
+          }
+        }
+      }
+
       await MainActor.run {
-        var updatedJob = job
         updatedJob.status = .completed
+        updatedJob.source = .localGeneration
         self.activeJobs[job.id] = updatedJob
         self.logger.info("Transcript completed for: \(job.episodeTitle)")
       }
 
-      // Remove from active jobs after a short delay
-      try? await Task.sleep(for: .seconds(3))
-      _ = await MainActor.run {
-        self.activeJobs.removeValue(forKey: job.id)
-      }
+      // Finish job cleanup
+      await finishJob(updatedJob)
 
     } catch {
       await MainActor.run {
-        var updatedJob = job
         updatedJob.status = .failed(error: error.localizedDescription)
         self.activeJobs[job.id] = updatedJob
         self.logger.error(
           "Transcript failed for \(job.episodeTitle): \(error.localizedDescription)")
       }
-    }
 
-    // Job completed - clean up and check for more pending jobs
+      await finishJob(updatedJob)
+    }
+  }
+
+  /// Finish job and clean up
+  private func finishJob(_ job: TranscriptJob) async {
+    // Remove from active jobs after a short delay
+    try? await Task.sleep(for: .seconds(3))
+
     await MainActor.run {
+      self.activeJobs.removeValue(forKey: job.id)
       self.runningJobIds.remove(job.id)
       self.processingTasks.removeValue(forKey: job.id)
 
