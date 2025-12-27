@@ -85,3 +85,5 @@ fastlane/*.env
 iOSInjectionProject/
 
 *.xcodeproj/
+
+buildServer.json
