@@ -141,6 +141,34 @@ struct SettingsView: View {
           )
         }
 
+        // MARK: - AI Settings Section
+        Section {
+          NavigationLink {
+            AISettingsView()
+          } label: {
+            HStack {
+              Image(systemName: "sparkles")
+                .foregroundColor(.purple)
+                .frame(width: 24)
+              Text("AI Settings")
+              Spacer()
+              if AISettingsManager.shared.hasConfiguredProvider {
+                Text(AISettingsManager.shared.selectedProvider.displayName)
+                  .font(.caption)
+                  .foregroundColor(.secondary)
+              } else {
+                Text("Not configured")
+                  .font(.caption)
+                  .foregroundColor(.orange)
+              }
+            }
+          }
+        } header: {
+          Text("AI Analysis")
+        } footer: {
+          Text("Configure cloud AI providers (OpenAI, Claude, Gemini, Grok) for transcript analysis")
+        }
+
         // MARK: - About Section
         Section {
           HStack {

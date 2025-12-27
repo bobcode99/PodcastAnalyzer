@@ -876,414 +876,275 @@ final class EpisodeDetailViewModel {
     }
   }
 
-  // MARK: - AI Analysis (iOS 26+)
+  // MARK: - On-Device AI (Quick Tags from Metadata)
 
-  // AI Analysis State
-  var aiAvailability: FoundationModelsAvailability = .unavailable(reason: "Checking...")
-  var analysisState: AnalysisState = .idle
+  // On-device AI availability
+  var onDeviceAIAvailability: FoundationModelsAvailability = .unavailable(reason: "Checking...")
 
-  // Cached AI results
-  var episodeSummary: EpisodeSummary?
-  var episodeTags: EpisodeTags?
-  var episodeEntities: EpisodeEntities?
-  var episodeHighlights: EpisodeHighlights?
-  var episodeContentAnalysis: EpisodeContentAnalysis?
+  // Quick tags state and cache
+  var quickTagsState: AnalysisState = .idle
+  var quickTagsCache: CachedQuickTags = CachedQuickTags()
 
-  // Question & Answer
-  var currentQuestion: String = ""
-  var currentAnswer: EpisodeAnswer?
-
-  /// Check if Foundation Models are available on this device
-  func checkAIAvailability() {
+  /// Check if on-device Foundation Models are available
+  func checkOnDeviceAIAvailability() {
     if #available(iOS 26.0, macOS 26.0, *) {
       Task {
         let service = EpisodeAnalysisService()
         let availability = await service.checkAvailability()
 
         await MainActor.run {
-          aiAvailability = availability
+          onDeviceAIAvailability = availability
         }
       }
     } else {
-      aiAvailability = .unavailable(reason: "Requires iOS 26 or later")
+      onDeviceAIAvailability = .unavailable(reason: "Requires iOS 26 or later")
     }
   }
 
-  /// Generate AI summary from transcript
-  func generateAISummary() {
+  /// Generate quick tags from episode metadata (on-device, fast)
+  func generateQuickTags() {
     guard #available(iOS 26.0, macOS 26.0, *) else {
-      analysisState = .error("AI features require iOS 26 or later")
+      quickTagsState = .error("Requires iOS 26 or later")
       return
     }
 
-    guard !transcriptText.isEmpty else {
-      analysisState = .error("No transcript available. Generate transcript first.")
-      return
-    }
-
-    guard aiAvailability.isAvailable else {
-      analysisState = .error(aiAvailability.message ?? "AI is unavailable")
+    guard onDeviceAIAvailability.isAvailable else {
+      quickTagsState = .error(onDeviceAIAvailability.message ?? "On-device AI unavailable")
       return
     }
 
     Task {
       do {
         await MainActor.run {
-          analysisState = .analyzing(progress: 0.2)
+          quickTagsState = .analyzing(progress: 0, message: "Generating tags...")
         }
 
         let service = EpisodeAnalysisService()
-        let plainText = SRTParser.extractPlainText(from: transcriptText)
+        let tags = try await service.generateQuickTags(
+          title: episode.title,
+          description: episode.podcastEpisodeDescription ?? "",
+          podcastTitle: podcastTitle,
+          duration: episode.duration.map { TimeInterval($0) },
+          releaseDate: episode.pubDate,
+          progressCallback: { [weak self] message, progress in
+            Task { @MainActor in
+              self?.quickTagsState = .analyzing(progress: progress, message: message)
+            }
+          }
+        )
 
         await MainActor.run {
-          analysisState = .analyzing(progress: 0.5)
+          quickTagsCache.tags = tags
+          quickTagsCache.generatedAt = Date()
+          quickTagsState = .completed
+          logger.info("Quick tags generated successfully")
+        }
+      } catch {
+        await MainActor.run {
+          quickTagsState = .error("Failed: \(error.localizedDescription)")
+          logger.error("Quick tags generation failed: \(error.localizedDescription)")
+        }
+      }
+    }
+  }
+
+  /// Generate brief summary from metadata (on-device, fast)
+  func generateBriefSummary() {
+    guard #available(iOS 26.0, macOS 26.0, *) else {
+      quickTagsState = .error("Requires iOS 26 or later")
+      return
+    }
+
+    guard onDeviceAIAvailability.isAvailable else {
+      quickTagsState = .error(onDeviceAIAvailability.message ?? "On-device AI unavailable")
+      return
+    }
+
+    Task {
+      do {
+        await MainActor.run {
+          quickTagsState = .analyzing(progress: 0, message: "Creating summary...")
         }
 
-        let summary = try await service.generateSummary(
-          from: plainText,
+        let service = EpisodeAnalysisService()
+        let summary = try await service.generateBriefSummary(
+          title: episode.title,
+          description: episode.podcastEpisodeDescription ?? "",
+          progressCallback: { [weak self] message, progress in
+            Task { @MainActor in
+              self?.quickTagsState = .analyzing(progress: progress, message: message)
+            }
+          }
+        )
+
+        await MainActor.run {
+          quickTagsCache.briefSummary = summary
+          quickTagsCache.generatedAt = Date()
+          quickTagsState = .completed
+          logger.info("Brief summary generated successfully")
+        }
+      } catch {
+        await MainActor.run {
+          quickTagsState = .error("Failed: \(error.localizedDescription)")
+          logger.error("Brief summary generation failed: \(error.localizedDescription)")
+        }
+      }
+    }
+  }
+
+  // MARK: - Cloud AI (Transcript Analysis with BYOK)
+
+  // Cloud analysis state and cache
+  var cloudAnalysisState: AnalysisState = .idle
+  var cloudQuestionState: AnalysisState = .idle
+  var cloudAnalysisCache: CachedCloudAnalysis = CachedCloudAnalysis()
+
+  /// Generate cloud-based transcript analysis
+  func generateCloudAnalysis(type: CloudAnalysisType) {
+    let settings = AISettingsManager.shared
+
+    guard settings.hasConfiguredProvider else {
+      cloudAnalysisState = .error("No API key configured. Go to Settings > AI Settings.")
+      return
+    }
+
+    guard hasTranscript else {
+      cloudAnalysisState = .error("No transcript available. Generate transcript first.")
+      return
+    }
+
+    Task {
+      do {
+        await MainActor.run {
+          cloudAnalysisState = .analyzing(progress: 0, message: "Preparing...")
+        }
+
+        let service = CloudAIService.shared
+        let plainText = SRTParser.extractPlainText(from: transcriptText)
+
+        let result = try await service.analyzeTranscript(
+          plainText,
           episodeTitle: episode.title,
-          language: podcastLanguage
+          podcastTitle: podcastTitle,
+          analysisType: type,
+          progressCallback: { [weak self] message, progress in
+            Task { @MainActor in
+              self?.cloudAnalysisState = .analyzing(progress: progress, message: message)
+            }
+          }
         )
 
         await MainActor.run {
-          episodeSummary = summary
-          analysisState = .completed
-          logger.info("AI summary generated successfully")
+          // Store in cache
+          switch type {
+          case .summary:
+            cloudAnalysisCache.summary = result
+          case .entities:
+            cloudAnalysisCache.entities = result
+          case .highlights:
+            cloudAnalysisCache.highlights = result
+          case .fullAnalysis:
+            cloudAnalysisCache.fullAnalysis = result
+          }
+          cloudAnalysisState = .completed
+          logger.info("Cloud analysis (\(type.rawValue)) completed successfully")
         }
       } catch {
         await MainActor.run {
-          analysisState = .error("Failed to generate summary: \(error.localizedDescription)")
-          logger.error("AI summary generation failed: \(error.localizedDescription)")
+          cloudAnalysisState = .error(error.localizedDescription)
+          logger.error("Cloud analysis failed: \(error.localizedDescription)")
         }
       }
     }
   }
 
-  /// Generate tags and categories for episode
-  func generateAITags() {
-    guard #available(iOS 26.0, macOS 26.0, *) else {
-      analysisState = .error("AI features require iOS 26 or later")
-      return
-    }
-
-    guard !transcriptText.isEmpty else {
-      analysisState = .error("No transcript available. Generate transcript first.")
-      return
-    }
-
-    guard aiAvailability.isAvailable else {
-      analysisState = .error(aiAvailability.message ?? "AI is unavailable")
-      return
-    }
-
-    Task {
-      do {
-        await MainActor.run {
-          analysisState = .analyzing(progress: 0.2)
-        }
-
-        let service = EpisodeAnalysisService()
-        let plainText = SRTParser.extractPlainText(from: transcriptText)
-
-        let tags = try await service.generateTags(
-          from: plainText,
-          episodeTitle: episode.title,
-          language: podcastLanguage
-        )
-
-        await MainActor.run {
-          episodeTags = tags
-          analysisState = .completed
-          logger.info("AI tags generated successfully")
-        }
-      } catch {
-        await MainActor.run {
-          analysisState = .error("Failed to generate tags: \(error.localizedDescription)")
-          logger.error("AI tags generation failed: \(error.localizedDescription)")
-        }
-      }
-    }
-  }
-
-  /// Extract named entities from episode
-  func extractAIEntities() {
-    guard #available(iOS 26.0, macOS 26.0, *) else {
-      analysisState = .error("AI features require iOS 26 or later")
-      return
-    }
-
-    guard !transcriptText.isEmpty else {
-      analysisState = .error("No transcript available. Generate transcript first.")
-      return
-    }
-
-    guard aiAvailability.isAvailable else {
-      analysisState = .error(aiAvailability.message ?? "AI is unavailable")
-      return
-    }
-
-    Task {
-      do {
-        await MainActor.run {
-          analysisState = .analyzing(progress: 0.2)
-        }
-
-        let service = EpisodeAnalysisService()
-        let plainText = SRTParser.extractPlainText(from: transcriptText)
-
-        let entities = try await service.extractEntities(
-          from: plainText,
-          language: podcastLanguage
-        )
-
-        await MainActor.run {
-          episodeEntities = entities
-          analysisState = .completed
-          logger.info("AI entities extracted successfully")
-        }
-      } catch {
-        await MainActor.run {
-          analysisState = .error("Failed to extract entities: \(error.localizedDescription)")
-          logger.error("AI entity extraction failed: \(error.localizedDescription)")
-        }
-      }
-    }
-  }
-
-  /// Generate episode highlights
-  func generateAIHighlights() {
-    guard #available(iOS 26.0, macOS 26.0, *) else {
-      analysisState = .error("AI features require iOS 26 or later")
-      return
-    }
-
-    guard !transcriptText.isEmpty else {
-      analysisState = .error("No transcript available. Generate transcript first.")
-      return
-    }
-
-    guard aiAvailability.isAvailable else {
-      analysisState = .error(aiAvailability.message ?? "AI is unavailable")
-      return
-    }
-
-    Task {
-      do {
-        await MainActor.run {
-          analysisState = .analyzing(progress: 0.2)
-        }
-
-        let service = EpisodeAnalysisService()
-        let plainText = SRTParser.extractPlainText(from: transcriptText)
-
-        let highlights = try await service.generateHighlights(
-          from: plainText,
-          episodeTitle: episode.title,
-          language: podcastLanguage
-        )
-
-        await MainActor.run {
-          episodeHighlights = highlights
-          analysisState = .completed
-          logger.info("AI highlights generated successfully")
-        }
-      } catch {
-        await MainActor.run {
-          analysisState = .error("Failed to generate highlights: \(error.localizedDescription)")
-          logger.error("AI highlights generation failed: \(error.localizedDescription)")
-        }
-      }
-    }
-  }
-
-  /// Analyze content structure and style
-  func analyzeAIContent() {
-    guard #available(iOS 26.0, macOS 26.0, *) else {
-      analysisState = .error("AI features require iOS 26 or later")
-      return
-    }
-
-    guard !transcriptText.isEmpty else {
-      analysisState = .error("No transcript available. Generate transcript first.")
-      return
-    }
-
-    guard aiAvailability.isAvailable else {
-      analysisState = .error(aiAvailability.message ?? "AI is unavailable")
-      return
-    }
-
-    Task {
-      do {
-        await MainActor.run {
-          analysisState = .analyzing(progress: 0.2)
-        }
-
-        let service = EpisodeAnalysisService()
-        let plainText = SRTParser.extractPlainText(from: transcriptText)
-
-        let analysis = try await service.analyzeContent(
-          from: plainText,
-          language: podcastLanguage
-        )
-
-        await MainActor.run {
-          episodeContentAnalysis = analysis
-          analysisState = .completed
-          logger.info("AI content analysis completed successfully")
-        }
-      } catch {
-        await MainActor.run {
-          analysisState = .error("Failed to analyze content: \(error.localizedDescription)")
-          logger.error("AI content analysis failed: \(error.localizedDescription)")
-        }
-      }
-    }
-  }
-
-  /// Ask a question about the episode
-  func askAIQuestion(_ question: String) {
-    guard #available(iOS 26.0, macOS 26.0, *) else {
-      analysisState = .error("AI features require iOS 26 or later")
-      return
-    }
+  /// Ask a question about the episode using cloud AI
+  func askCloudQuestion(_ question: String) {
+    let settings = AISettingsManager.shared
 
     guard !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       return
     }
 
-    guard !transcriptText.isEmpty else {
-      analysisState = .error("No transcript available. Generate transcript first.")
+    guard settings.hasConfiguredProvider else {
+      cloudQuestionState = .error("No API key configured. Go to Settings > AI Settings.")
       return
     }
 
-    guard aiAvailability.isAvailable else {
-      analysisState = .error(aiAvailability.message ?? "AI is unavailable")
+    guard hasTranscript else {
+      cloudQuestionState = .error("No transcript available. Generate transcript first.")
       return
     }
 
     Task {
       do {
         await MainActor.run {
-          currentQuestion = question
-          analysisState = .analyzing(progress: 0.2)
+          cloudQuestionState = .analyzing(progress: 0, message: "Processing question...")
         }
 
-        let service = EpisodeAnalysisService()
+        let service = CloudAIService.shared
         let plainText = SRTParser.extractPlainText(from: transcriptText)
 
-        let answer = try await service.answerQuestion(
+        let answer = try await service.askQuestion(
           question,
-          from: plainText,
+          transcript: plainText,
           episodeTitle: episode.title,
-          language: podcastLanguage
+          progressCallback: { [weak self] message, progress in
+            Task { @MainActor in
+              self?.cloudQuestionState = .analyzing(progress: progress, message: message)
+            }
+          }
         )
 
         await MainActor.run {
-          currentAnswer = answer
-          analysisState = .completed
-          logger.info("AI question answered successfully")
+          cloudAnalysisCache.questionAnswers.append((
+            question: question,
+            answer: answer,
+            timestamp: Date()
+          ))
+          cloudQuestionState = .completed
+          logger.info("Cloud Q&A completed successfully")
         }
       } catch {
         await MainActor.run {
-          analysisState = .error("Failed to answer question: \(error.localizedDescription)")
-          logger.error("AI question answering failed: \(error.localizedDescription)")
+          cloudQuestionState = .error(error.localizedDescription)
+          logger.error("Cloud Q&A failed: \(error.localizedDescription)")
         }
       }
     }
   }
 
-  /// Generate all AI analyses at once
-  func generateAllAIAnalyses() {
-    guard #available(iOS 26.0, macOS 26.0, *) else {
-      analysisState = .error("AI features require iOS 26 or later")
-      return
+  /// Clear a specific cloud analysis result
+  func clearCloudAnalysis(type: CloudAnalysisType) {
+    switch type {
+    case .summary:
+      cloudAnalysisCache.summary = nil
+    case .entities:
+      cloudAnalysisCache.entities = nil
+    case .highlights:
+      cloudAnalysisCache.highlights = nil
+    case .fullAnalysis:
+      cloudAnalysisCache.fullAnalysis = nil
     }
-
-    guard !transcriptText.isEmpty else {
-      analysisState = .error("No transcript available. Generate transcript first.")
-      return
-    }
-
-    guard aiAvailability.isAvailable else {
-      analysisState = .error(aiAvailability.message ?? "AI is unavailable")
-      return
-    }
-
-    Task {
-      do {
-        await MainActor.run {
-          analysisState = .analyzing(progress: 0.1)
-        }
-
-        let service = EpisodeAnalysisService()
-        let plainText = SRTParser.extractPlainText(from: transcriptText)
-
-        // Generate summary
-        await MainActor.run {
-          analysisState = .analyzing(progress: 0.2)
-        }
-        let summary = try await service.generateSummary(
-          from: plainText,
-          episodeTitle: episode.title,
-          language: podcastLanguage
-        )
-
-        // Generate tags
-        await MainActor.run {
-          episodeSummary = summary
-          analysisState = .analyzing(progress: 0.4)
-        }
-        let tags = try await service.generateTags(
-          from: plainText,
-          episodeTitle: episode.title,
-          language: podcastLanguage
-        )
-
-        // Extract entities
-        await MainActor.run {
-          episodeTags = tags
-          analysisState = .analyzing(progress: 0.6)
-        }
-        let entities = try await service.extractEntities(
-          from: plainText,
-          language: podcastLanguage
-        )
-
-        // Generate highlights
-        await MainActor.run {
-          episodeEntities = entities
-          analysisState = .analyzing(progress: 0.8)
-        }
-        let highlights = try await service.generateHighlights(
-          from: plainText,
-          episodeTitle: episode.title,
-          language: podcastLanguage
-        )
-
-        await MainActor.run {
-          episodeHighlights = highlights
-          analysisState = .completed
-          logger.info("All AI analyses completed successfully")
-        }
-      } catch {
-        await MainActor.run {
-          analysisState = .error("Failed to complete analyses: \(error.localizedDescription)")
-          logger.error("AI analyses failed: \(error.localizedDescription)")
-        }
-      }
-    }
+    cloudAnalysisState = .idle
   }
 
-  /// Clear AI analysis results
-  func clearAIResults() {
-    episodeSummary = nil
-    episodeTags = nil
-    episodeEntities = nil
-    episodeHighlights = nil
-    episodeContentAnalysis = nil
-    currentAnswer = nil
-    currentQuestion = ""
-    analysisState = .idle
+  /// Clear all AI results
+  func clearAllAIResults() {
+    quickTagsCache.clear()
+    quickTagsState = .idle
+    cloudAnalysisCache.clearAll()
+    cloudAnalysisState = .idle
+    cloudQuestionState = .idle
+  }
+
+  // MARK: - Legacy AI Properties (for backward compatibility)
+
+  var aiAvailability: FoundationModelsAvailability {
+    onDeviceAIAvailability
+  }
+
+  func checkAIAvailability() {
+    checkOnDeviceAIAvailability()
   }
 }

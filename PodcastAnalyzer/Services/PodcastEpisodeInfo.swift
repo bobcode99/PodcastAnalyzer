@@ -7,7 +7,6 @@
 
 import FeedKit
 import Foundation
-internal import XMLKit
 
 public struct PodcastEpisodeInfo: Sendable, Codable, Identifiable {
   public let title: String

@@ -2,7 +2,6 @@
 //  SRTParser.swift
 //  PodcastAnalyzer
 //
-//  Created by Claude Code
 //  Utility for parsing SRT (SubRip) transcript files
 //
 
@@ -141,93 +140,19 @@ struct SRTParser {
     }
 
     /// Estimate token count for text (rough approximation)
+    /// Used for progress estimation with cloud providers
     /// - Parameters:
     ///   - text: Input text
     ///   - language: Language code (e.g., "en", "zh", "ja")
     /// - Returns: Estimated token count
-    static func estimateTokenCount(for text: String, language: String = "en") -> Int {
-        // English/European languages: ~3-4 chars per token
-        // Asian languages (Chinese/Japanese): ~1 char per token
-        let isAsianLanguage = ["zh", "ja", "ko"].contains(language.lowercased().prefix(2))
-        let charsPerToken = isAsianLanguage ? 1.0 : 3.5
+    nonisolated static func estimateTokenCount(for text: String, language: String = "en") -> Int {
+        // English/European: ~4 chars per token
+        // Asian languages (CJK): ~1.5 chars per token
+        let langPrefix = String(language.lowercased().prefix(2))
+        let isAsianLanguage = ["zh", "ja", "ko"].contains(langPrefix)
+        let charsPerToken = isAsianLanguage ? 1.5 : 4.0
 
         return Int(ceil(Double(text.count) / charsPerToken))
-    }
-
-    /// Split transcript into chunks that fit within token limit
-    /// - Parameters:
-    ///   - text: Full transcript text
-    ///   - maxTokens: Maximum tokens per chunk (default 3000 to leave room for output)
-    ///   - language: Language code for token estimation
-    /// - Returns: Array of text chunks
-    static func chunkText(_ text: String, maxTokens: Int = 3000, language: String = "en") -> [String] {
-        let estimatedTokens = estimateTokenCount(for: text, language: language)
-
-        // If text fits in one chunk, return as-is
-        if estimatedTokens <= maxTokens {
-            return [text]
-        }
-
-        // Split by sentences first
-        let sentences = splitIntoSentences(text)
-        var chunks: [String] = []
-        var currentChunk: [String] = []
-        var currentTokenCount = 0
-
-        for sentence in sentences {
-            let sentenceTokens = estimateTokenCount(for: sentence, language: language)
-
-            // If adding this sentence exceeds limit, start new chunk
-            if currentTokenCount + sentenceTokens > maxTokens && !currentChunk.isEmpty {
-                chunks.append(currentChunk.joined(separator: " "))
-                currentChunk = [sentence]
-                currentTokenCount = sentenceTokens
-            } else {
-                currentChunk.append(sentence)
-                currentTokenCount += sentenceTokens
-            }
-        }
-
-        // Add final chunk
-        if !currentChunk.isEmpty {
-            chunks.append(currentChunk.joined(separator: " "))
-        }
-
-        return chunks
-    }
-
-    /// Split text into sentences using basic punctuation
-    /// - Parameter text: Input text
-    /// - Returns: Array of sentences
-    private static func splitIntoSentences(_ text: String) -> [String] {
-        // Split on sentence terminators while preserving them
-        let pattern = "([.!?。！？]+\\s+)"
-        let regex = try? NSRegularExpression(pattern: pattern, options: [])
-
-        guard let regex = regex else {
-            // Fallback: split on common sentence endings
-            return text.components(separatedBy: ". ")
-        }
-
-        let range = NSRange(text.startIndex..., in: text)
-        var sentences: [String] = []
-        var lastEnd = text.startIndex
-
-        regex.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
-            guard let match = match else { return }
-            let matchRange = Range(match.range, in: text)!
-
-            let sentence = String(text[lastEnd..<matchRange.upperBound])
-            sentences.append(sentence.trimmingCharacters(in: .whitespacesAndNewlines))
-            lastEnd = matchRange.upperBound
-        }
-
-        // Add remaining text
-        if lastEnd < text.endIndex {
-            sentences.append(String(text[lastEnd...]).trimmingCharacters(in: .whitespacesAndNewlines))
-        }
-
-        return sentences.filter { !$0.isEmpty }
     }
 }
 
