@@ -107,6 +107,7 @@ final class EpisodeDetailViewModel {
     self.modelContext = context
     loadEpisodeModel()
     observePlaybackState()
+    loadAIAnalysisFromSwiftData()
   }
 
   // MARK: - Episode Properties
@@ -937,6 +938,10 @@ final class EpisodeDetailViewModel {
           quickTagsCache.tags = tags
           quickTagsCache.generatedAt = Date()
           quickTagsState = .completed
+
+          // Save to SwiftData
+          saveQuickTagsToSwiftData(tags: tags)
+
           logger.info("Quick tags generated successfully")
         }
       } catch {
@@ -999,7 +1004,12 @@ final class EpisodeDetailViewModel {
   var cloudQuestionState: AnalysisState = .idle
   var cloudAnalysisCache: CachedCloudAnalysis = CachedCloudAnalysis()
 
-  /// Generate cloud-based transcript analysis
+  // Streaming response text (updated in real-time)
+  var streamingText: String = ""
+  var isStreaming: Bool = false
+  var currentStreamingType: CloudAnalysisType?
+
+  /// Generate cloud-based transcript analysis with streaming
   func generateCloudAnalysis(type: CloudAnalysisType) {
     let settings = AISettingsManager.shared
 
@@ -1017,16 +1027,22 @@ final class EpisodeDetailViewModel {
       do {
         await MainActor.run {
           cloudAnalysisState = .analyzing(progress: 0, message: "Preparing...")
+          streamingText = ""
+          isStreaming = true
+          currentStreamingType = type
         }
 
         let service = CloudAIService.shared
         let plainText = SRTParser.extractPlainText(from: transcriptText)
 
-        let result = try await service.analyzeTranscript(
+        let result = try await service.analyzeTranscriptStreaming(
           plainText,
           episodeTitle: episode.title,
           podcastTitle: podcastTitle,
           analysisType: type,
+          onChunk: { [weak self] text in
+            self?.streamingText = text
+          },
           progressCallback: { [weak self] message, progress in
             Task { @MainActor in
               self?.cloudAnalysisState = .analyzing(progress: progress, message: message)
@@ -1035,6 +1051,10 @@ final class EpisodeDetailViewModel {
         )
 
         await MainActor.run {
+          isStreaming = false
+          currentStreamingType = nil
+          streamingText = ""
+
           // Store in cache
           switch type {
           case .summary:
@@ -1047,10 +1067,17 @@ final class EpisodeDetailViewModel {
             cloudAnalysisCache.fullAnalysis = result
           }
           cloudAnalysisState = .completed
+
+          // Save to SwiftData
+          saveCloudAnalysisToSwiftData(result: result, type: type)
+
           logger.info("Cloud analysis (\(type.rawValue)) completed successfully")
         }
       } catch {
         await MainActor.run {
+          isStreaming = false
+          currentStreamingType = nil
+          streamingText = ""
           cloudAnalysisState = .error(error.localizedDescription)
           logger.error("Cloud analysis failed: \(error.localizedDescription)")
         }
@@ -1085,7 +1112,7 @@ final class EpisodeDetailViewModel {
         let service = CloudAIService.shared
         let plainText = SRTParser.extractPlainText(from: transcriptText)
 
-        let answer = try await service.askQuestion(
+        let result = try await service.askQuestion(
           question,
           transcript: plainText,
           episodeTitle: episode.title,
@@ -1098,11 +1125,15 @@ final class EpisodeDetailViewModel {
 
         await MainActor.run {
           cloudAnalysisCache.questionAnswers.append((
-            question: question,
-            answer: answer,
-            timestamp: Date()
+            question: result.question,
+            answer: result.answer,
+            timestamp: result.timestamp
           ))
           cloudQuestionState = .completed
+
+          // Save Q&A to SwiftData
+          saveQAToSwiftData(question: result.question, answer: result.answer)
+
           logger.info("Cloud Q&A completed successfully")
         }
       } catch {
@@ -1146,5 +1177,361 @@ final class EpisodeDetailViewModel {
 
   func checkAIAvailability() {
     checkOnDeviceAIAvailability()
+  }
+
+  // MARK: - SwiftData AI Analysis Persistence
+
+  /// Cached SwiftData model for AI analysis
+  private var aiAnalysisModel: EpisodeAIAnalysis?
+
+  /// Load AI analysis from SwiftData on initialization
+  func loadAIAnalysisFromSwiftData() {
+    guard let context = modelContext else { return }
+
+    // Load cloud analysis
+    let audioURL = episode.audioURL ?? ""
+    let cloudDescriptor = FetchDescriptor<EpisodeAIAnalysis>(
+      predicate: #Predicate { $0.episodeAudioURL == audioURL }
+    )
+
+    do {
+      let results = try context.fetch(cloudDescriptor)
+      if let model = results.first {
+        aiAnalysisModel = model
+        restoreCloudAnalysisFromModel(model)
+      }
+    } catch {
+      logger.error("Failed to load AI analysis: \(error.localizedDescription)")
+    }
+
+    // Load quick tags
+    let tagsDescriptor = FetchDescriptor<EpisodeQuickTagsModel>(
+      predicate: #Predicate { $0.episodeAudioURL == audioURL }
+    )
+
+    do {
+      let results = try context.fetch(tagsDescriptor)
+      if let model = results.first {
+        restoreQuickTagsFromModel(model)
+      }
+    } catch {
+      logger.error("Failed to load quick tags: \(error.localizedDescription)")
+    }
+  }
+
+  /// Restore cloud analysis cache from SwiftData model
+  private func restoreCloudAnalysisFromModel(_ model: EpisodeAIAnalysis) {
+    // Restore summary
+    if let summaryText = model.summaryText {
+      let parsed = ParsedSummaryResponse(
+        summary: summaryText,
+        mainTopics: model.summaryMainTopics ?? [],
+        keyTakeaways: model.summaryKeyTakeaways ?? [],
+        targetAudience: model.summaryTargetAudience ?? "",
+        engagementLevel: model.summaryEngagementLevel ?? ""
+      )
+      cloudAnalysisCache.summary = CloudAnalysisResult(
+        type: .summary,
+        content: summaryText,
+        parsedSummary: parsed,
+        parsedEntities: nil,
+        parsedHighlights: nil,
+        parsedFullAnalysis: nil,
+        provider: CloudAIProvider(rawValue: model.summaryProvider ?? "") ?? .openai,
+        model: model.summaryModel ?? "",
+        timestamp: model.summaryGeneratedAt ?? model.createdAt
+      )
+    }
+
+    // Restore entities
+    if model.hasEntities {
+      let parsed = ParsedEntitiesResponse(
+        people: model.entitiesPeople ?? [],
+        organizations: model.entitiesOrganizations ?? [],
+        products: model.entitiesProducts ?? [],
+        locations: model.entitiesLocations ?? [],
+        resources: model.entitiesResources ?? []
+      )
+      let content = formatEntitiesAsText(parsed)
+      cloudAnalysisCache.entities = CloudAnalysisResult(
+        type: .entities,
+        content: content,
+        parsedSummary: nil,
+        parsedEntities: parsed,
+        parsedHighlights: nil,
+        parsedFullAnalysis: nil,
+        provider: CloudAIProvider(rawValue: model.entitiesProvider ?? "") ?? .openai,
+        model: model.entitiesModel ?? "",
+        timestamp: model.entitiesGeneratedAt ?? model.createdAt
+      )
+    }
+
+    // Restore highlights
+    if model.hasHighlights {
+      let parsed = ParsedHighlightsResponse(
+        highlights: model.highlightsList ?? [],
+        bestQuote: model.highlightsBestQuote ?? "",
+        actionItems: model.highlightsActionItems ?? [],
+        controversialPoints: model.highlightsControversialPoints,
+        entertainingMoments: model.highlightsEntertainingMoments
+      )
+      let content = formatHighlightsAsText(parsed)
+      cloudAnalysisCache.highlights = CloudAnalysisResult(
+        type: .highlights,
+        content: content,
+        parsedSummary: nil,
+        parsedEntities: nil,
+        parsedHighlights: parsed,
+        parsedFullAnalysis: nil,
+        provider: CloudAIProvider(rawValue: model.highlightsProvider ?? "") ?? .openai,
+        model: model.highlightsModel ?? "",
+        timestamp: model.highlightsGeneratedAt ?? model.createdAt
+      )
+    }
+
+    // Restore full analysis
+    if let fullText = model.fullAnalysisText {
+      // Try to parse as JSON for structured display
+      let parsedFull = parseFullAnalysisJSON(fullText)
+      cloudAnalysisCache.fullAnalysis = CloudAnalysisResult(
+        type: .fullAnalysis,
+        content: fullText,
+        parsedSummary: nil,
+        parsedEntities: nil,
+        parsedHighlights: nil,
+        parsedFullAnalysis: parsedFull,
+        provider: CloudAIProvider(rawValue: model.fullAnalysisProvider ?? "") ?? .openai,
+        model: model.fullAnalysisModel ?? "",
+        timestamp: model.fullAnalysisGeneratedAt ?? model.createdAt
+      )
+    }
+
+    // Restore Q&A history
+    cloudAnalysisCache.questionAnswers = model.qaHistory
+  }
+
+  /// Restore quick tags cache from SwiftData model
+  private func restoreQuickTagsFromModel(_ model: EpisodeQuickTagsModel) {
+    let tags = EpisodeQuickTags(
+      tags: model.tags,
+      primaryCategory: model.primaryCategory,
+      secondaryCategory: model.secondaryCategory,
+      contentType: model.contentType,
+      difficulty: model.difficulty
+    )
+    quickTagsCache.tags = tags
+    quickTagsCache.briefSummary = model.briefSummary
+    quickTagsCache.generatedAt = model.generatedAt
+  }
+
+  /// Save quick tags to SwiftData
+  private func saveQuickTagsToSwiftData(tags: EpisodeQuickTags) {
+    guard let context = modelContext else { return }
+    guard let audioURL = episode.audioURL else { return }
+
+    // Find existing or create new
+    let descriptor = FetchDescriptor<EpisodeQuickTagsModel>(
+      predicate: #Predicate { $0.episodeAudioURL == audioURL }
+    )
+
+    do {
+      let results = try context.fetch(descriptor)
+      if let existing = results.first {
+        // Update existing
+        existing.tags = tags.tags
+        existing.primaryCategory = tags.primaryCategory
+        existing.secondaryCategory = tags.secondaryCategory
+        existing.contentType = tags.contentType
+        existing.difficulty = tags.difficulty
+        existing.briefSummary = quickTagsCache.briefSummary
+        existing.generatedAt = Date()
+      } else {
+        // Create new
+        let model = EpisodeQuickTagsModel(
+          episodeAudioURL: audioURL,
+          episodeTitle: episode.title,
+          tags: tags.tags,
+          primaryCategory: tags.primaryCategory,
+          secondaryCategory: tags.secondaryCategory,
+          contentType: tags.contentType,
+          difficulty: tags.difficulty,
+          briefSummary: quickTagsCache.briefSummary
+        )
+        context.insert(model)
+      }
+
+      try context.save()
+      logger.info("Quick tags saved to SwiftData")
+    } catch {
+      logger.error("Failed to save quick tags: \(error.localizedDescription)")
+    }
+  }
+
+  /// Save cloud analysis to SwiftData
+  private func saveCloudAnalysisToSwiftData(result: CloudAnalysisResult, type: CloudAnalysisType) {
+    guard let context = modelContext else { return }
+    guard let audioURL = episode.audioURL else { return }
+
+    // Find existing or create new
+    let descriptor = FetchDescriptor<EpisodeAIAnalysis>(
+      predicate: #Predicate { $0.episodeAudioURL == audioURL }
+    )
+
+    do {
+      let results = try context.fetch(descriptor)
+      let model: EpisodeAIAnalysis
+
+      if let existing = results.first {
+        model = existing
+      } else {
+        model = EpisodeAIAnalysis(
+          episodeAudioURL: audioURL,
+          episodeTitle: episode.title,
+          podcastTitle: podcastTitle
+        )
+        context.insert(model)
+      }
+
+      // Update based on analysis type
+      switch type {
+      case .summary:
+        if let parsed = result.parsedSummary {
+          model.summaryText = parsed.summary
+          model.summaryMainTopics = parsed.mainTopics
+          model.summaryKeyTakeaways = parsed.keyTakeaways
+          model.summaryTargetAudience = parsed.targetAudience
+          model.summaryEngagementLevel = parsed.engagementLevel
+        } else {
+          model.summaryText = result.content
+        }
+        model.summaryProvider = result.provider.rawValue
+        model.summaryModel = result.model
+        model.summaryGeneratedAt = result.timestamp
+
+      case .entities:
+        if let parsed = result.parsedEntities {
+          model.entitiesPeople = parsed.people
+          model.entitiesOrganizations = parsed.organizations
+          model.entitiesProducts = parsed.products
+          model.entitiesLocations = parsed.locations
+          model.entitiesResources = parsed.resources
+        }
+        model.entitiesProvider = result.provider.rawValue
+        model.entitiesModel = result.model
+        model.entitiesGeneratedAt = result.timestamp
+
+      case .highlights:
+        if let parsed = result.parsedHighlights {
+          model.highlightsList = parsed.highlights
+          model.highlightsBestQuote = parsed.bestQuote
+          model.highlightsActionItems = parsed.actionItems
+          model.highlightsControversialPoints = parsed.controversialPoints
+          model.highlightsEntertainingMoments = parsed.entertainingMoments
+        }
+        model.highlightsProvider = result.provider.rawValue
+        model.highlightsModel = result.model
+        model.highlightsGeneratedAt = result.timestamp
+
+      case .fullAnalysis:
+        model.fullAnalysisText = result.content
+        model.fullAnalysisProvider = result.provider.rawValue
+        model.fullAnalysisModel = result.model
+        model.fullAnalysisGeneratedAt = result.timestamp
+      }
+
+      model.updatedAt = Date()
+      aiAnalysisModel = model
+
+      try context.save()
+      logger.info("Cloud analysis (\(type.rawValue)) saved to SwiftData")
+    } catch {
+      logger.error("Failed to save cloud analysis: \(error.localizedDescription)")
+    }
+  }
+
+  /// Save Q&A to SwiftData
+  private func saveQAToSwiftData(question: String, answer: String) {
+    guard let context = modelContext else { return }
+    guard let audioURL = episode.audioURL else { return }
+
+    // Find existing or create new
+    let descriptor = FetchDescriptor<EpisodeAIAnalysis>(
+      predicate: #Predicate { $0.episodeAudioURL == audioURL }
+    )
+
+    do {
+      let results = try context.fetch(descriptor)
+      let model: EpisodeAIAnalysis
+
+      if let existing = results.first {
+        model = existing
+      } else {
+        model = EpisodeAIAnalysis(
+          episodeAudioURL: audioURL,
+          episodeTitle: episode.title,
+          podcastTitle: podcastTitle
+        )
+        context.insert(model)
+      }
+
+      model.addQA(question: question, answer: answer)
+      aiAnalysisModel = model
+
+      try context.save()
+      logger.info("Q&A saved to SwiftData")
+    } catch {
+      logger.error("Failed to save Q&A: \(error.localizedDescription)")
+    }
+  }
+
+  // MARK: - Format Helpers
+
+  private func formatEntitiesAsText(_ entities: ParsedEntitiesResponse) -> String {
+    var parts: [String] = []
+    if !entities.people.isEmpty { parts.append("People: \(entities.people.joined(separator: ", "))") }
+    if !entities.organizations.isEmpty { parts.append("Organizations: \(entities.organizations.joined(separator: ", "))") }
+    if !entities.products.isEmpty { parts.append("Products: \(entities.products.joined(separator: ", "))") }
+    if !entities.locations.isEmpty { parts.append("Locations: \(entities.locations.joined(separator: ", "))") }
+    if !entities.resources.isEmpty { parts.append("Resources: \(entities.resources.joined(separator: ", "))") }
+    return parts.joined(separator: "\n\n")
+  }
+
+  private func formatHighlightsAsText(_ highlights: ParsedHighlightsResponse) -> String {
+    var parts: [String] = []
+    if !highlights.highlights.isEmpty { parts.append("Highlights:\n• " + highlights.highlights.joined(separator: "\n• ")) }
+    if !highlights.bestQuote.isEmpty { parts.append("Best Quote: \"\(highlights.bestQuote)\"") }
+    if !highlights.actionItems.isEmpty { parts.append("Action Items:\n• " + highlights.actionItems.joined(separator: "\n• ")) }
+    if let controversial = highlights.controversialPoints, !controversial.isEmpty {
+      parts.append("Controversial Points:\n• " + controversial.joined(separator: "\n• "))
+    }
+    if let entertaining = highlights.entertainingMoments, !entertaining.isEmpty {
+      parts.append("Entertaining Moments:\n• " + entertaining.joined(separator: "\n• "))
+    }
+    return parts.joined(separator: "\n\n")
+  }
+
+  /// Parse full analysis JSON from stored content
+  private func parseFullAnalysisJSON(_ content: String) -> ParsedFullAnalysisResponse? {
+    var jsonString = content.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    // Remove markdown code block if present
+    if jsonString.hasPrefix("```json") {
+      jsonString = String(jsonString.dropFirst(7))
+    } else if jsonString.hasPrefix("```") {
+      jsonString = String(jsonString.dropFirst(3))
+    }
+    if jsonString.hasSuffix("```") {
+      jsonString = String(jsonString.dropLast(3))
+    }
+    jsonString = jsonString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard let data = jsonString.data(using: .utf8) else { return nil }
+
+    do {
+      return try JSONDecoder().decode(ParsedFullAnalysisResponse.self, from: data)
+    } catch {
+      logger.debug("Failed to parse full analysis JSON: \(error.localizedDescription)")
+      return nil
+    }
   }
 }

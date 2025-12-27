@@ -225,6 +225,86 @@ actor CloudAIService {
         return true
     }
 
+    // MARK: - Streaming Transcript Analysis
+
+    /// Analyze transcript with streaming response
+    func analyzeTranscriptStreaming(
+        _ transcript: String,
+        episodeTitle: String,
+        podcastTitle: String,
+        analysisType: CloudAnalysisType,
+        onChunk: @escaping (String) -> Void,
+        progressCallback: ((String, Double) -> Void)? = nil
+    ) async throws -> CloudAnalysisResult {
+        let provider = settings.selectedProvider
+        let apiKey = settings.currentAPIKey
+        let model = settings.currentModel
+
+        guard !apiKey.isEmpty else {
+            throw CloudAIError.noAPIKey
+        }
+
+        progressCallback?("Preparing analysis...", 0.1)
+
+        let systemPrompt = buildSystemPrompt(for: analysisType)
+        let userPrompt = buildUserPrompt(
+            transcript: transcript,
+            episodeTitle: episodeTitle,
+            podcastTitle: podcastTitle,
+            analysisType: analysisType
+        )
+
+        progressCallback?("Connecting to \(provider.displayName)...", 0.15)
+
+        // Use streaming for the request with progress updates
+        let fullResponse = try await sendStreamingRequest(
+            prompt: userPrompt,
+            systemPrompt: systemPrompt,
+            provider: provider,
+            apiKey: apiKey,
+            model: model,
+            onChunk: { text in
+                onChunk(text)
+                // Update progress based on text length (estimate ~4000 chars for full response)
+                let estimatedProgress = min(0.85, 0.2 + Double(text.count) / 5000.0 * 0.65)
+                progressCallback?("Generating response...", estimatedProgress)
+            }
+        )
+
+        progressCallback?("Parsing response...", 0.9)
+
+        // Parse the JSON response based on analysis type
+        var parsedSummary: ParsedSummaryResponse?
+        var parsedEntities: ParsedEntitiesResponse?
+        var parsedHighlights: ParsedHighlightsResponse?
+        var parsedFullAnalysis: ParsedFullAnalysisResponse?
+
+        switch analysisType {
+        case .summary:
+            parsedSummary = parseJSON(fullResponse, as: ParsedSummaryResponse.self)
+        case .entities:
+            parsedEntities = parseJSON(fullResponse, as: ParsedEntitiesResponse.self)
+        case .highlights:
+            parsedHighlights = parseJSON(fullResponse, as: ParsedHighlightsResponse.self)
+        case .fullAnalysis:
+            parsedFullAnalysis = parseJSON(fullResponse, as: ParsedFullAnalysisResponse.self)
+        }
+
+        progressCallback?("Done", 1.0)
+
+        return CloudAnalysisResult(
+            type: analysisType,
+            content: fullResponse,
+            parsedSummary: parsedSummary,
+            parsedEntities: parsedEntities,
+            parsedHighlights: parsedHighlights,
+            parsedFullAnalysis: parsedFullAnalysis,
+            provider: provider,
+            model: model,
+            timestamp: Date()
+        )
+    }
+
     // MARK: - Transcript Analysis
 
     func analyzeTranscript(
@@ -262,15 +342,64 @@ actor CloudAIService {
             model: model
         )
 
-        progressCallback?("Processing response...", 0.9)
+        progressCallback?("Parsing response...", 0.8)
+
+        // Parse the JSON response based on analysis type
+        var parsedSummary: ParsedSummaryResponse?
+        var parsedEntities: ParsedEntitiesResponse?
+        var parsedHighlights: ParsedHighlightsResponse?
+        var parsedFullAnalysis: ParsedFullAnalysisResponse?
+
+        switch analysisType {
+        case .summary:
+            parsedSummary = parseJSON(response, as: ParsedSummaryResponse.self)
+        case .entities:
+            parsedEntities = parseJSON(response, as: ParsedEntitiesResponse.self)
+        case .highlights:
+            parsedHighlights = parseJSON(response, as: ParsedHighlightsResponse.self)
+        case .fullAnalysis:
+            parsedFullAnalysis = parseJSON(response, as: ParsedFullAnalysisResponse.self)
+        }
+
+        progressCallback?("Done", 1.0)
 
         return CloudAnalysisResult(
             type: analysisType,
             content: response,
+            parsedSummary: parsedSummary,
+            parsedEntities: parsedEntities,
+            parsedHighlights: parsedHighlights,
+            parsedFullAnalysis: parsedFullAnalysis,
             provider: provider,
             model: model,
             timestamp: Date()
         )
+    }
+
+    /// Parse JSON from AI response, handling markdown code blocks
+    private func parseJSON<T: Decodable>(_ response: String, as type: T.Type) -> T? {
+        // Extract JSON from markdown code blocks if present
+        var jsonString = response.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Remove ```json ... ``` wrapper
+        if jsonString.hasPrefix("```json") {
+            jsonString = String(jsonString.dropFirst(7))
+        } else if jsonString.hasPrefix("```") {
+            jsonString = String(jsonString.dropFirst(3))
+        }
+        if jsonString.hasSuffix("```") {
+            jsonString = String(jsonString.dropLast(3))
+        }
+        jsonString = jsonString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let data = jsonString.data(using: .utf8) else { return nil }
+
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            logger.error("JSON parsing failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     // MARK: - Question Answering
@@ -280,7 +409,7 @@ actor CloudAIService {
         transcript: String,
         episodeTitle: String,
         progressCallback: ((String, Double) -> Void)? = nil
-    ) async throws -> String {
+    ) async throws -> CloudQAResult {
         let provider = settings.selectedProvider
         let apiKey = settings.currentAPIKey
         let model = settings.currentModel
@@ -295,8 +424,15 @@ actor CloudAIService {
         You are a helpful assistant that answers questions about podcast episodes.
         Base your answers ONLY on the provided transcript.
         If the answer is not in the transcript, say so clearly.
-        Include approximate timestamps when possible.
-        Be concise but thorough.
+
+        Respond in the following JSON format:
+        {
+            "answer": "Your detailed answer to the question",
+            "confidence": "high/medium/low based on how clearly the transcript addresses this",
+            "relatedTopics": ["topic1", "topic2"] or null if none
+        }
+
+        IMPORTANT: Return ONLY valid JSON, no additional text.
         """
 
         let userPrompt = """
@@ -318,9 +454,21 @@ actor CloudAIService {
             model: model
         )
 
+        progressCallback?("Parsing response...", 0.9)
+
+        let parsed = parseJSON(response, as: ParsedQAResponse.self)
+
         progressCallback?("Done", 1.0)
 
-        return response
+        return CloudQAResult(
+            question: question,
+            answer: parsed?.answer ?? response,
+            confidence: parsed?.confidence ?? "unknown",
+            relatedTopics: parsed?.relatedTopics,
+            provider: provider,
+            model: model,
+            timestamp: Date()
+        )
     }
 
     // MARK: - Private: Build Prompts
@@ -373,17 +521,23 @@ actor CloudAIService {
             return """
             You are an expert podcast analyst. Provide a comprehensive analysis of this podcast episode.
 
-            Include:
-            1. Executive Summary (2-3 paragraphs)
-            2. Main Topics Discussed (bulleted list)
-            3. Key Takeaways (bulleted list)
-            4. Notable Quotes
-            5. People/Organizations Mentioned
-            6. Action Items or Recommendations
-            7. Target Audience
-            8. Overall Assessment
+            IMPORTANT: Return ONLY valid JSON with no additional text.
 
-            Format your response in clear sections with headers.
+            Return JSON in this exact format:
+            {
+                "overview": "2-3 paragraph executive summary of the episode",
+                "mainTopics": [
+                    {
+                        "topic": "Topic Name",
+                        "summary": "Brief summary of this topic",
+                        "keyPoints": ["point 1", "point 2"]
+                    }
+                ],
+                "keyInsights": ["insight 1", "insight 2", "insight 3"],
+                "notableQuotes": ["quote 1", "quote 2"],
+                "actionableAdvice": ["advice 1", "advice 2"] or null,
+                "conclusion": "Overall assessment and who would benefit from this episode"
+            }
             """
         }
     }
@@ -415,6 +569,270 @@ actor CloudAIService {
         Transcript:
         \(transcript)
         """
+    }
+
+    // MARK: - Private: Send Streaming Request
+
+    private func sendStreamingRequest(
+        prompt: String,
+        systemPrompt: String,
+        provider: CloudAIProvider,
+        apiKey: String,
+        model: String,
+        onChunk: @escaping (String) -> Void
+    ) async throws -> String {
+        switch provider {
+        case .openai, .grok:
+            return try await sendOpenAIStreamingRequest(
+                prompt: prompt,
+                systemPrompt: systemPrompt,
+                apiKey: apiKey,
+                model: model,
+                endpoint: apiEndpoint(for: provider),
+                onChunk: onChunk
+            )
+        case .claude:
+            return try await sendClaudeStreamingRequest(
+                prompt: prompt,
+                systemPrompt: systemPrompt,
+                apiKey: apiKey,
+                model: model,
+                onChunk: onChunk
+            )
+        case .gemini:
+            return try await sendGeminiStreamingRequest(
+                prompt: prompt,
+                systemPrompt: systemPrompt,
+                apiKey: apiKey,
+                model: model,
+                onChunk: onChunk
+            )
+        }
+    }
+
+    // MARK: - OpenAI Streaming
+
+    private func sendOpenAIStreamingRequest(
+        prompt: String,
+        systemPrompt: String,
+        apiKey: String,
+        model: String,
+        endpoint: URL,
+        onChunk: @escaping (String) -> Void
+    ) async throws -> String {
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "model": model,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": prompt]
+            ],
+            "temperature": 0.7,
+            "max_tokens": 4096,
+            "stream": true
+        ]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CloudAIError.invalidResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            // Try to read error message from stream
+            var errorMessage = ""
+            for try await line in bytes.lines {
+                errorMessage += line
+                if errorMessage.count > 500 { break }
+            }
+            // Parse error message from JSON if possible
+            if let data = errorMessage.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let error = json["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                throw CloudAIError.apiError(statusCode: httpResponse.statusCode, message: message)
+            }
+            throw CloudAIError.apiError(statusCode: httpResponse.statusCode, message: errorMessage.isEmpty ? "Request failed" : errorMessage)
+        }
+
+        var fullContent = ""
+
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data: "), line != "data: [DONE]" else { continue }
+
+            let jsonString = String(line.dropFirst(6))
+            guard let data = jsonString.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let delta = choices.first?["delta"] as? [String: Any],
+                  let content = delta["content"] as? String else {
+                continue
+            }
+
+            fullContent += content
+            await MainActor.run { onChunk(fullContent) }
+        }
+
+        return fullContent
+    }
+
+    // MARK: - Claude Streaming
+
+    private func sendClaudeStreamingRequest(
+        prompt: String,
+        systemPrompt: String,
+        apiKey: String,
+        model: String,
+        onChunk: @escaping (String) -> Void
+    ) async throws -> String {
+        let endpoint = apiEndpoint(for: .claude)
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "model": model,
+            "max_tokens": 4096,
+            "system": systemPrompt,
+            "messages": [
+                ["role": "user", "content": prompt]
+            ],
+            "stream": true
+        ]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CloudAIError.invalidResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            // Try to read error message from stream
+            var errorMessage = ""
+            for try await line in bytes.lines {
+                errorMessage += line
+                if errorMessage.count > 500 { break }
+            }
+            // Parse Claude error format
+            if let data = errorMessage.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let error = json["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                throw CloudAIError.apiError(statusCode: httpResponse.statusCode, message: message)
+            }
+            throw CloudAIError.apiError(statusCode: httpResponse.statusCode, message: errorMessage.isEmpty ? "Claude request failed" : errorMessage)
+        }
+
+        var fullContent = ""
+
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data: ") else { continue }
+
+            let jsonString = String(line.dropFirst(6))
+            guard let data = jsonString.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+
+            // Claude uses "content_block_delta" events for text streaming
+            if let type = json["type"] as? String,
+               type == "content_block_delta",
+               let delta = json["delta"] as? [String: Any],
+               let text = delta["text"] as? String {
+                fullContent += text
+                await MainActor.run { onChunk(fullContent) }
+            }
+        }
+
+        return fullContent
+    }
+
+    // MARK: - Gemini Streaming
+
+    private func sendGeminiStreamingRequest(
+        prompt: String,
+        systemPrompt: String,
+        apiKey: String,
+        model: String,
+        onChunk: @escaping (String) -> Void
+    ) async throws -> String {
+        // Gemini uses streamGenerateContent endpoint
+        let endpoint = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?key=\(apiKey)&alt=sse")!
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "contents": [
+                [
+                    "parts": [
+                        ["text": "\(systemPrompt)\n\n\(prompt)"]
+                    ]
+                ]
+            ],
+            "generationConfig": [
+                "temperature": 0.7,
+                "maxOutputTokens": 4096
+            ]
+        ]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CloudAIError.invalidResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            // Try to read error message from stream
+            var errorMessage = ""
+            for try await line in bytes.lines {
+                errorMessage += line
+                if errorMessage.count > 500 { break }
+            }
+            // Parse Gemini error format
+            if let data = errorMessage.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let error = json["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                throw CloudAIError.apiError(statusCode: httpResponse.statusCode, message: message)
+            }
+            throw CloudAIError.apiError(statusCode: httpResponse.statusCode, message: errorMessage.isEmpty ? "Gemini request failed" : errorMessage)
+        }
+
+        var fullContent = ""
+
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data: ") else { continue }
+
+            let jsonString = String(line.dropFirst(6))
+            guard let data = jsonString.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let candidates = json["candidates"] as? [[String: Any]],
+                  let content = candidates.first?["content"] as? [String: Any],
+                  let parts = content["parts"] as? [[String: Any]],
+                  let text = parts.first?["text"] as? String else {
+                continue
+            }
+
+            fullContent += text
+            await MainActor.run { onChunk(fullContent) }
+        }
+
+        return fullContent
     }
 
     // MARK: - Private: Send Request
@@ -627,6 +1045,20 @@ enum CloudAnalysisType: String, CaseIterable {
 struct CloudAnalysisResult {
     let type: CloudAnalysisType
     let content: String
+    let parsedSummary: ParsedSummaryResponse?
+    let parsedEntities: ParsedEntitiesResponse?
+    let parsedHighlights: ParsedHighlightsResponse?
+    let parsedFullAnalysis: ParsedFullAnalysisResponse?
+    let provider: CloudAIProvider
+    let model: String
+    let timestamp: Date
+}
+
+struct CloudQAResult {
+    let question: String
+    let answer: String
+    let confidence: String
+    let relatedTopics: [String]?
     let provider: CloudAIProvider
     let model: String
     let timestamp: Date
@@ -637,6 +1069,11 @@ enum CloudAIError: LocalizedError {
     case invalidResponse
     case apiError(statusCode: Int, message: String)
     case networkError(Error)
+    case quotaExceeded(provider: String)
+    case invalidAPIKey(provider: String)
+    case modelNotFound(model: String)
+    case rateLimited(provider: String)
+    case contextTooLong(provider: String)
 
     var errorDescription: String? {
         switch self {
@@ -645,9 +1082,49 @@ enum CloudAIError: LocalizedError {
         case .invalidResponse:
             return "Invalid response from AI provider."
         case .apiError(let statusCode, let message):
-            return "API error (\(statusCode)): \(message)"
+            return parseAPIError(statusCode: statusCode, message: message)
         case .networkError(let error):
             return "Network error: \(error.localizedDescription)"
+        case .quotaExceeded(let provider):
+            return "API quota exceeded for \(provider). Please check your billing/usage limits or try again later."
+        case .invalidAPIKey(let provider):
+            return "Invalid API key for \(provider). Please check your API key in Settings > AI Settings."
+        case .modelNotFound(let model):
+            return "Model '\(model)' not found. Please select a different model in Settings > AI Settings."
+        case .rateLimited(let provider):
+            return "Too many requests to \(provider). Please wait a moment and try again."
+        case .contextTooLong(let provider):
+            return "Transcript too long for \(provider). Try a shorter episode or use a model with larger context window."
+        }
+    }
+
+    private func parseAPIError(statusCode: Int, message: String) -> String {
+        let lowercaseMessage = message.lowercased()
+
+        switch statusCode {
+        case 401:
+            return "Invalid or expired API key. Please check your API key in Settings."
+        case 403:
+            return "Access denied. Your API key may not have permission for this model."
+        case 404:
+            if lowercaseMessage.contains("model") {
+                return "Model not found. Please select a different model in Settings > AI Settings."
+            }
+            return "Resource not found. Please try again."
+        case 429:
+            if lowercaseMessage.contains("quota") || lowercaseMessage.contains("exceeded") {
+                return "API quota exceeded. Please check your billing limits or upgrade your plan."
+            }
+            return "Rate limit exceeded. Please wait a moment and try again."
+        case 500, 502, 503:
+            return "AI service temporarily unavailable. Please try again later."
+        case 400:
+            if lowercaseMessage.contains("context") || lowercaseMessage.contains("token") || lowercaseMessage.contains("length") {
+                return "Transcript too long. Try a shorter episode or use a model with larger context."
+            }
+            return "Invalid request: \(message)"
+        default:
+            return "API error (\(statusCode)): \(message)"
         }
     }
 }

@@ -17,6 +17,8 @@ struct PodcastAnalyzerApp: App {
     let schema = Schema([
       PodcastInfoModel.self,
       EpisodeDownloadModel.self,
+      EpisodeAIAnalysis.self,
+      EpisodeQuickTagsModel.self,
     ])
     let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
