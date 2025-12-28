@@ -384,12 +384,18 @@ struct EpisodeRowView: View {
     case .queued:
       return 0.0
     case .downloadingModel(let progress):
-      return progress * 0.1
+      return progress  // Show actual model download progress (matches EpisodeDetailView)
     case .transcribing(let progress):
-      return 0.1 + (progress * 0.9)
+      return progress  // Show actual transcription progress (matches EpisodeDetailView)
     default:
       return nil
     }
+  }
+
+  private var isDownloadingModel: Bool {
+    guard let status = transcriptJobStatus else { return false }
+    if case .downloadingModel = status { return true }
+    return false
   }
 
   private var isStarred: Bool { episodeModel?.isStarred ?? false }
@@ -651,6 +657,12 @@ struct EpisodeRowView: View {
         } else if isTranscribing {
           HStack(spacing: 2) {
             ProgressView().scaleEffect(0.35)
+            if isDownloadingModel {
+              // Show "Model" label during model download phase (matches EpisodeDetailView)
+              Text("Model")
+                .font(.system(size: 8))
+                .foregroundColor(.purple)
+            }
             if let progress = transcriptProgress {
               Text("\(Int(progress * 100))%")
                 .font(.system(size: 8))

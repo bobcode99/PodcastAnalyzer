@@ -17,6 +17,7 @@ struct ExpandedPlayerView: View {
   @State private var showSpeedPicker = false
   @State private var showQueue = false
   @State private var showEllipsisMenu = false
+  @State private var showFullTranscript = false
 
   // Speed options matching Apple Podcasts
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -33,29 +34,37 @@ struct ExpandedPlayerView: View {
         )
         .ignoresSafeArea()
 
-        VStack(spacing: 0) {
-          // Large artwork
-          artworkSection
-            .padding(.top, 20)
+        ScrollView {
+          VStack(spacing: 0) {
+            // Large artwork
+            artworkSection
+              .padding(.top, 20)
 
-          // Episode info
-          episodeInfoSection
-            .padding(.top, 24)
+            // Episode info
+            episodeInfoSection
+              .padding(.top, 24)
 
-          Spacer()
+            // Progress bar
+            progressSection
+              .padding(.horizontal, 24)
+              .padding(.top, 32)
 
-          // Progress bar
-          progressSection
-            .padding(.horizontal, 24)
+            // Playback controls
+            controlsSection
+              .padding(.top, 24)
 
-          // Playback controls
-          controlsSection
-            .padding(.top, 24)
+            // Bottom actions
+            bottomActionsSection
+              .padding(.top, 24)
 
-          // Bottom actions
-          bottomActionsSection
-            .padding(.top, 24)
-            .padding(.bottom, 20)
+            // Transcript preview section (if available)
+            if viewModel.hasTranscript {
+              transcriptPreviewSection
+                .padding(.top, 24)
+            }
+
+            Spacer(minLength: 40)
+          }
         }
         .blur(radius: showSpeedPicker || showQueue ? 3 : 0)
 
@@ -125,7 +134,95 @@ struct ExpandedPlayerView: View {
       .onAppear {
         viewModel.setModelContext(modelContext)
       }
+      .sheet(isPresented: $showFullTranscript) {
+        TranscriptFullScreenView(viewModel: viewModel)
+      }
     }
+  }
+
+  // MARK: - Transcript Preview Section
+  private var transcriptPreviewSection: some View {
+    VStack(spacing: 12) {
+      // Header
+      HStack {
+        HStack(spacing: 6) {
+          Image(systemName: "captions.bubble.fill")
+            .foregroundColor(.purple)
+          Text("Transcript")
+            .font(.headline)
+        }
+
+        Spacer()
+
+        Button(action: { showFullTranscript = true }) {
+          HStack(spacing: 4) {
+            Text("Expand")
+              .font(.subheadline)
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+              .font(.caption)
+          }
+          .foregroundColor(.blue)
+        }
+      }
+      .padding(.horizontal, 20)
+
+      // Current segment highlight
+      if let currentText = viewModel.currentSegmentText {
+        Text(currentText)
+          .font(.body)
+          .foregroundColor(.primary)
+          .multilineTextAlignment(.center)
+          .padding(.horizontal, 20)
+          .padding(.vertical, 12)
+          .frame(maxWidth: .infinity)
+          .background(Color.blue.opacity(0.1))
+          .cornerRadius(12)
+          .padding(.horizontal, 16)
+      }
+
+      // Preview of segments (show 3 upcoming)
+      VStack(spacing: 0) {
+        ForEach(getPreviewSegments(), id: \.id) { segment in
+          Button(action: { viewModel.seekToSegment(segment) }) {
+            HStack(alignment: .top, spacing: 10) {
+              Text(segment.formattedStartTime)
+                .font(.caption)
+                .foregroundColor(.blue)
+                .frame(width: 50, alignment: .leading)
+
+              Text(segment.text)
+                .font(.subheadline)
+                .foregroundColor(viewModel.currentSegmentId == segment.id ? .primary : .secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(
+              viewModel.currentSegmentId == segment.id
+                ? Color.blue.opacity(0.15)
+                : Color.clear
+            )
+          }
+          .buttonStyle(.plain)
+        }
+      }
+      .background(Color(.systemGray6))
+      .cornerRadius(12)
+      .padding(.horizontal, 16)
+    }
+  }
+
+  private func getPreviewSegments() -> [TranscriptSegment] {
+    let segments = viewModel.transcriptSegments
+    guard !segments.isEmpty else { return [] }
+
+    let currentId = viewModel.currentSegmentId ?? 0
+    let startIndex = max(0, currentId - 1)
+    let endIndex = min(segments.count, startIndex + 4)
+
+    return Array(segments[startIndex..<endIndex])
   }
 
   // MARK: - Artwork Section
@@ -626,6 +723,142 @@ struct SpeedButton: View {
     } else {
       return String(format: "%.2gx", speed)
     }
+  }
+}
+
+// MARK: - Transcript Full Screen View
+
+struct TranscriptFullScreenView: View {
+  @Environment(\.dismiss) private var dismiss
+  @ObservedObject var viewModel: ExpandedPlayerViewModel
+
+  var body: some View {
+    NavigationStack {
+      VStack(spacing: 0) {
+        // Search bar
+        HStack {
+          Image(systemName: "magnifyingglass")
+            .foregroundColor(.secondary)
+            .font(.system(size: 14))
+          TextField(
+            "Search transcript...",
+            text: $viewModel.transcriptSearchQuery
+          )
+          .textFieldStyle(.plain)
+          .font(.subheadline)
+          if !viewModel.transcriptSearchQuery.isEmpty {
+            Button(action: { viewModel.transcriptSearchQuery = "" }) {
+              Image(systemName: "xmark.circle.fill")
+                .foregroundColor(.secondary)
+                .font(.system(size: 14))
+            }
+          }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(.systemGray6))
+        .cornerRadius(10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+
+        // Mini player bar
+        miniPlayerBar
+          .padding(.horizontal, 16)
+          .padding(.bottom, 8)
+
+        Divider()
+
+        // Transcript segments
+        ScrollViewReader { proxy in
+          ScrollView {
+            LazyVStack(spacing: 0) {
+              ForEach(viewModel.filteredTranscriptSegments, id: \.id) { segment in
+                TranscriptSegmentRow(
+                  segment: segment,
+                  isCurrentSegment: viewModel.currentSegmentId == segment.id,
+                  searchQuery: viewModel.transcriptSearchQuery,
+                  showTimestamp: true,
+                  onTap: { viewModel.seekToSegment(segment) }
+                )
+                .id(segment.id)
+              }
+            }
+            .padding(.vertical, 8)
+          }
+          .onChange(of: viewModel.currentSegmentId) { _, newId in
+            if let id = newId, viewModel.transcriptSearchQuery.isEmpty {
+              withAnimation(.easeInOut(duration: 0.3)) {
+                proxy.scrollTo(id, anchor: .center)
+              }
+            }
+          }
+        }
+      }
+      .navigationTitle("Transcript")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("Done") {
+            dismiss()
+          }
+        }
+      }
+    }
+  }
+
+  // Mini player bar inside transcript sheet
+  private var miniPlayerBar: some View {
+    HStack(spacing: 12) {
+      // Small artwork
+      if let imageURL = viewModel.imageURL {
+        AsyncImage(url: imageURL) { phase in
+          if let image = phase.image {
+            image.resizable().aspectRatio(contentMode: .fill)
+          } else {
+            Color.gray.opacity(0.3)
+          }
+        }
+        .frame(width: 44, height: 44)
+        .cornerRadius(6)
+      }
+
+      // Episode info
+      VStack(alignment: .leading, spacing: 2) {
+        Text(viewModel.episodeTitle)
+          .font(.subheadline)
+          .fontWeight(.medium)
+          .lineLimit(1)
+        Text(viewModel.currentTimeString)
+          .font(.caption)
+          .foregroundColor(.secondary)
+      }
+
+      Spacer()
+
+      // Playback controls
+      HStack(spacing: 16) {
+        Button(action: { viewModel.skipBackward() }) {
+          Image(systemName: "gobackward.15")
+            .font(.system(size: 20))
+            .foregroundColor(.primary)
+        }
+
+        Button(action: { viewModel.togglePlayPause() }) {
+          Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
+            .font(.system(size: 24))
+            .foregroundColor(.primary)
+        }
+
+        Button(action: { viewModel.skipForward() }) {
+          Image(systemName: "goforward.30")
+            .font(.system(size: 20))
+            .foregroundColor(.primary)
+        }
+      }
+    }
+    .padding(12)
+    .background(Color(.systemGray6))
+    .cornerRadius(12)
   }
 }
 

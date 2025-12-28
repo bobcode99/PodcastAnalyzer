@@ -663,8 +663,15 @@ final class EpisodeDetailViewModel {
         podcastTitle: podcastTitle
       )
 
+      // Also get the file date
+      let fileDate = await fileStorage.getCaptionFileDate(
+        for: episode.title,
+        podcastTitle: podcastTitle
+      )
+
       await MainActor.run {
         transcriptText = content
+        cachedTranscriptDate = fileDate
         transcriptState = .completed
         parseTranscriptSegments()
       }
@@ -675,6 +682,29 @@ final class EpisodeDetailViewModel {
 
   var hasTranscript: Bool {
     !transcriptText.isEmpty
+  }
+
+  /// Get the transcript generation date from the SRT file's modification date
+  var transcriptGeneratedAt: Date? {
+    get async {
+      return await fileStorage.getCaptionFileDate(
+        for: episode.title,
+        podcastTitle: podcastTitle
+      )
+    }
+  }
+
+  /// Cached transcript generation date (for synchronous access in View)
+  var cachedTranscriptDate: Date?
+
+  /// Load transcript generation date
+  func loadTranscriptDate() {
+    Task {
+      let date = await transcriptGeneratedAt
+      await MainActor.run {
+        cachedTranscriptDate = date
+      }
+    }
   }
 
   var hasAIAnalysis: Bool {
