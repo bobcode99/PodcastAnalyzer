@@ -677,6 +677,10 @@ final class EpisodeDetailViewModel {
     !transcriptText.isEmpty
   }
 
+  var hasAIAnalysis: Bool {
+    cloudAnalysisCache.fullAnalysis != nil || !cloudAnalysisCache.questionAnswers.isEmpty
+  }
+
   /// Parses SRT content and returns clean text without timestamps
   /// Each subtitle entry is separated by a newline for readability
   var cleanTranscriptText: String {
