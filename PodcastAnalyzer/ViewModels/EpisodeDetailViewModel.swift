@@ -1040,6 +1040,7 @@ final class EpisodeDetailViewModel {
           episodeTitle: episode.title,
           podcastTitle: podcastTitle,
           analysisType: type,
+          podcastLanguage: podcastLanguage,
           onChunk: { [weak self] text in
             self?.streamingText = text
           },
@@ -1116,6 +1117,7 @@ final class EpisodeDetailViewModel {
           question,
           transcript: plainText,
           episodeTitle: episode.title,
+          podcastLanguage: podcastLanguage,
           progressCallback: { [weak self] message, progress in
             Task { @MainActor in
               self?.cloudQuestionState = .analyzing(progress: progress, message: message)

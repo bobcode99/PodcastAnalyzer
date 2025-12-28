@@ -233,6 +233,7 @@ actor CloudAIService {
         episodeTitle: String,
         podcastTitle: String,
         analysisType: CloudAnalysisType,
+        podcastLanguage: String? = nil,
         onChunk: @escaping (String) -> Void,
         progressCallback: ((String, Double) -> Void)? = nil
     ) async throws -> CloudAnalysisResult {
@@ -246,7 +247,7 @@ actor CloudAIService {
 
         progressCallback?("Preparing analysis...", 0.1)
 
-        let systemPrompt = buildSystemPrompt(for: analysisType)
+        let systemPrompt = buildSystemPrompt(for: analysisType, podcastLanguage: podcastLanguage)
         let userPrompt = buildUserPrompt(
             transcript: transcript,
             episodeTitle: episodeTitle,
@@ -256,6 +257,9 @@ actor CloudAIService {
 
         progressCallback?("Connecting to \(provider.displayName)...", 0.15)
 
+        // Use higher token limit for fullAnalysis to prevent truncation
+        let maxTokens = analysisType == .fullAnalysis ? 8192 : 4096
+
         // Use streaming for the request with progress updates
         let fullResponse = try await sendStreamingRequest(
             prompt: userPrompt,
@@ -263,6 +267,7 @@ actor CloudAIService {
             provider: provider,
             apiKey: apiKey,
             model: model,
+            maxTokens: maxTokens,
             onChunk: { text in
                 onChunk(text)
                 // Update progress based on text length (estimate ~4000 chars for full response)
@@ -312,6 +317,7 @@ actor CloudAIService {
         episodeTitle: String,
         podcastTitle: String,
         analysisType: CloudAnalysisType,
+        podcastLanguage: String? = nil,
         progressCallback: ((String, Double) -> Void)? = nil
     ) async throws -> CloudAnalysisResult {
         let provider = settings.selectedProvider
@@ -324,7 +330,7 @@ actor CloudAIService {
 
         progressCallback?("Preparing analysis...", 0.1)
 
-        let systemPrompt = buildSystemPrompt(for: analysisType)
+        let systemPrompt = buildSystemPrompt(for: analysisType, podcastLanguage: podcastLanguage)
         let userPrompt = buildUserPrompt(
             transcript: transcript,
             episodeTitle: episodeTitle,
@@ -408,6 +414,7 @@ actor CloudAIService {
         _ question: String,
         transcript: String,
         episodeTitle: String,
+        podcastLanguage: String? = nil,
         progressCallback: ((String, Double) -> Void)? = nil
     ) async throws -> CloudQAResult {
         let provider = settings.selectedProvider
@@ -419,6 +426,10 @@ actor CloudAIService {
         }
 
         progressCallback?("Processing question...", 0.2)
+
+        // Get language instruction based on user setting
+        let languageInstruction = settings.analysisLanguage.getLanguageInstruction(podcastLanguage: podcastLanguage)
+        let languageLine = languageInstruction.isEmpty ? "" : "\n\n\(languageInstruction)"
 
         let systemPrompt = """
         You are a helpful assistant that answers questions about podcast episodes.
@@ -432,7 +443,7 @@ actor CloudAIService {
             "relatedTopics": ["topic1", "topic2"] or null if none
         }
 
-        IMPORTANT: Return ONLY valid JSON, no additional text.
+        IMPORTANT: Return ONLY valid JSON, no additional text.\(languageLine)
         """
 
         let userPrompt = """
@@ -473,7 +484,11 @@ actor CloudAIService {
 
     // MARK: - Private: Build Prompts
 
-    private func buildSystemPrompt(for type: CloudAnalysisType) -> String {
+    private func buildSystemPrompt(for type: CloudAnalysisType, podcastLanguage: String? = nil) -> String {
+        // Get language instruction based on user setting
+        let languageInstruction = settings.analysisLanguage.getLanguageInstruction(podcastLanguage: podcastLanguage)
+        let languageLine = languageInstruction.isEmpty ? "" : "\n\n\(languageInstruction)"
+
         switch type {
         case .summary:
             return """
@@ -486,7 +501,7 @@ actor CloudAIService {
                 "keyTakeaways": ["takeaway1", "takeaway2", "takeaway3"],
                 "targetAudience": "Description of who would benefit from this episode",
                 "engagementLevel": "high/medium/low"
-            }
+            }\(languageLine)
             """
 
         case .entities:
@@ -500,7 +515,7 @@ actor CloudAIService {
                 "products": ["product1", "product2"],
                 "locations": ["location1", "location2"],
                 "resources": ["book1", "article1"]
-            }
+            }\(languageLine)
             """
 
         case .highlights:
@@ -514,7 +529,7 @@ actor CloudAIService {
                 "actionItems": ["action1", "action2"],
                 "controversialPoints": ["point1"] or null,
                 "entertainingMoments": ["moment1"] or null
-            }
+            }\(languageLine)
             """
 
         case .fullAnalysis:
@@ -537,7 +552,7 @@ actor CloudAIService {
                 "notableQuotes": ["quote 1", "quote 2"],
                 "actionableAdvice": ["advice 1", "advice 2"] or null,
                 "conclusion": "Overall assessment and who would benefit from this episode"
-            }
+            }\(languageLine)
             """
         }
     }
@@ -579,6 +594,7 @@ actor CloudAIService {
         provider: CloudAIProvider,
         apiKey: String,
         model: String,
+        maxTokens: Int = 4096,
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
         switch provider {
@@ -589,6 +605,7 @@ actor CloudAIService {
                 apiKey: apiKey,
                 model: model,
                 endpoint: apiEndpoint(for: provider),
+                maxTokens: maxTokens,
                 onChunk: onChunk
             )
         case .claude:
@@ -597,6 +614,7 @@ actor CloudAIService {
                 systemPrompt: systemPrompt,
                 apiKey: apiKey,
                 model: model,
+                maxTokens: maxTokens,
                 onChunk: onChunk
             )
         case .gemini:
@@ -605,6 +623,7 @@ actor CloudAIService {
                 systemPrompt: systemPrompt,
                 apiKey: apiKey,
                 model: model,
+                maxTokens: maxTokens,
                 onChunk: onChunk
             )
         }
@@ -618,6 +637,7 @@ actor CloudAIService {
         apiKey: String,
         model: String,
         endpoint: URL,
+        maxTokens: Int,
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
         var request = URLRequest(url: endpoint)
@@ -632,7 +652,7 @@ actor CloudAIService {
                 ["role": "user", "content": prompt]
             ],
             "temperature": 0.7,
-            "max_tokens": 4096,
+            "max_tokens": maxTokens,
             "stream": true
         ]
 
@@ -689,6 +709,7 @@ actor CloudAIService {
         systemPrompt: String,
         apiKey: String,
         model: String,
+        maxTokens: Int,
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
         let endpoint = apiEndpoint(for: .claude)
@@ -701,7 +722,7 @@ actor CloudAIService {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": maxTokens,
             "system": systemPrompt,
             "messages": [
                 ["role": "user", "content": prompt]
@@ -765,6 +786,7 @@ actor CloudAIService {
         systemPrompt: String,
         apiKey: String,
         model: String,
+        maxTokens: Int,
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
         // Gemini uses streamGenerateContent endpoint
@@ -784,7 +806,7 @@ actor CloudAIService {
             ],
             "generationConfig": [
                 "temperature": 0.7,
-                "maxOutputTokens": 4096
+                "maxOutputTokens": maxTokens
             ]
         ]
 

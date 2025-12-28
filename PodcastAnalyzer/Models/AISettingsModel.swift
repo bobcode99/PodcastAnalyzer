@@ -8,6 +8,50 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Analysis Language Setting
+
+enum AnalysisLanguage: String, CaseIterable, Codable {
+    case deviceLanguage = "Device Language"
+    case english = "English"
+    case matchPodcast = "Match Podcast"
+
+    var displayName: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .deviceLanguage: return "iphone"
+        case .english: return "globe.americas"
+        case .matchPodcast: return "waveform"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .deviceLanguage: return "Use your device's language settings"
+        case .english: return "Always respond in English"
+        case .matchPodcast: return "Match the podcast's language"
+        }
+    }
+
+    /// Returns the language instruction to include in AI prompts
+    func getLanguageInstruction(podcastLanguage: String? = nil) -> String {
+        switch self {
+        case .deviceLanguage:
+            let preferredLanguage = Locale.preferredLanguages.first ?? "en"
+            let languageName = Locale.current.localizedString(forLanguageCode: preferredLanguage) ?? "English"
+            return "IMPORTANT: Respond in \(languageName)."
+        case .english:
+            return "IMPORTANT: Respond in English."
+        case .matchPodcast:
+            if let podcastLang = podcastLanguage, !podcastLang.isEmpty {
+                let languageName = Locale.current.localizedString(forLanguageCode: podcastLang) ?? podcastLang
+                return "IMPORTANT: Respond in \(languageName) (the podcast's language)."
+            }
+            return "" // No instruction if podcast language unknown
+        }
+    }
+}
+
 // MARK: - Cloud AI Provider
 
 enum CloudAIProvider: String, CaseIterable, Codable {
@@ -140,6 +184,10 @@ final class AISettingsManager {
         didSet { saveSettings() }
     }
 
+    var analysisLanguage: AnalysisLanguage {
+        didSet { saveSettings() }
+    }
+
     // MARK: - Initialization
 
     private init() {
@@ -156,6 +204,14 @@ final class AISettingsManager {
         self.selectedClaudeModel = UserDefaults.standard.string(forKey: "ai_claude_model") ?? CloudAIProvider.claude.defaultModel
         self.selectedGeminiModel = UserDefaults.standard.string(forKey: "ai_gemini_model") ?? CloudAIProvider.gemini.defaultModel
         self.selectedGrokModel = UserDefaults.standard.string(forKey: "ai_grok_model") ?? CloudAIProvider.grok.defaultModel
+
+        // Load analysis language setting
+        if let languageString = UserDefaults.standard.string(forKey: "ai_analysis_language"),
+           let language = AnalysisLanguage(rawValue: languageString) {
+            self.analysisLanguage = language
+        } else {
+            self.analysisLanguage = .deviceLanguage // Default
+        }
 
         // Load API keys from Keychain (use static method to avoid 'self' issue)
         self.openAIKey = Self.loadKeyFromKeychain(for: .openai)
@@ -214,6 +270,7 @@ final class AISettingsManager {
         UserDefaults.standard.set(selectedClaudeModel, forKey: "ai_claude_model")
         UserDefaults.standard.set(selectedGeminiModel, forKey: "ai_gemini_model")
         UserDefaults.standard.set(selectedGrokModel, forKey: "ai_grok_model")
+        UserDefaults.standard.set(analysisLanguage.rawValue, forKey: "ai_analysis_language")
     }
 
     // MARK: - Keychain Helpers

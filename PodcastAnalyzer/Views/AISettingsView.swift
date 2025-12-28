@@ -123,6 +123,36 @@ struct AISettingsView: View {
                 Text("Tap the refresh button to fetch the latest available models from the API.")
             }
 
+            // MARK: - Analysis Language
+            Section {
+                Picker("Response Language", selection: $settings.analysisLanguage) {
+                    ForEach(AnalysisLanguage.allCases, id: \.self) { language in
+                        Label {
+                            VStack(alignment: .leading) {
+                                Text(language.displayName)
+                            }
+                        } icon: {
+                            Image(systemName: language.icon)
+                        }
+                        .tag(language)
+                    }
+                }
+                .pickerStyle(.navigationLink)
+
+                // Show current language preview
+                HStack {
+                    Image(systemName: "info.circle")
+                        .foregroundColor(.blue)
+                    Text(settings.analysisLanguage.description)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } header: {
+                Text("Analysis Language")
+            } footer: {
+                Text("Controls the language of AI-generated summaries, highlights, and other analysis results.")
+            }
+
             // MARK: - Other Provider Keys (Collapsed)
             Section {
                 DisclosureGroup("Configure Other Providers") {
