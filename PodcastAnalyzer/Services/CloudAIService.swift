@@ -413,22 +413,84 @@ final class CloudAIService {
     ) async throws -> CloudAnalysisResult {
         progressCallback?("Starting Shortcuts analysis...", 0.2)
 
-        // Use ShortcutsAIService for direct execution
-        let shortcutsService = ShortcutsAIService.shared
+        // Build the prompt with JSON format
+        let prompt = buildShortcutsPrompt(
+            transcript: transcript,
+            episodeTitle: episodeTitle,
+            podcastTitle: podcastTitle,
+            analysisType: analysisType
+        )
 
         progressCallback?("Running shortcut...", 0.4)
 
+        let shortcutsService = ShortcutsAIService.shared
+
         do {
-            let result = try await shortcutsService.analyzeTranscript(
-                transcript: transcript,
-                episodeTitle: episodeTitle,
-                podcastTitle: podcastTitle,
-                analysisType: analysisType,
-                timeout: 180  // 3 minute timeout for AI processing
-            )
+            let rawResult = try await shortcutsService.runShortcut(input: prompt, timeout: 180)
+
+            progressCallback?("Parsing response...", 0.8)
+
+            // Try to parse JSON response
+            var parsedSummary: ParsedSummaryResponse?
+            var parsedEntities: ParsedEntitiesResponse?
+            var parsedHighlights: ParsedHighlightsResponse?
+            var parsedFullAnalysis: ParsedFullAnalysisResponse?
+            var jsonParseWarning: String?
+
+            // Clean the response - remove markdown code blocks if present
+            let cleanedResult = cleanJSONResponse(rawResult)
+
+            if let data = cleanedResult.data(using: .utf8) {
+                switch analysisType {
+                case .summary:
+                    if let parsed = try? JSONDecoder().decode(ParsedSummaryResponse.self, from: data) {
+                        parsedSummary = parsed
+                    } else {
+                        jsonParseWarning = "JSON parsing failed - showing raw response"
+                    }
+                case .entities:
+                    if let parsed = try? JSONDecoder().decode(ParsedEntitiesResponse.self, from: data) {
+                        parsedEntities = parsed
+                    } else {
+                        jsonParseWarning = "JSON parsing failed - showing raw response"
+                    }
+                case .highlights:
+                    if let parsed = try? JSONDecoder().decode(ParsedHighlightsResponse.self, from: data) {
+                        parsedHighlights = parsed
+                    } else {
+                        jsonParseWarning = "JSON parsing failed - showing raw response"
+                    }
+                case .fullAnalysis:
+                    if let parsed = try? JSONDecoder().decode(ParsedFullAnalysisResponse.self, from: data) {
+                        parsedFullAnalysis = parsed
+                    } else {
+                        jsonParseWarning = "JSON parsing failed - showing raw response"
+                    }
+                }
+            }
 
             progressCallback?("Done", 1.0)
-            return result
+
+            // Format the raw response if JSON parsing failed
+            let displayContent: String
+            if jsonParseWarning != nil {
+                displayContent = formatRawResponseForDisplay(rawResult)
+            } else {
+                displayContent = rawResult
+            }
+
+            return CloudAnalysisResult(
+                type: analysisType,
+                content: displayContent,
+                parsedSummary: parsedSummary,
+                parsedEntities: parsedEntities,
+                parsedHighlights: parsedHighlights,
+                parsedFullAnalysis: parsedFullAnalysis,
+                provider: .applePCC,
+                model: "Apple Intelligence (via Shortcuts)",
+                timestamp: Date(),
+                jsonParseWarning: jsonParseWarning
+            )
 
         } catch let error as ShortcutsError {
             progressCallback?("Error", 1.0)
@@ -437,6 +499,38 @@ final class CloudAIService {
             progressCallback?("Error", 1.0)
             throw error
         }
+    }
+
+    /// Clean JSON response by removing markdown code blocks
+    private func cleanJSONResponse(_ response: String) -> String {
+        var cleaned = response.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Remove markdown code blocks
+        if cleaned.hasPrefix("```json") {
+            cleaned = String(cleaned.dropFirst(7))
+        } else if cleaned.hasPrefix("```") {
+            cleaned = String(cleaned.dropFirst(3))
+        }
+
+        if cleaned.hasSuffix("```") {
+            cleaned = String(cleaned.dropLast(3))
+        }
+
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Format raw response for human-readable display
+    private func formatRawResponseForDisplay(_ response: String) -> String {
+        // Try to pretty print if it's JSON
+        if let data = response.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data),
+           let prettyData = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
+           let prettyString = String(data: prettyData, encoding: .utf8) {
+            return prettyString
+        }
+
+        // Otherwise return as-is
+        return response
     }
 
     /// Ask a question using Apple Intelligence via Shortcuts
@@ -494,7 +588,7 @@ final class CloudAIService {
         }
     }
 
-    /// Build a prompt for Shortcuts analysis
+    /// Build a prompt for Shortcuts analysis - matches the JSON format used by other LLMs
     private func buildShortcutsPrompt(
         transcript: String,
         episodeTitle: String,
@@ -502,86 +596,102 @@ final class CloudAIService {
         analysisType: CloudAnalysisType
     ) -> String {
         let languageInstruction = settings.analysisLanguage.getLanguageInstruction()
+        let languageLine = languageInstruction.isEmpty ? "" : "\n\nLanguage: \(languageInstruction)"
 
         switch analysisType {
         case .summary:
             return """
-            Please provide a comprehensive summary of this podcast episode.
+            You are an expert podcast analyst. Please analyze this podcast episode.
 
             Podcast: \(podcastTitle)
             Episode: \(episodeTitle)
 
-            \(languageInstruction)
+            IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
+
+            Return JSON in this exact format:
+            {
+                "summary": "A 2-3 paragraph summary of the episode",
+                "mainTopics": ["topic1", "topic2", "topic3"],
+                "keyTakeaways": ["takeaway1", "takeaway2", "takeaway3"],
+                "targetAudience": "Description of who would benefit from this episode",
+                "engagementLevel": "high/medium/low"
+            }\(languageLine)
 
             Transcript:
             \(transcript)
-
-            Provide:
-            1. A 2-3 paragraph summary
-            2. Main topics discussed (bullet points)
-            3. Key takeaways (bullet points)
-            4. Who would benefit from this episode
             """
 
         case .entities:
             return """
-            Please extract all named entities from this podcast episode.
+            You are an expert at extracting named entities from text. Please analyze this podcast episode.
 
             Podcast: \(podcastTitle)
             Episode: \(episodeTitle)
 
-            \(languageInstruction)
+            IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
+
+            Return JSON in this exact format:
+            {
+                "people": ["person1", "person2"],
+                "organizations": ["org1", "org2"],
+                "products": ["product1", "product2"],
+                "locations": ["location1", "location2"],
+                "resources": ["book1", "article1"]
+            }\(languageLine)
 
             Transcript:
             \(transcript)
-
-            List:
-            1. People mentioned
-            2. Organizations or companies
-            3. Products or services
-            4. Locations
-            5. Books, articles, or resources mentioned
             """
 
         case .highlights:
             return """
-            Please identify the key highlights from this podcast episode.
+            You are an expert at identifying key moments and highlights in podcast episodes. Please analyze this episode.
 
             Podcast: \(podcastTitle)
             Episode: \(episodeTitle)
 
-            \(languageInstruction)
+            IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
+
+            Return JSON in this exact format:
+            {
+                "highlights": ["highlight1", "highlight2", "highlight3"],
+                "bestQuote": "The most memorable quote from the episode",
+                "actionItems": ["action1", "action2"],
+                "controversialPoints": ["point1"],
+                "entertainingMoments": ["moment1"]
+            }\(languageLine)
 
             Transcript:
             \(transcript)
-
-            Provide:
-            1. Top 5 highlights or key moments
-            2. The best quote from the episode
-            3. Any action items mentioned
-            4. Interesting or surprising facts
             """
 
         case .fullAnalysis:
             return """
-            Please provide a complete analysis of this podcast episode.
+            You are an expert podcast analyst. Provide a comprehensive analysis of this podcast episode.
 
             Podcast: \(podcastTitle)
             Episode: \(episodeTitle)
 
-            \(languageInstruction)
+            IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
+
+            Return JSON in this exact format:
+            {
+                "overview": "2-3 paragraph executive summary of the episode",
+                "mainTopics": [
+                    {
+                        "topic": "Topic Name",
+                        "summary": "Brief summary of this topic",
+                        "keyPoints": ["point 1", "point 2"]
+                    }
+                ],
+                "keyInsights": ["insight 1", "insight 2", "insight 3"],
+                "notableQuotes": ["quote 1", "quote 2"],
+                "actionableAdvice": ["advice 1", "advice 2"],
+                "conclusion": "Overall assessment and who would benefit from this episode"
+            }\(languageLine)
 
             Transcript:
             \(transcript)
-
-            Provide:
-            1. Executive Summary (2-3 paragraphs)
-            2. Main Topics Discussed
-            3. Key Insights and Learnings
-            4. Notable Quotes
-            5. Actionable Advice
-            6. People and Organizations Mentioned
-            7. Conclusion
             """
         }
     }
@@ -1463,6 +1573,32 @@ struct CloudAnalysisResult {
     let provider: CloudAIProvider
     let model: String
     let timestamp: Date
+    /// Warning message when JSON parsing fails (e.g., when using Apple Intelligence via Shortcuts)
+    let jsonParseWarning: String?
+
+    init(
+        type: CloudAnalysisType,
+        content: String,
+        parsedSummary: ParsedSummaryResponse? = nil,
+        parsedEntities: ParsedEntitiesResponse? = nil,
+        parsedHighlights: ParsedHighlightsResponse? = nil,
+        parsedFullAnalysis: ParsedFullAnalysisResponse? = nil,
+        provider: CloudAIProvider,
+        model: String,
+        timestamp: Date,
+        jsonParseWarning: String? = nil
+    ) {
+        self.type = type
+        self.content = content
+        self.parsedSummary = parsedSummary
+        self.parsedEntities = parsedEntities
+        self.parsedHighlights = parsedHighlights
+        self.parsedFullAnalysis = parsedFullAnalysis
+        self.provider = provider
+        self.model = model
+        self.timestamp = timestamp
+        self.jsonParseWarning = jsonParseWarning
+    }
 }
 
 struct CloudQAResult {

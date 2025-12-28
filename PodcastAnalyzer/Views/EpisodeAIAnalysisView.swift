@@ -329,6 +329,27 @@ struct EpisodeAIAnalysisView: View {
 
   private func analysisResultCard(_ result: CloudAnalysisResult) -> some View {
     VStack(alignment: .leading, spacing: 16) {
+      // Show warning if JSON parsing failed
+      if let warning = result.jsonParseWarning {
+        HStack(spacing: 8) {
+          Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundColor(.orange)
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Response Format Warning")
+              .font(.caption)
+              .fontWeight(.semibold)
+              .foregroundColor(.orange)
+            Text(warning)
+              .font(.caption2)
+              .foregroundColor(.secondary)
+          }
+          Spacer()
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.1))
+        .cornerRadius(8)
+      }
+
       // Structured content based on type
       switch result.type {
       case .summary:
