@@ -890,7 +890,7 @@ final class EpisodeDetailViewModel {
   func checkOnDeviceAIAvailability() {
     if #available(iOS 26.0, macOS 26.0, *) {
       Task {
-        let service = EpisodeAnalysisService()
+        let service = AppleFoundationModelsService()
         let availability = await service.checkAvailability()
 
         await MainActor.run {
@@ -920,7 +920,7 @@ final class EpisodeDetailViewModel {
           quickTagsState = .analyzing(progress: 0, message: "Generating tags...")
         }
 
-        let service = EpisodeAnalysisService()
+        let service = AppleFoundationModelsService()
         let tags = try await service.generateQuickTags(
           title: episode.title,
           description: episode.podcastEpisodeDescription ?? "",
@@ -971,7 +971,7 @@ final class EpisodeDetailViewModel {
           quickTagsState = .analyzing(progress: 0, message: "Creating summary...")
         }
 
-        let service = EpisodeAnalysisService()
+        let service = AppleFoundationModelsService()
         let summary = try await service.generateBriefSummary(
           title: episode.title,
           description: episode.podcastEpisodeDescription ?? "",

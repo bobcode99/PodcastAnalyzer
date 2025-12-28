@@ -1,9 +1,9 @@
 //
-//  EpisodeAnalysisService.swift
+//  AppleFoundationModelsService.swift
 //  PodcastAnalyzer
 //
-//  Service for on-device AI quick tags using Apple Foundation Models
-//  NOTE: This service is ONLY for lightweight tag generation from episode metadata
+//  Service for on-device AI using Apple Foundation Models (iOS 26+)
+//  Used for quick tags, categorization, and brief summaries from episode metadata
 //  For full transcript analysis, use CloudAIService with user-provided API keys
 //
 
@@ -11,13 +11,13 @@ import Foundation
 import FoundationModels
 import os.log
 
-private nonisolated let logger = Logger(subsystem: "com.podcastanalyzer", category: "EpisodeAnalysisService")
+private nonisolated let logger = Logger(subsystem: "com.podcastanalyzer", category: "AppleFoundationModelsService")
 
-/// Service for generating quick tags from episode metadata using Apple Foundation Models (iOS 26+)
+/// Service for on-device AI features using Apple Foundation Models (iOS 26+)
 /// Uses only episode title, description, duration, and release date - NOT the full transcript
 /// This keeps requests well within the 4096 token context limit
 @available(iOS 26.0, macOS 26.0, *)
-actor EpisodeAnalysisService {
+actor AppleFoundationModelsService {
 
     // MARK: - Properties
 
@@ -57,11 +57,6 @@ actor EpisodeAnalysisService {
         case .unavailable(_):
             return .unavailable(reason: "Apple Intelligence is currently unavailable.")
         }
-    }
-
-    /// Simple boolean check for availability
-    var isAvailable: Bool {
-        SystemLanguageModel.default.isAvailable
     }
 
     // MARK: - Quick Tag Generation (On-Device)

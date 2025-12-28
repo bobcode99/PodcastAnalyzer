@@ -19,6 +19,9 @@ struct AISettingsView: View {
     @State private var isFetchingModels = false
     @State private var modelFetchError: String?
 
+    // On-device AI availability
+    @State private var onDeviceAvailability: FoundationModelsAvailability = .unavailable(reason: "Checking...")
+
     var body: some View {
         Form {
             // MARK: - Provider Selection
@@ -186,7 +189,7 @@ struct AISettingsView: View {
             // MARK: - On-Device AI Info
             Section {
                 HStack {
-                    Image(systemName: "cpu")
+                    Image(systemName: "apple.intelligence")
                         .foregroundColor(.blue)
                     VStack(alignment: .leading) {
                         Text("Apple Foundation Models")
@@ -198,19 +201,19 @@ struct AISettingsView: View {
                     }
                 }
 
-                if #available(iOS 26.0, macOS 26.0, *) {
-                    HStack {
+                // Show actual availability status
+                HStack {
+                    if onDeviceAvailability.isAvailable {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
-                        Text("Available on this device")
+                        Text("Available and ready")
                             .font(.caption)
-                    }
-                } else {
-                    HStack {
-                        Image(systemName: "xmark.circle.fill")
+                    } else {
+                        Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(.orange)
-                        Text("Requires iOS 26+ / macOS 26+")
+                        Text(onDeviceAvailability.message ?? "Not available")
                             .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
             } header: {
@@ -256,6 +259,9 @@ struct AISettingsView: View {
             if !apiKey.isEmpty && fetchedModels[provider] == nil {
                 fetchModels(for: provider)
             }
+
+            // Check on-device AI availability
+            checkOnDeviceAvailability()
         }
     }
 
@@ -385,6 +391,21 @@ struct AISettingsView: View {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         return formatter.string(from: NSNumber(value: number)) ?? "\(number)"
+    }
+
+    private func checkOnDeviceAvailability() {
+        if #available(iOS 26.0, macOS 26.0, *) {
+            Task {
+                let service = AppleFoundationModelsService()
+                let availability = await service.checkAvailability()
+
+                await MainActor.run {
+                    onDeviceAvailability = availability
+                }
+            }
+        } else {
+            onDeviceAvailability = .unavailable(reason: "Requires iOS 26+ / macOS 26+")
+        }
     }
 }
 
