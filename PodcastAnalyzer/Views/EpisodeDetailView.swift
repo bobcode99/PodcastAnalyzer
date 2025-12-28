@@ -147,75 +147,66 @@ struct EpisodeDetailView: View {
                         .fixedSize(horizontal: false, vertical: true)  // Allows wrapping
 
                     HStack(spacing: 4) {
-                        if viewModel.isStarred {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(.yellow)
-                        }
                         Text(viewModel.podcastTitle)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                     .textSelection(.enabled)
 
-                    if let dateString = viewModel.pubDateString {
-                        Text(dateString)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-
-                    // NEW: Status indicators (like badges in a web UI)
-                    HStack(spacing: 12) {
-                        // Downloaded status
-                        HStack(spacing: 4) {
-                            Image(
-                                systemName: viewModel.hasLocalAudio
-                                    ? "checkmark.circle.fill" : "circle"
-                            )
-                            .foregroundColor(
-                                viewModel.hasLocalAudio ? .green : .secondary
-                            )
-                            Text(
-                                viewModel.hasLocalAudio
-                                    ? "Downloaded" : "Not Downloaded"
-                            )
-                            .font(.caption2)
+                    // Date and status icons row
+                    HStack(spacing: 8) {
+                        if let dateString = viewModel.pubDateString {
+                            Text(dateString)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
 
-                        // Transcript status
-                        HStack(spacing: 4) {
+                        // Status icons (same as EpisodeRowView)
+                        HStack(spacing: 6) {
+                            if viewModel.isStarred {
+                                Image(systemName: "star.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.yellow)
+                            }
+
+                            if viewModel.hasLocalAudio {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.green)
+                            }
+
+                            // Transcript status
                             switch viewModel.transcriptState {
                             case .idle, .error:
-                                Image(
-                                    systemName: viewModel.hasTranscript
-                                        ? "checkmark.circle.fill" : "circle"
-                                )
-                                .foregroundColor(
-                                    viewModel.hasTranscript
-                                        ? .green : .secondary
-                                )
-                                Text(
-                                    viewModel.hasTranscript
-                                        ? "Transcript Ready" : "No Transcript"
-                                )
-                                .font(.caption2)
-                            case .downloadingModel:
-                                ProgressView().scaleEffect(0.8)
-                                Text("Downloading Model...")
-                                    .font(.caption2)
-                            case .transcribing:
-                                ProgressView().scaleEffect(0.8)
-                                Text("Transcribing...")
-                                    .font(.caption2)
+                                if viewModel.hasTranscript {
+                                    Image(systemName: "captions.bubble.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.purple)
+                                }
+                            case .downloadingModel, .transcribing:
+                                HStack(spacing: 2) {
+                                    ProgressView().scaleEffect(0.5)
+                                }
                             case .completed:
+                                Image(systemName: "captions.bubble.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.purple)
+                            }
+
+                            // AI Analysis available
+                            if viewModel.hasAIAnalysis {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.orange)
+                            }
+
+                            if viewModel.isCompleted {
                                 Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 12))
                                     .foregroundColor(.green)
-                                Text("Transcript Ready")
-                                    .font(.caption2)
                             }
                         }
                     }
-                    .foregroundColor(.secondary)
 
                     // Playback progress (unchanged)
                     if viewModel.playbackProgress > 0

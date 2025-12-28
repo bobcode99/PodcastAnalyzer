@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import ZMarkupParser
 
 struct HomeView: View {
     @StateObject private var viewModel: HomeViewModel
@@ -40,21 +41,7 @@ struct HomeView: View {
                 } else {
                     List(viewModel.podcastInfoModelList) { model in
                         NavigationLink(destination: EpisodeListView(podcastModel: model)) {
-
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(model.podcastInfo.title)
-                                    .font(.headline)
-                                if let description = model.podcastInfo.podcastInfoDescription {
-                                    Text(description)
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
-                                        .lineLimit(2)
-                                }
-                                Text("\(model.podcastInfo.episodes.count) episodes")
-                                    .font(.caption2)
-                                    .foregroundColor(.blue)
-                            }
-                            .padding(.vertical, 4)
+                            PodcastRowView(podcast: model.podcastInfo)
                         }
                     }
                 }
@@ -83,6 +70,61 @@ struct HomeView: View {
         .onAppear {
             viewModel.setModelContext(modelContext)
             viewModel.loadPodcasts()
+        }
+    }
+}
+
+// MARK: - Podcast Row View with HTML Description
+
+struct PodcastRowView: View {
+    let podcast: PodcastInfo
+    @State private var descriptionView: AnyView?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(podcast.title)
+                .font(.headline)
+
+            if let view = descriptionView {
+                view
+                    .lineLimit(2)
+            } else if let description = podcast.podcastInfoDescription {
+                Text(description)
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .lineLimit(2)
+            }
+
+            Text("\(podcast.episodes.count) episodes")
+                .font(.caption2)
+                .foregroundColor(.blue)
+        }
+        .padding(.vertical, 4)
+        .onAppear {
+            parseDescription()
+        }
+    }
+
+    private func parseDescription() {
+        guard let html = podcast.podcastInfoDescription, !html.isEmpty else { return }
+
+        let rootStyle = MarkupStyle(
+            font: MarkupStyleFont(size: 12),
+            foregroundColor: MarkupStyleColor(color: UIColor.secondaryLabel)
+        )
+
+        let parser = ZHTMLParserBuilder.initWithDefault()
+            .set(rootStyle: rootStyle)
+            .build()
+
+        Task {
+            let attributedString = parser.render(html)
+
+            await MainActor.run {
+                descriptionView = AnyView(
+                    HTMLTextView(attributedString: attributedString)
+                )
+            }
         }
     }
 }

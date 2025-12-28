@@ -5,12 +5,15 @@
 //  Redesigned to look like Apple Podcasts player
 //
 
+import SwiftData
 import SwiftUI
 
 struct ExpandedPlayerView: View {
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.modelContext) private var modelContext
   @StateObject private var viewModel = ExpandedPlayerViewModel()
   @State private var showEpisodeDetail = false
+  @State private var showPodcastEpisodeList = false
   @State private var showSpeedPicker = false
   @State private var showQueue = false
   @State private var showEllipsisMenu = false
@@ -114,6 +117,14 @@ struct ExpandedPlayerView: View {
           )
         }
       }
+      .navigationDestination(isPresented: $showPodcastEpisodeList) {
+        if let podcastModel = viewModel.podcastModel {
+          EpisodeListView(podcastModel: podcastModel)
+        }
+      }
+      .onAppear {
+        viewModel.setModelContext(modelContext)
+      }
     }
   }
 
@@ -180,46 +191,46 @@ struct ExpandedPlayerView: View {
       }
       .padding(.horizontal, 24)
 
-      // Podcast name
-      Text(viewModel.podcastTitle)
-        .font(.subheadline)
-        .foregroundColor(.secondary)
-        .lineLimit(1)
+      // Podcast name - tappable to go to episode list
+      Button(action: {
+        if viewModel.podcastModel != nil {
+          showPodcastEpisodeList = true
+        }
+      }) {
+        HStack(spacing: 4) {
+          Text(viewModel.podcastTitle)
+            .font(.subheadline)
+            .foregroundColor(.blue)
+            .lineLimit(1)
+          if viewModel.podcastModel != nil {
+            Image(systemName: "chevron.right")
+              .font(.caption)
+              .foregroundColor(.blue)
+          }
+        }
+      }
+      .buttonStyle(.plain)
     }
   }
 
   // MARK: - Ellipsis Menu Content (Apple Podcasts Style)
   @ViewBuilder
   private var ellipsisMenuContent: some View {
-    // Download/Save/Share row would be icons in Apple Podcasts
-    // but we'll use standard menu items
-    Button(action: {}) {
-      Label("Download", systemImage: "arrow.down.circle")
-    }
-
-    Button(action: { viewModel.toggleStar() }) {
-      Label(
-        viewModel.isStarred ? "Unsave" : "Save",
-        systemImage: viewModel.isStarred ? "bookmark.fill" : "bookmark"
-      )
-    }
-
-    Button(action: { viewModel.shareEpisode() }) {
-      Label("Share", systemImage: "square.and.arrow.up")
-    }
-
-    Divider()
-
-    Button(action: { viewModel.playNextCurrentEpisode() }) {
-      Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
-    }
-
-    Button(action: { viewModel.togglePlayed() }) {
-      Label(
-        viewModel.isCompleted ? "Mark as Unplayed" : "Mark as Played",
-        systemImage: viewModel.isCompleted ? "arrow.counterclockwise" : "checkmark.circle"
-      )
-    }
+    // Use consistent EpisodeMenuActions component
+    EpisodeMenuActions(
+      isStarred: viewModel.isStarred,
+      isCompleted: viewModel.isCompleted,
+      hasLocalAudio: viewModel.hasLocalAudio,
+      downloadState: viewModel.downloadState,
+      audioURL: viewModel.audioURL,
+      onToggleStar: { viewModel.toggleStar() },
+      onTogglePlayed: { viewModel.togglePlayed() },
+      onDownload: { viewModel.startDownload() },
+      onCancelDownload: { viewModel.cancelDownload() },
+      onDeleteDownload: { viewModel.deleteDownload() },
+      onShare: { viewModel.shareEpisode() },
+      onPlayNext: { viewModel.playNextCurrentEpisode() }
+    )
 
     Divider()
 
@@ -227,13 +238,15 @@ struct ExpandedPlayerView: View {
       Label("Go to Episode", systemImage: "info.circle")
     }
 
-    Button(action: {}) {
-      Label("Go to Show", systemImage: "square.stack")
+    if viewModel.podcastModel != nil {
+      Button(action: { showPodcastEpisodeList = true }) {
+        Label("Go to Show", systemImage: "square.stack")
+      }
     }
 
     Divider()
 
-    Button(action: {}) {
+    Button(action: { viewModel.reportConcern() }) {
       Label("Report a Concern", systemImage: "exclamationmark.bubble")
     }
   }

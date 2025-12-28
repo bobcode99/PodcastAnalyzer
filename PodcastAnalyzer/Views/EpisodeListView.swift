@@ -59,57 +59,68 @@ struct EpisodeListView: View {
   }
 
   @ViewBuilder
-  private func episodeListContent(viewModel: EpisodeListViewModel) -> some View {
-    ScrollView {
-      LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-        // MARK: - Header Section
+  private func episodeListContent(viewModel: EpisodeListViewModel)
+    -> some View
+  {
+    List {
+      // MARK: - Header Section
+      Section {
         headerSection(viewModel: viewModel)
+          .listRowInsets(EdgeInsets())
+          .listRowSeparator(.hidden)
+          .listRowBackground(Color.clear)
 
         // MARK: - Filter and Sort Bar
         filterSortBar(viewModel: viewModel)
+          .listRowInsets(EdgeInsets())
+          .listRowSeparator(.hidden)
+          .listRowBackground(Color.clear)
+      }
 
-        // MARK: - Episodes List
-        Section {
-          ForEach(viewModel.filteredEpisodes) { episode in
-            EpisodeRowView(
-              episode: episode,
-              podcastTitle: viewModel.podcastInfo.title,
-              fallbackImageURL: viewModel.podcastInfo.imageURL,
-              podcastLanguage: viewModel.podcastInfo.language,
-              downloadManager: downloadManager,
-              episodeModel: viewModel.episodeModels[viewModel.makeEpisodeKey(episode)],
-              onToggleStar: { viewModel.toggleStar(for: episode) },
-              onDownload: { viewModel.downloadEpisode(episode) },
-              onDeleteRequested: {
-                episodeToDelete = episode
-                showDeleteConfirmation = true
-              },
-              onTogglePlayed: { viewModel.togglePlayed(for: episode) }
-            )
-            .padding(.horizontal, 16)
-
-            Divider()
-              .padding(.leading, 108)
-          }
-        } header: {
-          Text("Episodes (\(viewModel.filteredEpisodeCount))")
-            .font(.subheadline)
-            .fontWeight(.semibold)
-            .foregroundColor(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color(uiColor: .systemBackground))
+      // MARK: - Episodes List
+      Section {
+        ForEach(viewModel.filteredEpisodes) { episode in
+          EpisodeRowView(
+            episode: episode,
+            podcastTitle: viewModel.podcastInfo.title,
+            fallbackImageURL: viewModel.podcastInfo.imageURL,
+            podcastLanguage: viewModel.podcastInfo.language,
+            downloadManager: downloadManager,
+            episodeModel: viewModel.episodeModels[
+              viewModel.makeEpisodeKey(episode)
+            ],
+            onToggleStar: {
+              viewModel.toggleStar(for: episode)
+            },
+            onDownload: { viewModel.downloadEpisode(episode) },
+            onDeleteRequested: {
+              episodeToDelete = episode
+              showDeleteConfirmation = true
+            },
+            onTogglePlayed: {
+              viewModel.togglePlayed(for: episode)
+            }
+          )
+          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         }
+      } header: {
+        Text("Episodes (\(viewModel.filteredEpisodeCount))")
+          .font(.subheadline)
+          .fontWeight(.semibold)
+          .foregroundColor(.secondary)
       }
     }
+    .listStyle(.plain)
     .navigationTitle(viewModel.podcastInfo.title)
     .iosNavigationBarTitleDisplayModeInline()
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         Menu {
           Toggle(isOn: $downloadManager.autoTranscriptEnabled) {
-            Label("Auto-Generate Transcripts", systemImage: "text.bubble")
+            Label(
+              "Auto-Generate Transcripts",
+              systemImage: "text.bubble"
+            )
           }
 
           Divider()
@@ -117,7 +128,10 @@ struct EpisodeListView: View {
           Button(action: {
             Task { await viewModel.refreshPodcast() }
           }) {
-            Label("Refresh Episodes", systemImage: "arrow.clockwise")
+            Label(
+              "Refresh Episodes",
+              systemImage: "arrow.clockwise"
+            )
           }
         } label: {
           Image(systemName: "ellipsis.circle")
@@ -127,10 +141,13 @@ struct EpisodeListView: View {
     .refreshable {
       await viewModel.refreshPodcast()
     }
-    .searchable(text: Binding(
-      get: { viewModel.searchText },
-      set: { viewModel.searchText = $0 }
-    ), prompt: "Search episodes")
+    .searchable(
+      text: Binding(
+        get: { viewModel.searchText },
+        set: { viewModel.searchText = $0 }
+      ),
+      prompt: "Search episodes"
+    )
     .confirmationDialog(
       "Delete Download",
       isPresented: $showDeleteConfirmation,
@@ -180,8 +197,12 @@ struct EpisodeListView: View {
           HStack(spacing: 4) {
             Image(systemName: "globe")
               .font(.system(size: 10))
-            Text(languageDisplayName(for: viewModel.podcastInfo.language))
-              .font(.caption2)
+            Text(
+              languageDisplayName(
+                for: viewModel.podcastInfo.language
+              )
+            )
+            .font(.caption2)
           }
           .foregroundColor(.secondary)
           .padding(.horizontal, 6)
@@ -189,22 +210,25 @@ struct EpisodeListView: View {
           .background(Color.gray.opacity(0.15))
           .cornerRadius(4)
 
-          if let summary = viewModel.podcastInfo.podcastInfoDescription {
+          if viewModel.podcastInfo.podcastInfoDescription != nil {
             VStack(alignment: .leading, spacing: 2) {
-              Text(summary)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .lineLimit(viewModel.isDescriptionExpanded ? nil : 3)
+              viewModel.descriptionView
+                .lineLimit(
+                  viewModel.isDescriptionExpanded ? nil : 3
+                )
 
               Button(action: {
                 withAnimation {
                   viewModel.isDescriptionExpanded.toggle()
                 }
               }) {
-                Text(viewModel.isDescriptionExpanded ? "Show less" : "More")
-                  .font(.caption)
-                  .fontWeight(.medium)
-                  .foregroundColor(.blue)
+                Text(
+                  viewModel.isDescriptionExpanded
+                    ? "Show less" : "More"
+                )
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundColor(.blue)
               }
             }
           }
@@ -250,10 +274,15 @@ struct EpisodeListView: View {
             }
           }) {
             HStack(spacing: 4) {
-              Image(systemName: viewModel.sortOldestFirst ? "arrow.up" : "arrow.down")
-                .font(.system(size: 12))
-              Text(viewModel.sortOldestFirst ? "Oldest" : "Newest")
-                .font(.caption)
+              Image(
+                systemName: viewModel.sortOldestFirst
+                  ? "arrow.up" : "arrow.down"
+              )
+              .font(.system(size: 12))
+              Text(
+                viewModel.sortOldestFirst ? "Oldest" : "Newest"
+              )
+              .font(.caption)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -285,15 +314,22 @@ struct EpisodeRowView: View {
   let onDeleteRequested: () -> Void
   let onTogglePlayed: () -> Void
 
-  private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
+  @Environment(\.modelContext) private var modelContext
+  private var audioManager: EnhancedAudioManager {
+    EnhancedAudioManager.shared
+  }
   private let applePodcastService = ApplePodcastService()
   @State private var shareCancellable: AnyCancellable?
+  @State private var hasAIAnalysis: Bool = false
 
   // Use Unit Separator (U+001F) as delimiter
   private static let episodeKeyDelimiter = "\u{1F}"
 
   private var downloadState: DownloadState {
-    downloadManager.getDownloadState(episodeTitle: episode.title, podcastTitle: podcastTitle)
+    downloadManager.getDownloadState(
+      episodeTitle: episode.title,
+      podcastTitle: podcastTitle
+    )
   }
 
   private var isDownloaded: Bool {
@@ -309,7 +345,10 @@ struct EpisodeRowView: View {
 
     let fm = FileManager.default
     let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    let captionsDir = docsDir.appendingPathComponent("Captions", isDirectory: true)
+    let captionsDir = docsDir.appendingPathComponent(
+      "Captions",
+      isDirectory: true
+    )
 
     let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
     let baseFileName = "\(podcastTitle)_\(episode.title)"
@@ -358,8 +397,11 @@ struct EpisodeRowView: View {
   private var playbackProgress: Double { episodeModel?.progress ?? 0 }
 
   private var isPlayingThisEpisode: Bool {
-    guard let currentEpisode = audioManager.currentEpisode else { return false }
-    return currentEpisode.title == episode.title && currentEpisode.podcastTitle == podcastTitle
+    guard let currentEpisode = audioManager.currentEpisode else {
+      return false
+    }
+    return currentEpisode.title == episode.title
+      && currentEpisode.podcastTitle == podcastTitle
   }
 
   private var playbackURL: String {
@@ -370,9 +412,11 @@ struct EpisodeRowView: View {
   }
 
   private var durationText: String? {
-    if let model = episodeModel, model.duration > 0 && model.progress > 0 && model.progress < 1 {
+    if let model = episodeModel,
+      model.duration > 0 && model.progress > 0 && model.progress < 1
+    {
       let remaining = model.duration - model.lastPlaybackPosition
-      return formatDuration(Int(remaining))
+      return formatDuration(Int(remaining)) + " left"
     }
     return episode.formattedDuration
   }
@@ -383,14 +427,18 @@ struct EpisodeRowView: View {
 
   private var plainDescription: String? {
     guard let desc = episode.podcastEpisodeDescription else { return nil }
-    let stripped = desc.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-      .replacingOccurrences(of: "&nbsp;", with: " ")
-      .replacingOccurrences(of: "&amp;", with: "&")
-      .replacingOccurrences(of: "&lt;", with: "<")
-      .replacingOccurrences(of: "&gt;", with: ">")
-      .replacingOccurrences(of: "&#39;", with: "'")
-      .replacingOccurrences(of: "&quot;", with: "\"")
-      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let stripped = desc.replacingOccurrences(
+      of: "<[^>]+>",
+      with: "",
+      options: .regularExpression
+    )
+    .replacingOccurrences(of: "&nbsp;", with: " ")
+    .replacingOccurrences(of: "&amp;", with: "&")
+    .replacingOccurrences(of: "&lt;", with: "<")
+    .replacingOccurrences(of: "&gt;", with: ">")
+    .replacingOccurrences(of: "&#39;", with: "'")
+    .replacingOccurrences(of: "&quot;", with: "\"")
+    .trimmingCharacters(in: .whitespacesAndNewlines)
     return stripped.isEmpty ? nil : stripped
   }
 
@@ -398,6 +446,20 @@ struct EpisodeRowView: View {
     let hours = seconds / 3600
     let minutes = (seconds % 3600) / 60
     return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
+  }
+
+  private func checkAIAnalysis() {
+    guard let audioURL = episode.audioURL else { return }
+    let descriptor = FetchDescriptor<EpisodeAIAnalysis>(
+      predicate: #Predicate { $0.episodeAudioURL == audioURL }
+    )
+    if let model = try? modelContext.fetch(descriptor).first {
+      // Check if ANY AI analysis is available
+      hasAIAnalysis =
+        model.hasFullAnalysis || model.hasSummary || model.hasEntities
+        || model.hasHighlights
+        || (model.qaHistoryJSON != nil && !model.qaHistoryJSON!.isEmpty)
+    }
   }
 
   var body: some View {
@@ -409,149 +471,220 @@ struct EpisodeRowView: View {
         podcastLanguage: podcastLanguage
       )
     ) {
-      HStack(alignment: .top, spacing: 12) {
+      HStack(alignment: .center, spacing: 12) {
         episodeThumbnail
         episodeInfo
       }
-      .padding(.vertical, 6)
+      .padding(.vertical, 8)
     }
     .contextMenu { contextMenuContent }
-    .swipeActions(edge: .trailing, allowsFullSwipe: false) { trailingSwipeActions }
-    .swipeActions(edge: .leading, allowsFullSwipe: true) { leadingSwipeActions }
+    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+      trailingSwipeActions
+    }
+    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+      leadingSwipeActions
+    }
+    .onAppear { checkAIAnalysis() }
   }
 
   @ViewBuilder
   private var episodeThumbnail: some View {
-    if let url = URL(string: episodeImageURL) {
-      AsyncImage(url: url) { phase in
-        switch phase {
-        case .success(let image):
-          image.resizable().scaledToFill()
-        case .failure:
-          Color.gray
-        case .empty:
-          Color.gray.opacity(0.3)
-        @unknown default:
-          Color.gray
+    ZStack(alignment: .bottomTrailing) {
+      if let url = URL(string: episodeImageURL) {
+        AsyncImage(url: url) { phase in
+          switch phase {
+          case .success(let image):
+            image.resizable().scaledToFill()
+          case .failure:
+            Color.gray
+          case .empty:
+            Color.gray.opacity(0.3)
+          @unknown default:
+            Color.gray
+          }
         }
-      }
-      .frame(width: 80, height: 80)
-      .cornerRadius(8)
-      .clipped()
-    } else {
-      Color.gray
-        .frame(width: 80, height: 80)
+        .frame(width: 90, height: 90)
         .cornerRadius(8)
+        .clipped()
+      } else {
+        Color.gray
+          .frame(width: 90, height: 90)
+          .cornerRadius(8)
+      }
+
+      // Playing indicator overlay
+      if isPlayingThisEpisode {
+        Image(
+          systemName: audioManager.isPlaying
+            ? "waveform" : "pause.fill"
+        )
+        .font(.system(size: 12, weight: .bold))
+        .foregroundColor(.white)
+        .padding(4)
+        .background(Color.blue)
+        .cornerRadius(4)
+        .padding(4)
+      }
     }
   }
 
   @ViewBuilder
   private var episodeInfo: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      // Date and indicators row
-      HStack(spacing: 4) {
-        if let date = episode.pubDate {
-          Text(date.formatted(date: .abbreviated, time: .omitted))
-            .font(.caption2)
-            .foregroundColor(.secondary)
-        }
-
-        if isStarred {
-          Image(systemName: "star.fill")
-            .font(.system(size: 8))
-            .foregroundColor(.yellow)
-        }
-
-        if isDownloaded {
-          Image(systemName: "arrow.down.circle.fill")
-            .font(.system(size: 8))
-            .foregroundColor(.green)
-        }
-
-        if hasCaptions {
-          Image(systemName: "captions.bubble.fill")
-            .font(.system(size: 8))
-            .foregroundColor(.purple)
-        } else if isTranscribing {
-          HStack(spacing: 2) {
-            ProgressView().scaleEffect(0.4)
-            if let progress = transcriptProgress {
-              Text("\(Int(progress * 100))%")
-                .font(.system(size: 7))
-                .foregroundColor(.purple)
-            }
-          }
-        }
+    VStack(alignment: .leading, spacing: 6) {
+      // Date row
+      if let date = episode.pubDate {
+        Text(date.formatted(date: .abbreviated, time: .omitted))
+          .font(.caption)
+          .foregroundColor(.secondary)
       }
 
+      // Title - more lines
       Text(episode.title)
         .font(.subheadline)
-        .fontWeight(.medium)
-        .lineLimit(2)
+        .fontWeight(.semibold)
+        .lineLimit(3)
         .foregroundColor(.primary)
 
+      // Description - more lines
       if let description = plainDescription {
         Text(description)
           .font(.caption)
           .foregroundColor(.secondary)
-          .lineLimit(2)
+          .lineLimit(3)
       }
 
-      playbackControls
+      Spacer(minLength: 4)
+
+      // Bottom status bar with all indicators
+      bottomStatusBar
     }
   }
 
   @ViewBuilder
-  private var playbackControls: some View {
-    HStack(spacing: 8) {
+  private var bottomStatusBar: some View {
+    HStack(spacing: 6) {
+      // Play button with progress
       Button(action: playAction) {
         HStack(spacing: 4) {
           if isPlayingThisEpisode && audioManager.isPlaying {
-            Image(systemName: "pause.fill").font(.system(size: 10))
+            Image(systemName: "pause.fill").font(.system(size: 9))
           } else if isCompleted {
-            Image(systemName: "arrow.counterclockwise").font(.system(size: 10, weight: .bold))
+            Image(systemName: "arrow.counterclockwise").font(
+              .system(size: 9, weight: .bold)
+            )
           } else {
-            Image(systemName: "play.fill").font(.system(size: 10))
+            Image(systemName: "play.fill").font(.system(size: 9))
           }
 
+          // Progress bar
           if playbackProgress > 0 && playbackProgress < 1 {
             GeometryReader { geo in
               ZStack(alignment: .leading) {
-                Capsule().fill(Color.gray.opacity(0.3)).frame(height: 3)
-                Capsule().fill(Color.blue).frame(width: geo.size.width * playbackProgress, height: 3)
+                Capsule().fill(Color.white.opacity(0.4)).frame(
+                  height: 2
+                )
+                Capsule().fill(Color.white).frame(
+                  width: geo.size.width * playbackProgress,
+                  height: 2
+                )
               }
             }
-            .frame(width: 30, height: 3)
+            .frame(width: 24, height: 2)
           }
 
           if let duration = durationText {
-            Text(duration).font(.caption2).fontWeight(.medium)
+            Text(duration).font(.system(size: 10)).fontWeight(
+              .medium
+            )
           }
         }
-        .foregroundColor(.blue)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.blue.opacity(0.15))
+        .foregroundColor(.white)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.blue)
         .clipShape(Capsule())
       }
       .buttonStyle(.borderless)
       .disabled(episode.audioURL == nil)
 
+      // Download progress
       if case .downloading(let progress) = downloadState {
-        HStack(spacing: 4) {
-          ProgressView().scaleEffect(0.5)
-          Text("\(Int(progress * 100))%").font(.caption2)
+        HStack(spacing: 2) {
+          ProgressView().scaleEffect(0.4)
+          Text("\(Int(progress * 100))%").font(.system(size: 9))
         }
         .foregroundColor(.orange)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(Color.orange.opacity(0.15))
+        .clipShape(Capsule())
       } else if case .finishing = downloadState {
-        HStack(spacing: 4) {
-          ProgressView().scaleEffect(0.5)
-          Text("Saving...").font(.caption2)
+        HStack(spacing: 2) {
+          ProgressView().scaleEffect(0.4)
+          Text("Saving").font(.system(size: 9))
         }
         .foregroundColor(.blue)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(Color.blue.opacity(0.15))
+        .clipShape(Capsule())
+      }
+
+      // Status indicators
+      HStack(spacing: 4) {
+        if isStarred {
+          Image(systemName: "star.fill")
+            .font(.system(size: 10))
+            .foregroundColor(.yellow)
+        }
+
+        if isDownloaded {
+          Image(systemName: "arrow.down.circle.fill")
+            .font(.system(size: 10))
+            .foregroundColor(.green)
+        }
+
+        if hasCaptions {
+          Image(systemName: "captions.bubble.fill")
+            .font(.system(size: 10))
+            .foregroundColor(.purple)
+        } else if isTranscribing {
+          HStack(spacing: 2) {
+            ProgressView().scaleEffect(0.35)
+            if let progress = transcriptProgress {
+              Text("\(Int(progress * 100))%")
+                .font(.system(size: 8))
+                .foregroundColor(.purple)
+            }
+          }
+        }
+
+        if hasAIAnalysis {
+          Image(systemName: "sparkles")
+            .font(.system(size: 10))
+            .foregroundColor(.orange)
+        }
+
+        if isCompleted {
+          Image(systemName: "checkmark.circle.fill")
+            .font(.system(size: 10))
+            .foregroundColor(.green)
+        }
       }
 
       Spacer()
+
+      // Ellipsis menu button
+      Menu {
+        contextMenuContent
+      } label: {
+        Image(systemName: "ellipsis")
+          .font(.system(size: 14, weight: .medium))
+          .foregroundColor(.secondary)
+          .frame(width: 28, height: 28)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
     }
   }
 
@@ -567,7 +700,10 @@ struct EpisodeRowView: View {
       onTogglePlayed: onTogglePlayed,
       onDownload: onDownload,
       onCancelDownload: {
-        downloadManager.cancelDownload(episodeTitle: episode.title, podcastTitle: podcastTitle)
+        downloadManager.cancelDownload(
+          episodeTitle: episode.title,
+          podcastTitle: podcastTitle
+        )
       },
       onDeleteDownload: onDeleteRequested,
       onShare: {
@@ -576,7 +712,8 @@ struct EpisodeRowView: View {
       onPlayNext: {
         guard let audioURL = episode.audioURL else { return }
         let playbackEpisode = PlaybackEpisode(
-          id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)",
+          id:
+            "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)",
           title: episode.title,
           podcastTitle: podcastTitle,
           audioURL: audioURL,
@@ -593,7 +730,10 @@ struct EpisodeRowView: View {
   @ViewBuilder
   private var trailingSwipeActions: some View {
     Button(action: onToggleStar) {
-      Label(isStarred ? "Unstar" : "Star", systemImage: isStarred ? "star.slash" : "star.fill")
+      Label(
+        isStarred ? "Unstar" : "Star",
+        systemImage: isStarred ? "star.slash" : "star.fill"
+      )
     }
     .tint(.yellow)
 
@@ -603,7 +743,10 @@ struct EpisodeRowView: View {
       }
     } else if case .downloading = downloadState {
       Button(action: {
-        downloadManager.cancelDownload(episodeTitle: episode.title, podcastTitle: podcastTitle)
+        downloadManager.cancelDownload(
+          episodeTitle: episode.title,
+          podcastTitle: podcastTitle
+        )
       }) {
         Label("Cancel", systemImage: "xmark.circle")
       }
@@ -627,7 +770,8 @@ struct EpisodeRowView: View {
     Button(action: onTogglePlayed) {
       Label(
         isCompleted ? "Unplayed" : "Played",
-        systemImage: isCompleted ? "arrow.counterclockwise" : "checkmark.circle"
+        systemImage: isCompleted
+          ? "arrow.counterclockwise" : "checkmark.circle"
       )
     }
     .tint(.green)
@@ -683,11 +827,17 @@ struct EpisodeRowView: View {
   }
 
   private func shareWithURL(_ urlString: String?) {
-    guard let urlString = urlString, let url = URL(string: urlString) else { return }
+    guard let urlString = urlString, let url = URL(string: urlString) else {
+      return
+    }
 
-    let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-       let rootVC = windowScene.windows.first?.rootViewController
+    let activityVC = UIActivityViewController(
+      activityItems: [url],
+      applicationActivities: nil
+    )
+    if let windowScene = UIApplication.shared.connectedScenes.first
+      as? UIWindowScene,
+      let rootVC = windowScene.windows.first?.rootViewController
     {
       rootVC.present(activityVC, animated: true)
     }

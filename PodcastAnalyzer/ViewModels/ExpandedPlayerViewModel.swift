@@ -6,6 +6,7 @@
 //
 
 import Combine
+import SwiftData
 import SwiftUI
 
 @MainActor
@@ -24,16 +25,29 @@ class ExpandedPlayerViewModel: ObservableObject {
   @Published var isCompleted: Bool = false
   @Published var queue: [PlaybackEpisode] = []
   @Published var episodeDescription: String?
+  @Published var downloadState: DownloadState = .notDownloaded
+  @Published var podcastModel: PodcastInfoModel?
 
   private let audioManager = EnhancedAudioManager.shared
+  private let downloadManager = DownloadManager.shared
   private var updateTimer: Timer?
   private let applePodcastService = ApplePodcastService()
   private var shareCancellable: AnyCancellable?
+  private var modelContext: ModelContext?
+
+  // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
+  private static let episodeKeyDelimiter = "\u{1F}"
 
   init() {
     // Update state immediately before setting up timer
     updateState()
     setupUpdateTimer()
+  }
+
+  func setModelContext(_ context: ModelContext) {
+    self.modelContext = context
+    loadEpisodeState()
+    loadPodcastModel()
   }
 
   private func setupUpdateTimer() {
@@ -47,6 +61,7 @@ class ExpandedPlayerViewModel: ObservableObject {
 
   private func updateState() {
     if let episode = audioManager.currentEpisode {
+      let previousEpisodeId = currentEpisode?.id
       currentEpisode = episode
       isPlaying = audioManager.isPlaying
       episodeTitle = episode.title
@@ -55,6 +70,9 @@ class ExpandedPlayerViewModel: ObservableObject {
       if let imageURLString = episode.imageURL {
         imageURL = URL(string: imageURLString)
       }
+
+      // Update episode date from current episode
+      episodeDate = episode.pubDate
 
       currentTime = audioManager.currentTime
       duration = audioManager.duration
@@ -66,6 +84,88 @@ class ExpandedPlayerViewModel: ObservableObject {
 
       // Update queue
       queue = audioManager.queue
+
+      // Update download state
+      downloadState = downloadManager.getDownloadState(
+        episodeTitle: episode.title,
+        podcastTitle: episode.podcastTitle
+      )
+
+      // Reload episode state when episode changes
+      if previousEpisodeId != episode.id {
+        loadEpisodeState()
+        loadPodcastModel()
+      }
+    }
+  }
+
+  // MARK: - SwiftData Loading
+
+  private func loadEpisodeState() {
+    guard let context = modelContext, let episode = currentEpisode else { return }
+
+    let episodeKey = "\(episode.podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
+
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.id == episodeKey }
+    )
+
+    do {
+      if let model = try context.fetch(descriptor).first {
+        isStarred = model.isStarred
+        isCompleted = model.isCompleted
+      } else {
+        isStarred = false
+        isCompleted = false
+      }
+    } catch {
+      print("Failed to load episode state: \(error)")
+    }
+  }
+
+  private func loadPodcastModel() {
+    guard let context = modelContext else { return }
+
+    let podcastName = podcastTitle
+    let descriptor = FetchDescriptor<PodcastInfoModel>(
+      predicate: #Predicate { $0.podcastInfo.title == podcastName }
+    )
+
+    do {
+      podcastModel = try context.fetch(descriptor).first
+    } catch {
+      print("Failed to load podcast model: \(error)")
+    }
+  }
+
+  private func getOrCreateEpisodeModel() -> EpisodeDownloadModel? {
+    guard let context = modelContext, let episode = currentEpisode else { return nil }
+
+    let episodeKey = "\(episode.podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
+
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.id == episodeKey }
+    )
+
+    do {
+      if let existing = try context.fetch(descriptor).first {
+        return existing
+      } else {
+        // Create new model
+        let model = EpisodeDownloadModel(
+          episodeTitle: episode.title,
+          podcastTitle: episode.podcastTitle,
+          audioURL: episode.audioURL,
+          imageURL: episode.imageURL,
+          pubDate: episode.pubDate
+        )
+        context.insert(model)
+        try context.save()
+        return model
+      }
+    } catch {
+      print("Failed to get/create episode model: \(error)")
+      return nil
     }
   }
 
@@ -111,12 +211,23 @@ class ExpandedPlayerViewModel: ObservableObject {
 
   func toggleStar() {
     isStarred.toggle()
-    // TODO: Persist to SwiftData via EpisodeDownloadModel
+
+    // Persist to SwiftData
+    guard let model = getOrCreateEpisodeModel() else { return }
+    model.isStarred = isStarred
+    try? modelContext?.save()
   }
 
   func togglePlayed() {
     isCompleted.toggle()
-    // TODO: Persist to SwiftData via EpisodeDownloadModel
+
+    // Persist to SwiftData
+    guard let model = getOrCreateEpisodeModel() else { return }
+    model.isCompleted = isCompleted
+    if !isCompleted {
+      model.lastPlaybackPosition = 0
+    }
+    try? modelContext?.save()
   }
 
   func shareEpisode() {
@@ -156,6 +267,58 @@ class ExpandedPlayerViewModel: ObservableObject {
   func playNextCurrentEpisode() {
     guard let episode = currentEpisode else { return }
     audioManager.playNext(episode)
+  }
+
+  // MARK: - Download Actions
+
+  var hasLocalAudio: Bool {
+    if case .downloaded = downloadState { return true }
+    return false
+  }
+
+  var audioURL: String? {
+    currentEpisode?.audioURL
+  }
+
+  func startDownload() {
+    guard let episode = currentEpisode else { return }
+    // Create a PodcastEpisodeInfo to pass to download manager
+    let episodeInfo = PodcastEpisodeInfo(
+      title: episode.title,
+      podcastEpisodeDescription: episode.episodeDescription,
+      pubDate: episode.pubDate,
+      audioURL: episode.audioURL,
+      imageURL: episode.imageURL,
+      duration: episode.duration
+    )
+    downloadManager.downloadEpisode(
+      episode: episodeInfo,
+      podcastTitle: episode.podcastTitle,
+      language: "en"  // Default language
+    )
+  }
+
+  func cancelDownload() {
+    guard let episode = currentEpisode else { return }
+    downloadManager.cancelDownload(
+      episodeTitle: episode.title,
+      podcastTitle: episode.podcastTitle
+    )
+  }
+
+  func deleteDownload() {
+    guard let episode = currentEpisode else { return }
+    downloadManager.deleteDownload(
+      episodeTitle: episode.title,
+      podcastTitle: episode.podcastTitle
+    )
+  }
+
+  func reportConcern() {
+    // Open a report URL or show an alert
+    // For now, this can be a placeholder that opens Apple's podcast report page
+    guard let url = URL(string: "https://www.apple.com/feedback/podcasts.html") else { return }
+    UIApplication.shared.open(url)
   }
 
   // MARK: - Queue Actions

@@ -8,6 +8,7 @@
 import Combine
 import SwiftData
 import SwiftUI
+import ZMarkupParser
 
 @MainActor
 @Observable
@@ -19,6 +20,9 @@ final class EpisodeListViewModel {
   var searchText: String = ""
   var isRefreshing: Bool = false
   var isDescriptionExpanded: Bool = false
+
+  // HTML-rendered description view
+  var descriptionView: AnyView = AnyView(EmptyView())
 
   // MARK: - Dependencies
   private let podcastModel: PodcastInfoModel
@@ -94,11 +98,47 @@ final class EpisodeListViewModel {
 
   init(podcastModel: PodcastInfoModel) {
     self.podcastModel = podcastModel
+    parseDescription()
   }
 
   func setModelContext(_ context: ModelContext) {
     self.modelContext = context
     loadEpisodeModels()
+  }
+
+  // MARK: - HTML Description Parsing
+
+  private func parseDescription() {
+    let html = podcastModel.podcastInfo.podcastInfoDescription ?? ""
+
+    guard !html.isEmpty else {
+      descriptionView = AnyView(
+        Text("No description available.")
+          .foregroundColor(.secondary)
+          .font(.caption)
+      )
+      return
+    }
+
+    let rootStyle = MarkupStyle(
+      font: MarkupStyleFont(size: 13),  // Smaller font for list view
+      foregroundColor: MarkupStyleColor(color: UIColor.secondaryLabel)
+    )
+
+    let parser = ZHTMLParserBuilder.initWithDefault()
+      .set(rootStyle: rootStyle)
+      .build()
+
+    Task {
+      let attributedString = parser.render(html)
+
+      await MainActor.run {
+        self.descriptionView = AnyView(
+          HTMLTextView(attributedString: attributedString)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        )
+      }
+    }
   }
 
   // MARK: - Timer Management
