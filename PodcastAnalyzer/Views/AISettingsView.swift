@@ -59,71 +59,172 @@ struct AISettingsView: View {
                 Text("Cloud AI is used for full transcript analysis. You provide your own API key (BYOK).")
             }
 
-            // MARK: - API Key Input
-            Section {
-                apiKeyField(for: settings.selectedProvider)
+            // MARK: - API Key Input (for providers that need it)
+            if settings.selectedProvider.requiresAPIKey {
+                Section {
+                    apiKeyField(for: settings.selectedProvider)
 
-                // Model selection with refresh button
-                HStack {
-                    modelPicker(for: settings.selectedProvider)
+                    // Model selection with refresh button
+                    HStack {
+                        modelPicker(for: settings.selectedProvider)
 
-                    // Refresh models button
-                    Button(action: { fetchModels(for: settings.selectedProvider) }) {
-                        if isFetchingModels {
+                        // Refresh models button
+                        Button(action: { fetchModels(for: settings.selectedProvider) }) {
+                            if isFetchingModels {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                        }
+                        .disabled(settings.currentAPIKey.isEmpty || isFetchingModels)
+                        .buttonStyle(.borderless)
+                    }
+
+                    // Model fetch status
+                    if isFetchingModels {
+                        HStack {
                             ProgressView()
                                 .scaleEffect(0.7)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
+                            Text("Fetching available models...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else if let error = modelFetchError {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text(error)
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
+                    } else if let models = fetchedModels[settings.selectedProvider], !models.isEmpty {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("\(models.count) models available")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
-                    .disabled(settings.currentAPIKey.isEmpty || isFetchingModels)
-                    .buttonStyle(.borderless)
-                }
 
-                // Model fetch status
-                if isFetchingModels {
-                    HStack {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                        Text("Fetching available models...")
+                    // Test connection button
+                    Button(action: testConnection) {
+                        HStack {
+                            if isTesting {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "checkmark.circle")
+                            }
+                            Text("Test Connection")
+                        }
+                    }
+                    .disabled(settings.currentAPIKey.isEmpty || isTesting)
+                } header: {
+                    Text("\(settings.selectedProvider.displayName) Configuration")
+                } footer: {
+                    Text("Tap the refresh button to fetch the latest available models from the API.")
+                }
+            }
+
+            // MARK: - Apple PCC Configuration
+            if settings.selectedProvider == .applePCC {
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("No API key needed!")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                        }
+
+                        Text("Apple Intelligence via Shortcuts uses Apple's Private Cloud Compute for AI analysis. Your data is processed securely on Apple's servers.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                } else if let error = modelFetchError {
+
+                    // Shortcut name configuration
                     HStack {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.orange)
+                        Text("Shortcut Name")
+                        Spacer()
+                        TextField("Shortcut Name", text: Binding(
+                            get: { ShortcutsAIService.shared.shortcutName },
+                            set: { ShortcutsAIService.shared.shortcutName = $0 }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                        .multilineTextAlignment(.trailing)
                     }
-                } else if let models = fetchedModels[settings.selectedProvider], !models.isEmpty {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text("\(models.count) models available")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+
+                    Button(action: {
+                        ShortcutsAIService.shared.openShortcutsApp()
+                    }) {
+                        HStack {
+                            Image(systemName: "square.on.square")
+                            Text("Open Shortcuts App")
+                        }
                     }
+                } header: {
+                    Text("Shortcut Configuration")
+                } footer: {
+                    Text("Enter the exact name of your shortcut. The app will run this shortcut automatically.")
                 }
 
-                // Test connection button
-                Button(action: testConnection) {
-                    HStack {
-                        if isTesting {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        } else {
-                            Image(systemName: "checkmark.circle")
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Setup Instructions:")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            instructionRow(number: 1, text: "Open the Shortcuts app")
+                            instructionRow(number: 2, text: "Create a new shortcut")
+                            instructionRow(number: 3, text: "Add 'Get Clipboard' action")
+                            instructionRow(number: 4, text: "Add 'Summarize' or 'Ask ChatGPT' action")
+                            instructionRow(number: 5, text: "Set output to 'Text'")
+                            instructionRow(number: 6, text: "Add 'Copy to Clipboard' action")
+                            instructionRow(number: 7, text: "Name it exactly as configured above")
                         }
-                        Text("Test Connection")
                     }
+
+                    // Tip about Ask Every Time
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Image(systemName: "lightbulb.fill")
+                                .foregroundColor(.yellow)
+                            Text("Pro Tip")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        }
+                        Text("Use 'Ask Every Time' for the Model parameter to choose between Apple Intelligence (PCC), ChatGPT, or other models each time you run the shortcut.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(10)
+                    .background(Color.yellow.opacity(0.1))
+                    .cornerRadius(8)
+
+                    // How it works
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundColor(.blue)
+                            Text("How It Works")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        }
+                        Text("When you analyze a transcript, the app will automatically run your shortcut, wait for it to complete, and display the result. No manual copy/paste needed!")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(10)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(8)
+                } header: {
+                    Text("Setup Instructions")
                 }
-                .disabled(settings.currentAPIKey.isEmpty || isTesting)
-            } header: {
-                Text("\(settings.selectedProvider.displayName) Configuration")
-            } footer: {
-                Text("Tap the refresh button to fetch the latest available models from the API.")
             }
 
             // MARK: - Analysis Language
@@ -290,6 +391,8 @@ struct AISettingsView: View {
     private func modelPicker(for provider: CloudAIProvider) -> some View {
         let binding: Binding<String> = {
             switch provider {
+            case .applePCC:
+                return .constant("Apple Intelligence")
             case .openai:
                 return $settings.selectedOpenAIModel
             case .claude:
@@ -334,6 +437,7 @@ struct AISettingsView: View {
                     // If current model is not in the list, select the first available
                     let currentModel: String
                     switch provider {
+                    case .applePCC: currentModel = "Apple Intelligence"
                     case .openai: currentModel = settings.selectedOpenAIModel
                     case .claude: currentModel = settings.selectedClaudeModel
                     case .gemini: currentModel = settings.selectedGeminiModel
@@ -343,6 +447,7 @@ struct AISettingsView: View {
 
                     if !models.contains(currentModel), let firstModel = models.first {
                         switch provider {
+                        case .applePCC: break  // No model selection for Apple PCC
                         case .openai: settings.selectedOpenAIModel = firstModel
                         case .claude: settings.selectedClaudeModel = firstModel
                         case .gemini: settings.selectedGeminiModel = firstModel
@@ -391,6 +496,19 @@ struct AISettingsView: View {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         return formatter.string(from: NSNumber(value: number)) ?? "\(number)"
+    }
+
+    private func instructionRow(number: Int, text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(number).")
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundColor(.blue)
+                .frame(width: 20, alignment: .leading)
+            Text(text)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
     }
 
     private func checkOnDeviceAvailability() {

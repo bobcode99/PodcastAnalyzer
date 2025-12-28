@@ -64,7 +64,20 @@ struct PodcastAnalyzerApp: App {
             }
           }
         }
+        .onOpenURL { url in
+          // Handle URL callbacks from Shortcuts
+          handleIncomingURL(url)
+        }
     }
     .modelContainer(sharedModelContainer)
+  }
+
+  private func handleIncomingURL(_ url: URL) {
+    logger.info("Received URL: \(url.absoluteString)")
+
+    // Route to ShortcutsAIService for handling
+    Task { @MainActor in
+      ShortcutsAIService.shared.handleURL(url)
+    }
   }
 }

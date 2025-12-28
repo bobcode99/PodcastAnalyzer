@@ -3,25 +3,29 @@
 //  PodcastAnalyzer
 //
 //  Service for cloud-based AI analysis using user-provided API keys (BYOK)
-//  Supports OpenAI, Claude, Gemini, and Grok
+//  Supports OpenAI, Claude, Gemini, Grok, and Apple Intelligence via Shortcuts
 //
 
 import Foundation
 import os.log
-
-private let logger = Logger(subsystem: "com.podcastanalyzer", category: "CloudAIService")
+import UIKit
 
 // MARK: - Cloud AI Service
 
-actor CloudAIService {
+@MainActor
+final class CloudAIService {
     static let shared = CloudAIService()
 
     private let settings = AISettingsManager.shared
+    private let logger = Logger(subsystem: "com.podcastanalyzer", category: "CloudAIService")
 
     // MARK: - API Endpoints
 
     private func apiEndpoint(for provider: CloudAIProvider) -> URL {
         switch provider {
+        case .applePCC:
+            // Apple PCC uses Shortcuts, no API endpoint needed
+            return URL(string: "shortcuts://")!
         case .openai:
             return URL(string: "https://api.openai.com/v1/chat/completions")!
         case .claude:
@@ -40,6 +44,9 @@ actor CloudAIService {
     /// Fetch available models from the provider's API
     func fetchAvailableModels(for provider: CloudAIProvider, apiKey: String) async throws -> [String] {
         switch provider {
+        case .applePCC:
+            // Apple PCC uses Shortcuts with Apple Intelligence - no model selection needed
+            return ["Apple Intelligence"]
         case .openai:
             return try await fetchOpenAIModels(apiKey: apiKey)
         case .claude:
@@ -131,7 +138,7 @@ actor CloudAIService {
     private func fetchGeminiModels(apiKey: String) async throws -> [String] {
         let endpoint = URL(string: "https://generativelanguage.googleapis.com/v1beta/models?key=\(apiKey)")!
 
-        var request = URLRequest(url: endpoint)
+        let request = URLRequest(url: endpoint)
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -250,12 +257,20 @@ actor CloudAIService {
         let provider = settings.selectedProvider
         let apiKey = settings.currentAPIKey
 
+        // Apple PCC doesn't need an API key or connection test
+        if provider == .applePCC {
+            return true
+        }
+
         guard !apiKey.isEmpty else {
             throw CloudAIError.noAPIKey
         }
 
         // Use provider-specific minimal ping request
         switch provider {
+        case .applePCC:
+            // Already handled above
+            break
         case .openai, .grok, .groq:
             try await pingOpenAICompatible(provider: provider, apiKey: apiKey)
         case .claude:
@@ -386,6 +401,191 @@ actor CloudAIService {
         }
     }
 
+    // MARK: - Apple PCC via Shortcuts
+
+    /// Analyze transcript using Apple Intelligence via Shortcuts
+    private func analyzeWithShortcuts(
+        transcript: String,
+        episodeTitle: String,
+        podcastTitle: String,
+        analysisType: CloudAnalysisType,
+        progressCallback: ((String, Double) -> Void)? = nil
+    ) async throws -> CloudAnalysisResult {
+        progressCallback?("Starting Shortcuts analysis...", 0.2)
+
+        // Use ShortcutsAIService for direct execution
+        let shortcutsService = ShortcutsAIService.shared
+
+        progressCallback?("Running shortcut...", 0.4)
+
+        do {
+            let result = try await shortcutsService.analyzeTranscript(
+                transcript: transcript,
+                episodeTitle: episodeTitle,
+                podcastTitle: podcastTitle,
+                analysisType: analysisType,
+                timeout: 180  // 3 minute timeout for AI processing
+            )
+
+            progressCallback?("Done", 1.0)
+            return result
+
+        } catch let error as ShortcutsError {
+            progressCallback?("Error", 1.0)
+            throw CloudAIError.apiError(statusCode: 0, message: error.localizedDescription)
+        } catch {
+            progressCallback?("Error", 1.0)
+            throw error
+        }
+    }
+
+    /// Ask a question using Apple Intelligence via Shortcuts
+    private func askQuestionWithShortcuts(
+        question: String,
+        transcript: String,
+        episodeTitle: String,
+        progressCallback: ((String, Double) -> Void)? = nil
+    ) async throws -> CloudQAResult {
+        progressCallback?("Preparing question for Shortcuts...", 0.2)
+
+        let languageInstruction = settings.analysisLanguage.getLanguageInstruction()
+
+        let prompt = """
+        Based on this podcast transcript, please answer the following question.
+
+        Episode: \(episodeTitle)
+
+        Question: \(question)
+
+        \(languageInstruction)
+
+        Transcript:
+        \(transcript)
+
+        Please provide a clear, detailed answer based ONLY on the information in the transcript.
+        If the answer is not in the transcript, say so clearly.
+        """
+
+        progressCallback?("Running shortcut...", 0.4)
+
+        let shortcutsService = ShortcutsAIService.shared
+
+        do {
+            let result = try await shortcutsService.runShortcut(input: prompt, timeout: 180)
+
+            progressCallback?("Done", 1.0)
+
+            return CloudQAResult(
+                question: question,
+                answer: result,
+                confidence: "unknown",
+                relatedTopics: nil,
+                provider: .applePCC,
+                model: "Apple Intelligence (via Shortcuts)",
+                timestamp: Date()
+            )
+
+        } catch let error as ShortcutsError {
+            progressCallback?("Error", 1.0)
+            throw CloudAIError.apiError(statusCode: 0, message: error.localizedDescription)
+        } catch {
+            progressCallback?("Error", 1.0)
+            throw error
+        }
+    }
+
+    /// Build a prompt for Shortcuts analysis
+    private func buildShortcutsPrompt(
+        transcript: String,
+        episodeTitle: String,
+        podcastTitle: String,
+        analysisType: CloudAnalysisType
+    ) -> String {
+        let languageInstruction = settings.analysisLanguage.getLanguageInstruction()
+
+        switch analysisType {
+        case .summary:
+            return """
+            Please provide a comprehensive summary of this podcast episode.
+
+            Podcast: \(podcastTitle)
+            Episode: \(episodeTitle)
+
+            \(languageInstruction)
+
+            Transcript:
+            \(transcript)
+
+            Provide:
+            1. A 2-3 paragraph summary
+            2. Main topics discussed (bullet points)
+            3. Key takeaways (bullet points)
+            4. Who would benefit from this episode
+            """
+
+        case .entities:
+            return """
+            Please extract all named entities from this podcast episode.
+
+            Podcast: \(podcastTitle)
+            Episode: \(episodeTitle)
+
+            \(languageInstruction)
+
+            Transcript:
+            \(transcript)
+
+            List:
+            1. People mentioned
+            2. Organizations or companies
+            3. Products or services
+            4. Locations
+            5. Books, articles, or resources mentioned
+            """
+
+        case .highlights:
+            return """
+            Please identify the key highlights from this podcast episode.
+
+            Podcast: \(podcastTitle)
+            Episode: \(episodeTitle)
+
+            \(languageInstruction)
+
+            Transcript:
+            \(transcript)
+
+            Provide:
+            1. Top 5 highlights or key moments
+            2. The best quote from the episode
+            3. Any action items mentioned
+            4. Interesting or surprising facts
+            """
+
+        case .fullAnalysis:
+            return """
+            Please provide a complete analysis of this podcast episode.
+
+            Podcast: \(podcastTitle)
+            Episode: \(episodeTitle)
+
+            \(languageInstruction)
+
+            Transcript:
+            \(transcript)
+
+            Provide:
+            1. Executive Summary (2-3 paragraphs)
+            2. Main Topics Discussed
+            3. Key Insights and Learnings
+            4. Notable Quotes
+            5. Actionable Advice
+            6. People and Organizations Mentioned
+            7. Conclusion
+            """
+        }
+    }
+
     // MARK: - Streaming Transcript Analysis
 
     /// Analyze transcript with streaming response
@@ -401,6 +601,18 @@ actor CloudAIService {
         let provider = settings.selectedProvider
         let apiKey = settings.currentAPIKey
         let model = settings.currentModel
+
+        // Handle Apple PCC via Shortcuts
+        if provider == .applePCC {
+            progressCallback?("Preparing for Shortcuts...", 0.2)
+            return try await analyzeWithShortcuts(
+                transcript: transcript,
+                episodeTitle: episodeTitle,
+                podcastTitle: podcastTitle,
+                analysisType: analysisType,
+                progressCallback: progressCallback
+            )
+        }
 
         guard !apiKey.isEmpty else {
             throw CloudAIError.noAPIKey
@@ -582,6 +794,16 @@ actor CloudAIService {
         let apiKey = settings.currentAPIKey
         let model = settings.currentModel
 
+        // Handle Apple PCC via Shortcuts
+        if provider == .applePCC {
+            return try await askQuestionWithShortcuts(
+                question: question,
+                transcript: transcript,
+                episodeTitle: episodeTitle,
+                progressCallback: progressCallback
+            )
+        }
+
         guard !apiKey.isEmpty else {
             throw CloudAIError.noAPIKey
         }
@@ -759,6 +981,9 @@ actor CloudAIService {
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
         switch provider {
+        case .applePCC:
+            // Apple PCC is handled via Shortcuts, not streaming API
+            throw CloudAIError.apiError(statusCode: 0, message: "Apple PCC uses Shortcuts for processing")
         case .openai, .groq, .grok:
             return try await sendOpenAIStreamingRequest(
                 prompt: prompt,
@@ -1028,6 +1253,9 @@ actor CloudAIService {
         model: String
     ) async throws -> String {
         switch provider {
+        case .applePCC:
+            // Apple PCC is handled via Shortcuts, not direct API
+            throw CloudAIError.apiError(statusCode: 0, message: "Apple PCC uses Shortcuts for processing")
         case .openai, .groq, .grok:
             return try await sendOpenAICompatibleRequest(
                 prompt: prompt,
@@ -1074,7 +1302,7 @@ actor CloudAIService {
                 ["role": "user", "content": prompt]
             ],
             "temperature": 0.7,
-            "max_tokens": 4096
+            "max_tokens": 8192  // Increased for full JSON responses
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -1120,7 +1348,7 @@ actor CloudAIService {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": 8192,  // Increased for full JSON responses
             "system": systemPrompt,
             "messages": [
                 ["role": "user", "content": prompt]
@@ -1175,7 +1403,7 @@ actor CloudAIService {
             ],
             "generationConfig": [
                 "temperature": 0.7,
-                "maxOutputTokens": 4096
+                "maxOutputTokens": 8192  // Increased for full JSON responses
             ]
         ]
 
