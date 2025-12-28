@@ -263,7 +263,9 @@ struct EpisodeDetailView: View {
 
                 // AI Analysis button (iOS 26+)
                 if #available(iOS 26.0, macOS 26.0, *) {
-                    NavigationLink(destination: EpisodeAIAnalysisView(viewModel: viewModel)) {
+                    NavigationLink(
+                        destination: EpisodeAIAnalysisView(viewModel: viewModel)
+                    ) {
                         HStack(spacing: 4) {
                             Image(systemName: "sparkles")
                                 .font(.system(size: 12))
@@ -635,15 +637,17 @@ struct EpisodeDetailView: View {
                 } else {
                     // Fallback for older iOS versions
                     VStack(spacing: 12) {
-                        Image(systemName: "cpu")
+                        Image(systemName: "apple.intelligence")
                             .font(.system(size: 48))
                             .foregroundColor(.secondary)
                         Text("Requires iOS 26+")
                             .font(.headline)
-                        Text("On-device AI keywords require iOS 26 or later with Apple Intelligence.")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
+                        Text(
+                            "On-device AI keywords require iOS 26 or later with Apple Intelligence."
+                        )
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
                     .padding()
@@ -662,7 +666,7 @@ struct EpisodeDetailView: View {
         // Header
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(systemName: "cpu")
+                Image(systemName: "apple.intelligence")
                     .foregroundColor(.blue)
                 Text("Quick Tags")
                     .font(.title2)
@@ -678,9 +682,12 @@ struct EpisodeDetailView: View {
             HStack {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange)
-                Text(viewModel.onDeviceAIAvailability.message ?? "On-device AI unavailable")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Text(
+                    viewModel.onDeviceAIAvailability.message
+                        ?? "On-device AI unavailable"
+                )
+                .font(.caption)
+                .foregroundColor(.secondary)
                 Spacer()
             }
             .padding()
@@ -757,7 +764,10 @@ struct EpisodeDetailView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(viewModel.onDeviceAIAvailability.isAvailable ? Color.blue : Color.gray)
+                .background(
+                    viewModel.onDeviceAIAvailability.isAvailable
+                        ? Color.blue : Color.gray
+                )
                 .foregroundColor(.white)
                 .cornerRadius(12)
             }
@@ -817,13 +827,16 @@ struct EpisodeDetailView: View {
 
     // MARK: - Helper Views for Keywords Tab
 
-    private func categoryBadge(_ category: String, isPrimary: Bool) -> some View {
+    private func categoryBadge(_ category: String, isPrimary: Bool) -> some View
+    {
         Text(category)
             .font(.caption)
             .fontWeight(isPrimary ? .bold : .regular)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(isPrimary ? Color.blue.opacity(0.2) : Color.gray.opacity(0.1))
+            .background(
+                isPrimary ? Color.blue.opacity(0.2) : Color.gray.opacity(0.1)
+            )
             .foregroundColor(isPrimary ? .blue : .secondary)
             .cornerRadius(8)
     }
