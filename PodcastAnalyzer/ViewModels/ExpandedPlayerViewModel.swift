@@ -8,6 +8,7 @@
 import Combine
 import SwiftUI
 
+@MainActor
 class ExpandedPlayerViewModel: ObservableObject {
   @Published var isPlaying: Bool = false
   @Published var episodeTitle: String = ""
@@ -37,8 +38,9 @@ class ExpandedPlayerViewModel: ObservableObject {
 
   private func setupUpdateTimer() {
     updateTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+      guard let self else { return }
       Task { @MainActor in
-        self?.updateState()
+        self.updateState()
       }
     }
   }
@@ -145,7 +147,7 @@ class ExpandedPlayerViewModel: ObservableObject {
 
     let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
     if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-       let rootVC = windowScene.windows.first?.rootViewController
+      let rootVC = windowScene.windows.first?.rootViewController
     {
       rootVC.present(activityVC, animated: true)
     }

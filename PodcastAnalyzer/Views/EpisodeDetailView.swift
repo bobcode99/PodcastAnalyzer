@@ -235,7 +235,7 @@ struct EpisodeDetailView: View {
                 Spacer()
             }
 
-            // Play + Download buttons (unchanged)
+            // Play + Download + AI Analysis buttons
             HStack(spacing: 8) {
                 Button(action: { viewModel.playAction() }) {
                     HStack(spacing: 4) {
@@ -260,6 +260,27 @@ struct EpisodeDetailView: View {
                 .disabled(viewModel.isPlayDisabled)
 
                 downloadButton
+
+                // AI Analysis button (iOS 26+)
+                if #available(iOS 26.0, macOS 26.0, *) {
+                    NavigationLink(
+                        destination: EpisodeAIAnalysisView(viewModel: viewModel)
+                    ) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 12))
+                            Text("AI")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.purple)
+                    .disabled(!viewModel.hasTranscript)
+                }
+
                 Spacer()
             }
 
@@ -609,15 +630,243 @@ struct EpisodeDetailView: View {
     // MARK: - Keywords Tab
     private var keywordsTab: some View {
         ScrollView {
-            VStack(spacing: 12) {
-                Image(systemName: "tag").font(.system(size: 48))
-                    .foregroundColor(.secondary)
-                Text("Keywords").font(.headline)
-                Text("Keyword extraction coming soon.")
-                    .font(.subheadline).foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
+            VStack(alignment: .leading, spacing: 16) {
+                // On-device AI availability check
+                if #available(iOS 26.0, macOS 26.0, *) {
+                    onDeviceKeywordsContent
+                } else {
+                    // Fallback for older iOS versions
+                    VStack(spacing: 12) {
+                        Image(systemName: "apple.intelligence")
+                            .font(.system(size: 48))
+                            .foregroundColor(.secondary)
+                        Text("Requires iOS 26+")
+                            .font(.headline)
+                        Text(
+                            "On-device AI keywords require iOS 26 or later with Apple Intelligence."
+                        )
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                }
             }
             .padding()
+        }
+        .onAppear {
+            viewModel.checkOnDeviceAIAvailability()
+        }
+    }
+
+    @available(iOS 26.0, macOS 26.0, *)
+    @ViewBuilder
+    private var onDeviceKeywordsContent: some View {
+        // Header
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: "apple.intelligence")
+                    .foregroundColor(.blue)
+                Text("Quick Tags")
+                    .font(.title2)
+                    .bold()
+            }
+            Text("AI-generated tags from episode metadata (on-device, private)")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+
+        // Availability banner if not available
+        if !viewModel.onDeviceAIAvailability.isAvailable {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
+                Text(
+                    viewModel.onDeviceAIAvailability.message
+                        ?? "On-device AI unavailable"
+                )
+                .font(.caption)
+                .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding()
+            .background(Color.orange.opacity(0.1))
+            .cornerRadius(8)
+        }
+
+        // Quick tags content
+        if let tags = viewModel.quickTagsCache.tags {
+            // Tags card
+            VStack(alignment: .leading, spacing: 12) {
+                // Category
+                HStack {
+                    categoryBadge(tags.primaryCategory, isPrimary: true)
+                    if let secondary = tags.secondaryCategory {
+                        categoryBadge(secondary, isPrimary: false)
+                    }
+                }
+
+                Divider()
+
+                // Tags as chips
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Tags")
+                        .font(.headline)
+                    FlowLayout(spacing: 8) {
+                        ForEach(tags.tags, id: \.self) { tag in
+                            tagChip(tag)
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Content type and difficulty
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Content Type")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(tags.contentType.capitalized)
+                            .font(.subheadline)
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("Difficulty")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        difficultyBadge(tags.difficulty)
+                    }
+                }
+
+                // Regenerate button
+                Button(action: {
+                    viewModel.quickTagsCache.tags = nil
+                    viewModel.generateQuickTags()
+                }) {
+                    Label("Regenerate", systemImage: "arrow.clockwise")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(12)
+        } else {
+            // Generate button
+            Button(action: { viewModel.generateQuickTags() }) {
+                HStack {
+                    Image(systemName: "sparkles")
+                    Text("Generate Quick Tags")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(
+                    viewModel.onDeviceAIAvailability.isAvailable
+                        ? Color.blue : Color.gray
+                )
+                .foregroundColor(.white)
+                .cornerRadius(12)
+            }
+            .disabled(!viewModel.onDeviceAIAvailability.isAvailable)
+        }
+
+        // Analysis state feedback
+        keywordsAnalysisStateView
+    }
+
+    @ViewBuilder
+    private var keywordsAnalysisStateView: some View {
+        switch viewModel.quickTagsState {
+        case .idle, .completed:
+            EmptyView()
+
+        case .analyzing(let progress, let message):
+            VStack(spacing: 12) {
+                if progress < 0 {
+                    ProgressView()
+                        .scaleEffect(1.2)
+                } else {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                }
+
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .foregroundColor(.blue)
+                    Text(message)
+                        .font(.subheadline)
+                }
+
+                if progress >= 0 {
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding()
+            .background(Color.blue.opacity(0.05))
+            .cornerRadius(12)
+
+        case .error(let message):
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.red)
+                Text(message)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+            .padding()
+            .background(Color.red.opacity(0.1))
+            .cornerRadius(8)
+        }
+    }
+
+    // MARK: - Helper Views for Keywords Tab
+
+    private func categoryBadge(_ category: String, isPrimary: Bool) -> some View
+    {
+        Text(category)
+            .font(.caption)
+            .fontWeight(isPrimary ? .bold : .regular)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                isPrimary ? Color.blue.opacity(0.2) : Color.gray.opacity(0.1)
+            )
+            .foregroundColor(isPrimary ? .blue : .secondary)
+            .cornerRadius(8)
+    }
+
+    private func tagChip(_ tag: String) -> some View {
+        Text("#\(tag)")
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.blue.opacity(0.1))
+            .foregroundColor(.blue)
+            .cornerRadius(6)
+    }
+
+    private func difficultyBadge(_ level: String) -> some View {
+        Text(level.capitalized)
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(difficultyColor(level).opacity(0.2))
+            .foregroundColor(difficultyColor(level))
+            .cornerRadius(8)
+    }
+
+    private func difficultyColor(_ level: String) -> Color {
+        switch level.lowercased() {
+        case "beginner": return .green
+        case "intermediate": return .orange
+        case "advanced": return .red
+        default: return .gray
         }
     }
 }

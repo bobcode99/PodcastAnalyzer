@@ -44,32 +44,40 @@ class HomeViewModel: ObservableObject {
     let podcastCount = self.podcastInfoModelList.count
     logger.info("Starting parallel refresh of \(podcastCount) podcast feeds")
 
+    // Extract RSS URLs and model IDs before entering TaskGroup to avoid Sendable issues
+    let modelData: [(id: UUID, rssUrl: String)] = self.podcastInfoModelList.map { ($0.id, $0.podcastInfo.rssUrl) }
+
     // Use TaskGroup to fetch all podcasts in parallel
-    await withTaskGroup(of: (PodcastInfoModel, PodcastInfo?).self) { group in
-      for model in self.podcastInfoModelList {
+    let results = await withTaskGroup(of: (UUID, PodcastInfo?).self) { group -> [(UUID, PodcastInfo?)] in
+      for (id, rssUrl) in modelData {
         group.addTask {
-          let rssUrl = model.podcastInfo.rssUrl
           do {
             let updatedPodcast = try await self.service.fetchPodcast(from: rssUrl)
-            return (model, updatedPodcast)
+            return (id, updatedPodcast)
           } catch {
-            self.logger.error("Failed to refresh \(rssUrl): \(error.localizedDescription)")
-            return (model, nil)
+            return (id, nil)
           }
         }
       }
 
-      // Collect results and update models
-      var successCount = 0
-      for await (model, updatedPodcast) in group {
-        if let podcast = updatedPodcast {
-          model.podcastInfo = podcast
-          successCount += 1
-          logger.info("Updated \(podcast.title) with \(podcast.episodes.count) episodes")
-        }
+      var collected: [(UUID, PodcastInfo?)] = []
+      for await result in group {
+        collected.append(result)
       }
-      logger.info("Successfully refreshed \(successCount)/\(podcastCount) podcasts in parallel")
+      return collected
     }
+
+    // Update models on main actor
+    var successCount = 0
+    for (id, updatedPodcast) in results {
+      if let podcast = updatedPodcast,
+         let model = self.podcastInfoModelList.first(where: { $0.id == id }) {
+        model.podcastInfo = podcast
+        successCount += 1
+        logger.info("Updated \(podcast.title) with \(podcast.episodes.count) episodes")
+      }
+    }
+    logger.info("Successfully refreshed \(successCount)/\(podcastCount) podcasts in parallel")
 
     // Save changes
     do {

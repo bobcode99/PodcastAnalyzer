@@ -7,7 +7,6 @@
 
 import FeedKit
 import Foundation
-internal import XMLKit
 
 public struct PodcastInfo: Sendable, Identifiable, Codable {
   public let id: String  // This will be the rssUrl
