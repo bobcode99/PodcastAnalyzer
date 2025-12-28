@@ -290,6 +290,8 @@ struct AISettingsView: View {
                 return $settings.selectedClaudeModel
             case .gemini:
                 return $settings.selectedGeminiModel
+            case .groq:
+                return $settings.selectedGroqModel
             case .grok:
                 return $settings.selectedGrokModel
             }
@@ -329,6 +331,7 @@ struct AISettingsView: View {
                     case .openai: currentModel = settings.selectedOpenAIModel
                     case .claude: currentModel = settings.selectedClaudeModel
                     case .gemini: currentModel = settings.selectedGeminiModel
+                    case .groq: currentModel = settings.selectedGroqModel
                     case .grok: currentModel = settings.selectedGrokModel
                     }
 
@@ -337,6 +340,7 @@ struct AISettingsView: View {
                         case .openai: settings.selectedOpenAIModel = firstModel
                         case .claude: settings.selectedClaudeModel = firstModel
                         case .gemini: settings.selectedGeminiModel = firstModel
+                        case .groq: settings.selectedGroqModel = firstModel
                         case .grok: settings.selectedGrokModel = firstModel
                         }
                     }

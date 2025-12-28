@@ -58,6 +58,7 @@ enum CloudAIProvider: String, CaseIterable, Codable {
     case openai = "OpenAI"
     case claude = "Claude"
     case gemini = "Gemini"
+    case groq = "Groq"
     case grok = "Grok"
 
     var displayName: String { rawValue }
@@ -67,6 +68,7 @@ enum CloudAIProvider: String, CaseIterable, Codable {
         case .openai: return "brain.head.profile"
         case .claude: return "sparkles"
         case .gemini: return "diamond"
+        case .groq: return "hare"          // Fast like a rabbit
         case .grok: return "bolt"
         }
     }
@@ -76,6 +78,7 @@ enum CloudAIProvider: String, CaseIterable, Codable {
         case .openai: return URL(string: "https://platform.openai.com/api-keys")
         case .claude: return URL(string: "https://console.anthropic.com/settings/keys")
         case .gemini: return URL(string: "https://aistudio.google.com/app/apikey")
+        case .groq: return URL(string: "https://console.groq.com/keys")
         case .grok: return URL(string: "https://console.x.ai/")
         }
     }
@@ -85,6 +88,7 @@ enum CloudAIProvider: String, CaseIterable, Codable {
         case .openai: return "gpt-4o-mini"
         case .claude: return "claude-sonnet-4-5-20250929"
         case .gemini: return "gemini-2.0-flash"
+        case .groq: return "llama-3.3-70b-versatile"
         case .grok: return "grok-2-1212"
         }
     }
@@ -111,6 +115,14 @@ enum CloudAIProvider: String, CaseIterable, Codable {
             "gemini-2.5-flash",      // Better quality
             "gemini-2.5-pro"         // Best quality
         ]
+        // Groq models (Dec 2025) - Ultra fast inference, free tier!
+        case .groq: return [
+            "llama-3.3-70b-versatile",   // Best quality (recommended)
+            "llama-3.1-8b-instant",      // Ultra fast, free tier
+            "llama-3.2-90b-vision-preview", // Vision capable
+            "mixtral-8x7b-32768",        // Good for long context
+            "gemma2-9b-it"               // Google's Gemma on Groq
+        ]
         // Grok models (Dec 2025)
         case .grok: return [
             "grok-2-1212",           // Stable, good quality
@@ -126,6 +138,7 @@ enum CloudAIProvider: String, CaseIterable, Codable {
         case .openai: return 128_000
         case .claude: return 200_000
         case .gemini: return 1_000_000
+        case .groq: return 128_000      // Varies by model
         case .grok: return 128_000
         }
     }
@@ -135,6 +148,7 @@ enum CloudAIProvider: String, CaseIterable, Codable {
         case .openai: return "gpt-4o-mini: $0.15/1M input tokens"
         case .claude: return "Haiku: $0.25/1M input tokens"
         case .gemini: return "Flash: Free tier available!"
+        case .groq: return "Free tier available! Ultra-fast inference"
         case .grok: return "grok-beta: $5/1M input tokens"
         }
     }
@@ -168,6 +182,10 @@ final class AISettingsManager {
         didSet { saveToKeychain(key: grokKey, for: .grok) }
     }
 
+    var groqKey: String {
+        didSet { saveToKeychain(key: groqKey, for: .groq) }
+    }
+
     var selectedOpenAIModel: String {
         didSet { saveSettings() }
     }
@@ -181,6 +199,10 @@ final class AISettingsManager {
     }
 
     var selectedGrokModel: String {
+        didSet { saveSettings() }
+    }
+
+    var selectedGroqModel: String {
         didSet { saveSettings() }
     }
 
@@ -204,6 +226,7 @@ final class AISettingsManager {
         self.selectedClaudeModel = UserDefaults.standard.string(forKey: "ai_claude_model") ?? CloudAIProvider.claude.defaultModel
         self.selectedGeminiModel = UserDefaults.standard.string(forKey: "ai_gemini_model") ?? CloudAIProvider.gemini.defaultModel
         self.selectedGrokModel = UserDefaults.standard.string(forKey: "ai_grok_model") ?? CloudAIProvider.grok.defaultModel
+        self.selectedGroqModel = UserDefaults.standard.string(forKey: "ai_groq_model") ?? CloudAIProvider.groq.defaultModel
 
         // Load analysis language setting
         if let languageString = UserDefaults.standard.string(forKey: "ai_analysis_language"),
@@ -218,6 +241,7 @@ final class AISettingsManager {
         self.claudeKey = Self.loadKeyFromKeychain(for: .claude)
         self.geminiKey = Self.loadKeyFromKeychain(for: .gemini)
         self.grokKey = Self.loadKeyFromKeychain(for: .grok)
+        self.groqKey = Self.loadKeyFromKeychain(for: .groq)
     }
 
     // MARK: - Computed Properties
@@ -231,6 +255,7 @@ final class AISettingsManager {
         case .openai: return openAIKey
         case .claude: return claudeKey
         case .gemini: return geminiKey
+        case .groq: return groqKey
         case .grok: return grokKey
         }
     }
@@ -240,6 +265,7 @@ final class AISettingsManager {
         case .openai: return selectedOpenAIModel
         case .claude: return selectedClaudeModel
         case .gemini: return selectedGeminiModel
+        case .groq: return selectedGroqModel
         case .grok: return selectedGrokModel
         }
     }
@@ -249,6 +275,7 @@ final class AISettingsManager {
         case .openai: return openAIKey
         case .claude: return claudeKey
         case .gemini: return geminiKey
+        case .groq: return groqKey
         case .grok: return grokKey
         }
     }
@@ -258,6 +285,7 @@ final class AISettingsManager {
         case .openai: openAIKey = key
         case .claude: claudeKey = key
         case .gemini: geminiKey = key
+        case .groq: groqKey = key
         case .grok: grokKey = key
         }
     }
@@ -270,6 +298,7 @@ final class AISettingsManager {
         UserDefaults.standard.set(selectedClaudeModel, forKey: "ai_claude_model")
         UserDefaults.standard.set(selectedGeminiModel, forKey: "ai_gemini_model")
         UserDefaults.standard.set(selectedGrokModel, forKey: "ai_grok_model")
+        UserDefaults.standard.set(selectedGroqModel, forKey: "ai_groq_model")
         UserDefaults.standard.set(analysisLanguage.rawValue, forKey: "ai_analysis_language")
     }
 

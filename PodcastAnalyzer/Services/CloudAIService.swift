@@ -28,6 +28,8 @@ actor CloudAIService {
             return URL(string: "https://api.anthropic.com/v1/messages")!
         case .gemini:
             return URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!
+        case .groq:
+            return URL(string: "https://api.groq.com/openai/v1/chat/completions")!
         case .grok:
             return URL(string: "https://api.x.ai/v1/chat/completions")!
         }
@@ -44,6 +46,8 @@ actor CloudAIService {
             return try await fetchClaudeModels(apiKey: apiKey)
         case .gemini:
             return try await fetchGeminiModels(apiKey: apiKey)
+        case .groq:
+            return try await fetchGroqModels(apiKey: apiKey)
         case .grok:
             return try await fetchGrokModels(apiKey: apiKey)
         }
@@ -168,6 +172,42 @@ actor CloudAIService {
         return geminiModels.isEmpty ? CloudAIProvider.gemini.availableModels : Array(geminiModels.prefix(10))
     }
 
+    private func fetchGroqModels(apiKey: String) async throws -> [String] {
+        let endpoint = URL(string: "https://api.groq.com/openai/v1/models")!
+
+        var request = URLRequest(url: endpoint)
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            // Fallback to hardcoded if API doesn't work
+            return CloudAIProvider.groq.availableModels
+        }
+
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let models = json?["data"] as? [[String: Any]] else {
+            return CloudAIProvider.groq.availableModels
+        }
+
+        let groqModels = models.compactMap { $0["id"] as? String }
+            .filter { id in
+                // Filter for chat models (llama, mixtral, gemma)
+                (id.contains("llama") || id.contains("mixtral") || id.contains("gemma"))
+                && !id.contains("guard") // Exclude guard models
+            }
+            .sorted { a, b in
+                // Sort by model size/quality
+                if a.contains("70b") && !b.contains("70b") { return true }
+                if !a.contains("70b") && b.contains("70b") { return false }
+                if a.contains("90b") && !b.contains("90b") { return true }
+                if !a.contains("90b") && b.contains("90b") { return false }
+                return a > b
+            }
+
+        return groqModels.isEmpty ? CloudAIProvider.groq.availableModels : Array(groqModels.prefix(10))
+    }
+
     private func fetchGrokModels(apiKey: String) async throws -> [String] {
         let endpoint = URL(string: "https://api.x.ai/v1/models")!
 
@@ -204,6 +244,8 @@ actor CloudAIService {
 
     // MARK: - Test Connection
 
+    /// Test connection using minimal tokens to verify API key and connectivity
+    /// Uses max_tokens: 1 with simple "ping" prompt for cost efficiency
     func testConnection() async throws -> Bool {
         let provider = settings.selectedProvider
         let apiKey = settings.currentAPIKey
@@ -212,17 +254,136 @@ actor CloudAIService {
             throw CloudAIError.noAPIKey
         }
 
-        let testPrompt = "Say 'Hello' in one word."
-
-        _ = try await sendRequest(
-            prompt: testPrompt,
-            systemPrompt: "You are a helpful assistant.",
-            provider: provider,
-            apiKey: apiKey,
-            model: settings.currentModel
-        )
+        // Use provider-specific minimal ping request
+        switch provider {
+        case .openai, .grok, .groq:
+            try await pingOpenAICompatible(provider: provider, apiKey: apiKey)
+        case .claude:
+            try await pingClaude(apiKey: apiKey)
+        case .gemini:
+            try await pingGemini(apiKey: apiKey)
+        }
 
         return true
+    }
+
+    /// Ping OpenAI-compatible APIs (OpenAI, Grok, Groq) with minimal tokens
+    private func pingOpenAICompatible(provider: CloudAIProvider, apiKey: String) async throws {
+        let endpoint = apiEndpoint(for: provider)
+
+        // Use cheapest model for each provider
+        let cheapModel: String
+        switch provider {
+        case .openai: cheapModel = "gpt-4o-mini"
+        case .grok: cheapModel = "grok-2-1212"
+        case .groq: cheapModel = "llama-3.1-8b-instant" // Free tier model
+        default: cheapModel = provider.defaultModel
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "model": cheapModel,
+            "messages": [["role": "user", "content": "ping"]],
+            "max_tokens": 1
+        ]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CloudAIError.invalidResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw CloudAIError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
+        }
+
+        // Verify response has expected structure
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard json?["choices"] != nil else {
+            throw CloudAIError.invalidResponse
+        }
+    }
+
+    /// Ping Claude API with minimal tokens
+    private func pingClaude(apiKey: String) async throws {
+        let endpoint = apiEndpoint(for: .claude)
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Use cheapest Claude model
+        let body: [String: Any] = [
+            "model": "claude-haiku-4-5-20251015",
+            "max_tokens": 1,
+            "messages": [["role": "user", "content": "ping"]]
+        ]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CloudAIError.invalidResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw CloudAIError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
+        }
+
+        // Verify response has expected structure
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard json?["content"] != nil else {
+            throw CloudAIError.invalidResponse
+        }
+    }
+
+    /// Ping Gemini API with minimal request
+    private func pingGemini(apiKey: String) async throws {
+        // Use cheapest Gemini model
+        let endpoint = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=\(apiKey)")!
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "contents": [
+                ["role": "user", "parts": [["text": "ping"]]]
+            ],
+            "generationConfig": [
+                "maxOutputTokens": 1
+            ]
+        ]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CloudAIError.invalidResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw CloudAIError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
+        }
+
+        // Verify response has expected structure
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard json?["candidates"] != nil else {
+            throw CloudAIError.invalidResponse
+        }
     }
 
     // MARK: - Streaming Transcript Analysis
@@ -598,7 +759,7 @@ actor CloudAIService {
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
         switch provider {
-        case .openai, .grok:
+        case .openai, .groq, .grok:
             return try await sendOpenAIStreamingRequest(
                 prompt: prompt,
                 systemPrompt: systemPrompt,
@@ -867,7 +1028,7 @@ actor CloudAIService {
         model: String
     ) async throws -> String {
         switch provider {
-        case .openai, .grok:
+        case .openai, .groq, .grok:
             return try await sendOpenAICompatibleRequest(
                 prompt: prompt,
                 systemPrompt: systemPrompt,
@@ -892,7 +1053,7 @@ actor CloudAIService {
         }
     }
 
-    // MARK: - OpenAI Compatible (OpenAI, Grok)
+    // MARK: - OpenAI Compatible (OpenAI, Groq, Grok)
 
     private func sendOpenAICompatibleRequest(
         prompt: String,
