@@ -79,18 +79,18 @@ final class EpisodeAIAnalysis {
     var hasHighlights: Bool { highlightsList != nil }
     var hasFullAnalysis: Bool { fullAnalysisText != nil }
 
-    // Q&A history as array
-    var qaHistory: [(question: String, answer: String, timestamp: Date)] {
+    // Q&A history as CloudQAResult array
+    var qaHistory: [CloudQAResult] {
         get {
             guard let json = qaHistoryJSON,
                   let data = json.data(using: .utf8),
                   let array = try? JSONDecoder().decode([QAEntry].self, from: data) else {
                 return []
             }
-            return array.map { ($0.question, $0.answer, $0.timestamp) }
+            return array.map { $0.toCloudQAResult() }
         }
         set {
-            let entries = newValue.map { QAEntry(question: $0.question, answer: $0.answer, timestamp: $0.timestamp) }
+            let entries = newValue.map { QAEntry(from: $0) }
             if let data = try? JSONEncoder().encode(entries),
                let json = String(data: data, encoding: .utf8) {
                 qaHistoryJSON = json
@@ -98,19 +98,66 @@ final class EpisodeAIAnalysis {
         }
     }
 
-    func addQA(question: String, answer: String) {
+    func addQA(_ result: CloudQAResult) {
         var history = qaHistory
-        history.append((question: question, answer: answer, timestamp: Date()))
+        history.append(result)
         qaHistory = history
         updatedAt = Date()
     }
 }
 
-// Helper for Q&A serialization
-private struct QAEntry: Codable {
+// Helper for Q&A serialization - includes all fields from CloudQAResult
+struct QAEntry: Codable {
     let question: String
     let answer: String
+    let confidence: String
+    let relatedTopics: [String]?
+    let sources: [String]?
+    let providerRawValue: String
+    let model: String
     let timestamp: Date
+    let jsonParseWarning: String?
+
+    init(from result: CloudQAResult) {
+        self.question = result.question
+        self.answer = result.answer
+        self.confidence = result.confidence
+        self.relatedTopics = result.relatedTopics
+        self.sources = result.sources
+        self.providerRawValue = result.provider.rawValue
+        self.model = result.model
+        self.timestamp = result.timestamp
+        self.jsonParseWarning = result.jsonParseWarning
+    }
+
+    /// Convert back to CloudQAResult
+    func toCloudQAResult() -> CloudQAResult {
+        let provider = CloudAIProvider(rawValue: providerRawValue) ?? .gemini
+        return CloudQAResult(
+            question: question,
+            answer: answer,
+            confidence: confidence,
+            relatedTopics: relatedTopics,
+            sources: sources,
+            provider: provider,
+            model: model,
+            timestamp: timestamp,
+            jsonParseWarning: jsonParseWarning
+        )
+    }
+
+    // Legacy initializer for backward compatibility with old data
+    init(question: String, answer: String, timestamp: Date) {
+        self.question = question
+        self.answer = answer
+        self.confidence = "unknown"
+        self.relatedTopics = nil
+        self.sources = nil
+        self.providerRawValue = CloudAIProvider.gemini.rawValue
+        self.model = "Unknown"
+        self.timestamp = timestamp
+        self.jsonParseWarning = nil
+    }
 }
 
 // MARK: - Episode Quick Tags (On-Device)
@@ -190,6 +237,7 @@ struct ParsedQAResponse: Codable {
     let answer: String
     let confidence: String
     let relatedTopics: [String]?
+    let sources: [String]?
 }
 
 /// Parsed full analysis response from cloud AI

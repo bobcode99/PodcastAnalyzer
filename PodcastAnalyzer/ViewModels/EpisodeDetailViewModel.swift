@@ -1130,17 +1130,13 @@ final class EpisodeDetailViewModel {
         )
 
         await MainActor.run {
-          cloudAnalysisCache.questionAnswers.append((
-            question: result.question,
-            answer: result.answer,
-            timestamp: result.timestamp
-          ))
+          cloudAnalysisCache.questionAnswers.append(result)
           cloudQuestionState = .completed
 
           // Save Q&A to SwiftData
-          saveQAToSwiftData(question: result.question, answer: result.answer)
+          saveQAToSwiftData(result)
 
-          logger.info("Cloud Q&A completed successfully")
+          logger.info("Cloud Q&A completed successfully - Provider: \(result.provider.displayName), Model: \(result.model)")
         }
       } catch {
         await MainActor.run {
@@ -1456,7 +1452,7 @@ final class EpisodeDetailViewModel {
   }
 
   /// Save Q&A to SwiftData
-  private func saveQAToSwiftData(question: String, answer: String) {
+  private func saveQAToSwiftData(_ result: CloudQAResult) {
     guard let context = modelContext else { return }
     guard let audioURL = episode.audioURL else { return }
 
@@ -1480,11 +1476,11 @@ final class EpisodeDetailViewModel {
         context.insert(model)
       }
 
-      model.addQA(question: question, answer: answer)
+      model.addQA(result)
       aiAnalysisModel = model
 
       try context.save()
-      logger.info("Q&A saved to SwiftData")
+      logger.info("Q&A saved to SwiftData - Provider: \(result.provider.displayName), Model: \(result.model)")
     } catch {
       logger.error("Failed to save Q&A: \(error.localizedDescription)")
     }

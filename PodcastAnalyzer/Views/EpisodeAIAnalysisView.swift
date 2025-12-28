@@ -285,8 +285,8 @@ struct EpisodeAIAnalysisView: View {
           ForEach(
             Array(viewModel.cloudAnalysisCache.questionAnswers.enumerated().reversed()),
             id: \.offset
-          ) { index, qa in
-            qaCard(question: qa.question, answer: qa.answer, timestamp: qa.timestamp)
+          ) { _, qa in
+            qaResultCard(qa)
           }
         }
       }
@@ -892,30 +892,183 @@ struct EpisodeAIAnalysisView: View {
     )
   }
 
-  private func qaCard(question: String, answer: String, timestamp: Date) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-      // Question
-      HStack(alignment: .top) {
-        Image(systemName: "questionmark.circle.fill")
-          .foregroundColor(.blue)
-        Text(question)
-          .font(.subheadline)
-          .fontWeight(.medium)
+  /// Beautiful Q&A result card with all parsed fields
+  private func qaResultCard(_ result: CloudQAResult) -> some View {
+    VStack(alignment: .leading, spacing: 12) {
+      // Warning if JSON parsing failed
+      if let warning = result.jsonParseWarning {
+        HStack(spacing: 8) {
+          Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundColor(.orange)
+          Text(warning)
+            .font(.caption)
+            .foregroundColor(.orange)
+        }
+        .padding(8)
+        .background(Color.orange.opacity(0.1))
+        .cornerRadius(6)
       }
 
-      // Answer
-      Text(answer)
-        .font(.body)
-        .textSelection(.enabled)
+      // Question with enhanced styling
+      HStack(alignment: .top, spacing: 10) {
+        ZStack {
+          Circle()
+            .fill(Color.blue.opacity(0.15))
+            .frame(width: 32, height: 32)
+          Image(systemName: "bubble.left.fill")
+            .font(.system(size: 14))
+            .foregroundColor(.blue)
+        }
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Question")
+            .font(.caption2)
+            .foregroundColor(.secondary)
+            .textCase(.uppercase)
+          Text(result.question)
+            .font(.subheadline)
+            .fontWeight(.medium)
+        }
+      }
 
-      // Timestamp
-      Text(timestamp.formatted(date: .abbreviated, time: .shortened))
-        .font(.caption2)
-        .foregroundColor(.secondary)
+      // Answer with enhanced styling and context menu
+      HStack(alignment: .top, spacing: 10) {
+        ZStack {
+          Circle()
+            .fill(Color.green.opacity(0.15))
+            .frame(width: 32, height: 32)
+          Image(systemName: "text.bubble.fill")
+            .font(.system(size: 14))
+            .foregroundColor(.green)
+        }
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Answer")
+            .font(.caption2)
+            .foregroundColor(.secondary)
+            .textCase(.uppercase)
+          Text(result.answer)
+            .font(.body)
+            .textSelection(.enabled)
+            .contextMenu {
+              Button {
+                UIPasteboard.general.string = result.answer
+              } label: {
+                Label("Copy Answer", systemImage: "doc.on.doc")
+              }
+
+              Button {
+                if let query = result.answer.prefix(100).addingPercentEncoding(
+                  withAllowedCharacters: .urlQueryAllowed),
+                  let url = URL(string: "https://www.google.com/search?q=\(query)")
+                {
+                  UIApplication.shared.open(url)
+                }
+              } label: {
+                Label("Search Web", systemImage: "safari")
+              }
+
+              ShareLink(item: result.answer) {
+                Label("Share", systemImage: "square.and.arrow.up")
+              }
+            }
+        }
+      }
+
+      // Confidence badge
+      if result.confidence != "unknown" {
+        HStack(spacing: 6) {
+          Image(systemName: confidenceIcon(result.confidence))
+            .foregroundColor(confidenceColor(result.confidence))
+          Text("Confidence: \(result.confidence.capitalized)")
+            .font(.caption)
+            .fontWeight(.medium)
+            .foregroundColor(confidenceColor(result.confidence))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(confidenceColor(result.confidence).opacity(0.1))
+        .cornerRadius(16)
+      }
+
+      // Related topics as chips
+      if let topics = result.relatedTopics, !topics.isEmpty {
+        VStack(alignment: .leading, spacing: 6) {
+          Text("Related Topics")
+            .font(.caption)
+            .foregroundColor(.secondary)
+
+          FlowLayout(spacing: 6) {
+            ForEach(topics, id: \.self) { topic in
+              Text(topic)
+                .font(.caption2)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.purple.opacity(0.1))
+                .foregroundColor(.purple)
+                .cornerRadius(12)
+            }
+          }
+        }
+      }
+
+      // Sources from transcript
+      if let sources = result.sources, !sources.isEmpty {
+        VStack(alignment: .leading, spacing: 6) {
+          Label("Sources from Transcript", systemImage: "quote.bubble")
+            .font(.caption)
+            .foregroundColor(.secondary)
+
+          ForEach(Array(sources.enumerated()), id: \.offset) { _, source in
+            Text("\"\(source)\"")
+              .font(.caption)
+              .italic()
+              .foregroundColor(.secondary)
+              .padding(8)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .background(Color(.systemGray5))
+              .cornerRadius(6)
+          }
+        }
+      }
+
+      Divider()
+
+      // Metadata footer
+      HStack {
+        Label(result.provider.displayName, systemImage: result.provider.iconName)
+          .font(.caption2)
+          .foregroundColor(.secondary)
+        Spacer()
+        Text(result.model)
+          .font(.caption2)
+          .foregroundColor(.secondary)
+        Text(result.timestamp.formatted(date: .abbreviated, time: .shortened))
+          .font(.caption2)
+          .foregroundColor(.secondary)
+      }
     }
     .padding()
     .background(Color(.systemGray6))
     .cornerRadius(12)
+  }
+
+  /// Get icon for confidence level
+  private func confidenceIcon(_ confidence: String) -> String {
+    switch confidence.lowercased() {
+    case "high": return "checkmark.seal.fill"
+    case "medium": return "circle.lefthalf.filled"
+    case "low": return "exclamationmark.circle"
+    default: return "questionmark.circle"
+    }
+  }
+
+  /// Get color for confidence level
+  private func confidenceColor(_ confidence: String) -> Color {
+    switch confidence.lowercased() {
+    case "high": return .green
+    case "medium": return .orange
+    case "low": return .red
+    default: return .gray
+    }
   }
 
   private func analysisStateView(for state: AnalysisState) -> some View {

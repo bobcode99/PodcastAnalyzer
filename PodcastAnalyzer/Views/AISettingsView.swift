@@ -243,13 +243,21 @@ struct AISettingsView: View {
                 }
                 .pickerStyle(.navigationLink)
 
-                // Show current language preview
+                // Show current language preview with resolved language
                 HStack {
                     Image(systemName: "info.circle")
                         .foregroundColor(.blue)
-                    Text(settings.analysisLanguage.description)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(settings.analysisLanguage.description)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        // Show resolved language
+                        Text(resolvedLanguageText)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                    }
                 }
             } header: {
                 Text("Analysis Language")
@@ -496,6 +504,20 @@ struct AISettingsView: View {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         return formatter.string(from: NSNumber(value: number)) ?? "\(number)"
+    }
+
+    /// Computed property to show the resolved language based on the current setting
+    private var resolvedLanguageText: String {
+        switch settings.analysisLanguage {
+        case .deviceLanguage:
+            let preferredLanguage = Locale.preferredLanguages.first ?? "en"
+            let languageName = Locale.current.localizedString(forLanguageCode: preferredLanguage) ?? "English"
+            return "Will respond in: \(languageName)"
+        case .english:
+            return "Will respond in: English"
+        case .matchPodcast:
+            return "Will respond in: Same as podcast language"
+        }
     }
 
     private func instructionRow(number: Int, text: String) -> some View {
