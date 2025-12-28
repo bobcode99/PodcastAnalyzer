@@ -3,25 +3,29 @@
 //  PodcastAnalyzer
 //
 //  Service for cloud-based AI analysis using user-provided API keys (BYOK)
-//  Supports OpenAI, Claude, Gemini, and Grok
+//  Supports OpenAI, Claude, Gemini, Grok, and Apple Intelligence via Shortcuts
 //
 
 import Foundation
 import os.log
-
-private let logger = Logger(subsystem: "com.podcastanalyzer", category: "CloudAIService")
+import UIKit
 
 // MARK: - Cloud AI Service
 
-actor CloudAIService {
+@MainActor
+final class CloudAIService {
     static let shared = CloudAIService()
 
     private let settings = AISettingsManager.shared
+    private let logger = Logger(subsystem: "com.podcastanalyzer", category: "CloudAIService")
 
     // MARK: - API Endpoints
 
     private func apiEndpoint(for provider: CloudAIProvider) -> URL {
         switch provider {
+        case .applePCC:
+            // Apple PCC uses Shortcuts, no API endpoint needed
+            return URL(string: "shortcuts://")!
         case .openai:
             return URL(string: "https://api.openai.com/v1/chat/completions")!
         case .claude:
@@ -40,6 +44,9 @@ actor CloudAIService {
     /// Fetch available models from the provider's API
     func fetchAvailableModels(for provider: CloudAIProvider, apiKey: String) async throws -> [String] {
         switch provider {
+        case .applePCC:
+            // Apple PCC uses Shortcuts with Apple Intelligence - no model selection needed
+            return ["Apple Intelligence"]
         case .openai:
             return try await fetchOpenAIModels(apiKey: apiKey)
         case .claude:
@@ -131,7 +138,7 @@ actor CloudAIService {
     private func fetchGeminiModels(apiKey: String) async throws -> [String] {
         let endpoint = URL(string: "https://generativelanguage.googleapis.com/v1beta/models?key=\(apiKey)")!
 
-        var request = URLRequest(url: endpoint)
+        let request = URLRequest(url: endpoint)
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -250,12 +257,20 @@ actor CloudAIService {
         let provider = settings.selectedProvider
         let apiKey = settings.currentAPIKey
 
+        // Apple PCC doesn't need an API key or connection test
+        if provider == .applePCC {
+            return true
+        }
+
         guard !apiKey.isEmpty else {
             throw CloudAIError.noAPIKey
         }
 
         // Use provider-specific minimal ping request
         switch provider {
+        case .applePCC:
+            // Already handled above
+            break
         case .openai, .grok, .groq:
             try await pingOpenAICompatible(provider: provider, apiKey: apiKey)
         case .claude:
@@ -386,6 +401,335 @@ actor CloudAIService {
         }
     }
 
+    // MARK: - Apple PCC via Shortcuts
+
+    /// Analyze transcript using Apple Intelligence via Shortcuts
+    private func analyzeWithShortcuts(
+        transcript: String,
+        episodeTitle: String,
+        podcastTitle: String,
+        analysisType: CloudAnalysisType,
+        podcastLanguage: String? = nil,
+        progressCallback: ((String, Double) -> Void)? = nil
+    ) async throws -> CloudAnalysisResult {
+        progressCallback?("Starting Shortcuts analysis...", 0.2)
+
+        // Log the language setting
+        let languageInstruction = settings.analysisLanguage.getLanguageInstruction(podcastLanguage: podcastLanguage)
+        logger.info("Shortcuts Analysis Request - Type: \(analysisType.rawValue), Language setting: \(self.settings.analysisLanguage.rawValue), Instruction: \(languageInstruction.isEmpty ? "None" : languageInstruction)")
+
+        // Build the prompt with JSON format
+        let prompt = buildShortcutsPrompt(
+            transcript: transcript,
+            episodeTitle: episodeTitle,
+            podcastTitle: podcastTitle,
+            analysisType: analysisType,
+            podcastLanguage: podcastLanguage
+        )
+
+        progressCallback?("Running shortcut...", 0.4)
+
+        let shortcutsService = ShortcutsAIService.shared
+
+        do {
+            let rawResult = try await shortcutsService.runShortcut(input: prompt, timeout: 180)
+
+            progressCallback?("Parsing response...", 0.8)
+
+            // Try to parse JSON response
+            var parsedSummary: ParsedSummaryResponse?
+            var parsedEntities: ParsedEntitiesResponse?
+            var parsedHighlights: ParsedHighlightsResponse?
+            var parsedFullAnalysis: ParsedFullAnalysisResponse?
+            var jsonParseWarning: String?
+
+            // Clean the response - remove markdown code blocks if present
+            let cleanedResult = cleanJSONResponse(rawResult)
+
+            if let data = cleanedResult.data(using: .utf8) {
+                switch analysisType {
+                case .summary:
+                    if let parsed = try? JSONDecoder().decode(ParsedSummaryResponse.self, from: data) {
+                        parsedSummary = parsed
+                    } else {
+                        jsonParseWarning = "JSON parsing failed - showing raw response"
+                    }
+                case .entities:
+                    if let parsed = try? JSONDecoder().decode(ParsedEntitiesResponse.self, from: data) {
+                        parsedEntities = parsed
+                    } else {
+                        jsonParseWarning = "JSON parsing failed - showing raw response"
+                    }
+                case .highlights:
+                    if let parsed = try? JSONDecoder().decode(ParsedHighlightsResponse.self, from: data) {
+                        parsedHighlights = parsed
+                    } else {
+                        jsonParseWarning = "JSON parsing failed - showing raw response"
+                    }
+                case .fullAnalysis:
+                    if let parsed = try? JSONDecoder().decode(ParsedFullAnalysisResponse.self, from: data) {
+                        parsedFullAnalysis = parsed
+                    } else {
+                        jsonParseWarning = "JSON parsing failed - showing raw response"
+                    }
+                }
+            }
+
+            progressCallback?("Done", 1.0)
+
+            // Format the raw response if JSON parsing failed
+            let displayContent: String
+            if jsonParseWarning != nil {
+                displayContent = formatRawResponseForDisplay(rawResult)
+            } else {
+                displayContent = rawResult
+            }
+
+            return CloudAnalysisResult(
+                type: analysisType,
+                content: displayContent,
+                parsedSummary: parsedSummary,
+                parsedEntities: parsedEntities,
+                parsedHighlights: parsedHighlights,
+                parsedFullAnalysis: parsedFullAnalysis,
+                provider: .applePCC,
+                model: "Apple Intelligence (via Shortcuts)",
+                timestamp: Date(),
+                jsonParseWarning: jsonParseWarning
+            )
+
+        } catch let error as ShortcutsError {
+            progressCallback?("Error", 1.0)
+            throw CloudAIError.apiError(statusCode: 0, message: error.localizedDescription)
+        } catch {
+            progressCallback?("Error", 1.0)
+            throw error
+        }
+    }
+
+    /// Clean JSON response by removing markdown code blocks
+    private func cleanJSONResponse(_ response: String) -> String {
+        var cleaned = response.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Remove markdown code blocks
+        if cleaned.hasPrefix("```json") {
+            cleaned = String(cleaned.dropFirst(7))
+        } else if cleaned.hasPrefix("```") {
+            cleaned = String(cleaned.dropFirst(3))
+        }
+
+        if cleaned.hasSuffix("```") {
+            cleaned = String(cleaned.dropLast(3))
+        }
+
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Format raw response for human-readable display
+    private func formatRawResponseForDisplay(_ response: String) -> String {
+        // Try to pretty print if it's JSON
+        if let data = response.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data),
+           let prettyData = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
+           let prettyString = String(data: prettyData, encoding: .utf8) {
+            return prettyString
+        }
+
+        // Otherwise return as-is
+        return response
+    }
+
+    /// Ask a question using Apple Intelligence via Shortcuts
+    private func askQuestionWithShortcuts(
+        question: String,
+        transcript: String,
+        episodeTitle: String,
+        podcastLanguage: String? = nil,
+        progressCallback: ((String, Double) -> Void)? = nil
+    ) async throws -> CloudQAResult {
+        progressCallback?("Preparing question for Shortcuts...", 0.2)
+
+        let languageInstruction = settings.analysisLanguage.getLanguageInstruction(podcastLanguage: podcastLanguage)
+        let languageLine = languageInstruction.isEmpty ? "" : "\n\nLanguage: \(languageInstruction)"
+
+        // Log the language setting
+        logger.info("Q&A Shortcuts Request - Language setting: \(self.settings.analysisLanguage.rawValue), Instruction: \(languageInstruction.isEmpty ? "None" : languageInstruction)")
+
+        let prompt = """
+        Based on this podcast transcript, please answer the following question.
+
+        Episode: \(episodeTitle)
+
+        Question: \(question)
+
+        IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
+
+        Return JSON in this exact format:
+        {
+            "answer": "Your detailed answer to the question",
+            "confidence": "high/medium/low based on how clearly the transcript addresses this",
+            "relatedTopics": ["topic1", "topic2"] or null if none,
+            "sources": ["Brief quote or reference from transcript"] or null if none
+        }\(languageLine)
+
+        Transcript:
+        \(transcript)
+        """
+
+        progressCallback?("Running shortcut...", 0.4)
+
+        let shortcutsService = ShortcutsAIService.shared
+
+        do {
+            let rawResult = try await shortcutsService.runShortcut(input: prompt, timeout: 180)
+
+            progressCallback?("Parsing response...", 0.8)
+
+            // Clean and parse the JSON response
+            let cleanedResult = cleanJSONResponse(rawResult)
+            let parsed = parseJSON(cleanedResult, as: ParsedQAResponse.self)
+
+            // Log the response
+            logger.info("Q&A Shortcuts Response - Parsed successfully: \(parsed != nil)")
+
+            var jsonParseWarning: String?
+            if parsed == nil {
+                jsonParseWarning = "JSON parsing failed - showing raw response"
+                logger.warning("Q&A Shortcuts JSON parsing failed, falling back to raw response")
+            }
+
+            progressCallback?("Done", 1.0)
+
+            return CloudQAResult(
+                question: question,
+                answer: parsed?.answer ?? formatRawResponseForDisplay(rawResult),
+                confidence: parsed?.confidence ?? "unknown",
+                relatedTopics: parsed?.relatedTopics,
+                sources: parsed?.sources,
+                provider: .applePCC,
+                model: "Apple Intelligence (via Shortcuts)",
+                timestamp: Date(),
+                jsonParseWarning: jsonParseWarning
+            )
+
+        } catch let error as ShortcutsError {
+            progressCallback?("Error", 1.0)
+            throw CloudAIError.apiError(statusCode: 0, message: error.localizedDescription)
+        } catch {
+            progressCallback?("Error", 1.0)
+            throw error
+        }
+    }
+
+    /// Build a prompt for Shortcuts analysis - matches the JSON format used by other LLMs
+    private func buildShortcutsPrompt(
+        transcript: String,
+        episodeTitle: String,
+        podcastTitle: String,
+        analysisType: CloudAnalysisType,
+        podcastLanguage: String? = nil
+    ) -> String {
+        let languageInstruction = settings.analysisLanguage.getLanguageInstruction(podcastLanguage: podcastLanguage)
+        let languageLine = languageInstruction.isEmpty ? "" : "\n\nLanguage: \(languageInstruction)"
+
+        switch analysisType {
+        case .summary:
+            return """
+            You are an expert podcast analyst. Please analyze this podcast episode.
+
+            Podcast: \(podcastTitle)
+            Episode: \(episodeTitle)
+
+            IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
+
+            Return JSON in this exact format:
+            {
+                "summary": "A 2-3 paragraph summary of the episode",
+                "mainTopics": ["topic1", "topic2", "topic3"],
+                "keyTakeaways": ["takeaway1", "takeaway2", "takeaway3"],
+                "targetAudience": "Description of who would benefit from this episode",
+                "engagementLevel": "high/medium/low"
+            }\(languageLine)
+
+            Transcript:
+            \(transcript)
+            """
+
+        case .entities:
+            return """
+            You are an expert at extracting named entities from text. Please analyze this podcast episode.
+
+            Podcast: \(podcastTitle)
+            Episode: \(episodeTitle)
+
+            IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
+
+            Return JSON in this exact format:
+            {
+                "people": ["person1", "person2"],
+                "organizations": ["org1", "org2"],
+                "products": ["product1", "product2"],
+                "locations": ["location1", "location2"],
+                "resources": ["book1", "article1"]
+            }\(languageLine)
+
+            Transcript:
+            \(transcript)
+            """
+
+        case .highlights:
+            return """
+            You are an expert at identifying key moments and highlights in podcast episodes. Please analyze this episode.
+
+            Podcast: \(podcastTitle)
+            Episode: \(episodeTitle)
+
+            IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
+
+            Return JSON in this exact format:
+            {
+                "highlights": ["highlight1", "highlight2", "highlight3"],
+                "bestQuote": "The most memorable quote from the episode",
+                "actionItems": ["action1", "action2"],
+                "controversialPoints": ["point1"],
+                "entertainingMoments": ["moment1"]
+            }\(languageLine)
+
+            Transcript:
+            \(transcript)
+            """
+
+        case .fullAnalysis:
+            return """
+            You are an expert podcast analyst. Provide a comprehensive analysis of this podcast episode.
+
+            Podcast: \(podcastTitle)
+            Episode: \(episodeTitle)
+
+            IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
+
+            Return JSON in this exact format:
+            {
+                "overview": "2-3 paragraph executive summary of the episode",
+                "mainTopics": [
+                    {
+                        "topic": "Topic Name",
+                        "summary": "Brief summary of this topic",
+                        "keyPoints": ["point 1", "point 2"]
+                    }
+                ],
+                "keyInsights": ["insight 1", "insight 2", "insight 3"],
+                "notableQuotes": ["quote 1", "quote 2"],
+                "actionableAdvice": ["advice 1", "advice 2"],
+                "conclusion": "Overall assessment and who would benefit from this episode"
+            }\(languageLine)
+
+            Transcript:
+            \(transcript)
+            """
+        }
+    }
+
     // MARK: - Streaming Transcript Analysis
 
     /// Analyze transcript with streaming response
@@ -402,11 +746,28 @@ actor CloudAIService {
         let apiKey = settings.currentAPIKey
         let model = settings.currentModel
 
+        // Handle Apple PCC via Shortcuts
+        if provider == .applePCC {
+            progressCallback?("Preparing for Shortcuts...", 0.2)
+            return try await analyzeWithShortcuts(
+                transcript: transcript,
+                episodeTitle: episodeTitle,
+                podcastTitle: podcastTitle,
+                analysisType: analysisType,
+                podcastLanguage: podcastLanguage,
+                progressCallback: progressCallback
+            )
+        }
+
         guard !apiKey.isEmpty else {
             throw CloudAIError.noAPIKey
         }
 
         progressCallback?("Preparing analysis...", 0.1)
+
+        // Log the language setting for streaming analysis
+        let languageInstruction = settings.analysisLanguage.getLanguageInstruction(podcastLanguage: podcastLanguage)
+        logger.info("Streaming Analysis Request - Provider: \(provider.displayName), Type: \(analysisType.rawValue), Language setting: \(self.settings.analysisLanguage.rawValue), Instruction: \(languageInstruction.isEmpty ? "None" : languageInstruction)")
 
         let systemPrompt = buildSystemPrompt(for: analysisType, podcastLanguage: podcastLanguage)
         let userPrompt = buildUserPrompt(
@@ -582,6 +943,17 @@ actor CloudAIService {
         let apiKey = settings.currentAPIKey
         let model = settings.currentModel
 
+        // Handle Apple PCC via Shortcuts
+        if provider == .applePCC {
+            return try await askQuestionWithShortcuts(
+                question: question,
+                transcript: transcript,
+                episodeTitle: episodeTitle,
+                podcastLanguage: podcastLanguage,
+                progressCallback: progressCallback
+            )
+        }
+
         guard !apiKey.isEmpty else {
             throw CloudAIError.noAPIKey
         }
@@ -592,19 +964,23 @@ actor CloudAIService {
         let languageInstruction = settings.analysisLanguage.getLanguageInstruction(podcastLanguage: podcastLanguage)
         let languageLine = languageInstruction.isEmpty ? "" : "\n\n\(languageInstruction)"
 
+        // Log the language setting
+        logger.info("Q&A Request - Provider: \(provider.displayName), Language setting: \(self.settings.analysisLanguage.rawValue), Instruction: \(languageInstruction.isEmpty ? "None" : languageInstruction)")
+
         let systemPrompt = """
         You are a helpful assistant that answers questions about podcast episodes.
         Base your answers ONLY on the provided transcript.
         If the answer is not in the transcript, say so clearly.
 
-        Respond in the following JSON format:
+        IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
+
+        Return JSON in this exact format:
         {
             "answer": "Your detailed answer to the question",
             "confidence": "high/medium/low based on how clearly the transcript addresses this",
-            "relatedTopics": ["topic1", "topic2"] or null if none
-        }
-
-        IMPORTANT: Return ONLY valid JSON, no additional text.\(languageLine)
+            "relatedTopics": ["topic1", "topic2"] or null if none,
+            "sources": ["Brief quote or reference from transcript"] or null if none
+        }\(languageLine)
         """
 
         let userPrompt = """
@@ -628,18 +1004,31 @@ actor CloudAIService {
 
         progressCallback?("Parsing response...", 0.9)
 
-        let parsed = parseJSON(response, as: ParsedQAResponse.self)
+        // Clean and parse the response
+        let cleanedResponse = cleanJSONResponse(response)
+        let parsed = parseJSON(cleanedResponse, as: ParsedQAResponse.self)
+
+        // Log the response
+        logger.info("Q&A Response received - Parsed successfully: \(parsed != nil)")
+
+        var jsonParseWarning: String?
+        if parsed == nil {
+            jsonParseWarning = "JSON parsing failed - showing raw response"
+            logger.warning("Q&A JSON parsing failed, falling back to raw response")
+        }
 
         progressCallback?("Done", 1.0)
 
         return CloudQAResult(
             question: question,
-            answer: parsed?.answer ?? response,
+            answer: parsed?.answer ?? formatRawResponseForDisplay(response),
             confidence: parsed?.confidence ?? "unknown",
             relatedTopics: parsed?.relatedTopics,
+            sources: parsed?.sources,
             provider: provider,
             model: model,
-            timestamp: Date()
+            timestamp: Date(),
+            jsonParseWarning: jsonParseWarning
         )
     }
 
@@ -759,6 +1148,9 @@ actor CloudAIService {
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
         switch provider {
+        case .applePCC:
+            // Apple PCC is handled via Shortcuts, not streaming API
+            throw CloudAIError.apiError(statusCode: 0, message: "Apple PCC uses Shortcuts for processing")
         case .openai, .groq, .grok:
             return try await sendOpenAIStreamingRequest(
                 prompt: prompt,
@@ -1028,6 +1420,9 @@ actor CloudAIService {
         model: String
     ) async throws -> String {
         switch provider {
+        case .applePCC:
+            // Apple PCC is handled via Shortcuts, not direct API
+            throw CloudAIError.apiError(statusCode: 0, message: "Apple PCC uses Shortcuts for processing")
         case .openai, .groq, .grok:
             return try await sendOpenAICompatibleRequest(
                 prompt: prompt,
@@ -1074,7 +1469,7 @@ actor CloudAIService {
                 ["role": "user", "content": prompt]
             ],
             "temperature": 0.7,
-            "max_tokens": 4096
+            "max_tokens": 8192  // Increased for full JSON responses
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -1120,7 +1515,7 @@ actor CloudAIService {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": 8192,  // Increased for full JSON responses
             "system": systemPrompt,
             "messages": [
                 ["role": "user", "content": prompt]
@@ -1175,7 +1570,7 @@ actor CloudAIService {
             ],
             "generationConfig": [
                 "temperature": 0.7,
-                "maxOutputTokens": 4096
+                "maxOutputTokens": 8192  // Increased for full JSON responses
             ]
         ]
 
@@ -1235,6 +1630,32 @@ struct CloudAnalysisResult {
     let provider: CloudAIProvider
     let model: String
     let timestamp: Date
+    /// Warning message when JSON parsing fails (e.g., when using Apple Intelligence via Shortcuts)
+    let jsonParseWarning: String?
+
+    init(
+        type: CloudAnalysisType,
+        content: String,
+        parsedSummary: ParsedSummaryResponse? = nil,
+        parsedEntities: ParsedEntitiesResponse? = nil,
+        parsedHighlights: ParsedHighlightsResponse? = nil,
+        parsedFullAnalysis: ParsedFullAnalysisResponse? = nil,
+        provider: CloudAIProvider,
+        model: String,
+        timestamp: Date,
+        jsonParseWarning: String? = nil
+    ) {
+        self.type = type
+        self.content = content
+        self.parsedSummary = parsedSummary
+        self.parsedEntities = parsedEntities
+        self.parsedHighlights = parsedHighlights
+        self.parsedFullAnalysis = parsedFullAnalysis
+        self.provider = provider
+        self.model = model
+        self.timestamp = timestamp
+        self.jsonParseWarning = jsonParseWarning
+    }
 }
 
 struct CloudQAResult {
@@ -1242,9 +1663,34 @@ struct CloudQAResult {
     let answer: String
     let confidence: String
     let relatedTopics: [String]?
+    let sources: [String]?
     let provider: CloudAIProvider
     let model: String
     let timestamp: Date
+    /// Warning message when JSON parsing fails
+    let jsonParseWarning: String?
+
+    init(
+        question: String,
+        answer: String,
+        confidence: String = "unknown",
+        relatedTopics: [String]? = nil,
+        sources: [String]? = nil,
+        provider: CloudAIProvider,
+        model: String,
+        timestamp: Date,
+        jsonParseWarning: String? = nil
+    ) {
+        self.question = question
+        self.answer = answer
+        self.confidence = confidence
+        self.relatedTopics = relatedTopics
+        self.sources = sources
+        self.provider = provider
+        self.model = model
+        self.timestamp = timestamp
+        self.jsonParseWarning = jsonParseWarning
+    }
 }
 
 enum CloudAIError: LocalizedError {

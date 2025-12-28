@@ -123,7 +123,7 @@ struct CachedCloudAnalysis {
     var entities: CloudAnalysisResult?
     var highlights: CloudAnalysisResult?
     var fullAnalysis: CloudAnalysisResult?
-    var questionAnswers: [(question: String, answer: String, timestamp: Date)] = []
+    var questionAnswers: [CloudQAResult] = []
 
     /// Check if a specific analysis type has been completed
     func hasResult(for type: CloudAnalysisType) -> Bool {

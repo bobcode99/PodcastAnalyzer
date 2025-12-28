@@ -55,16 +55,23 @@ enum AnalysisLanguage: String, CaseIterable, Codable {
 // MARK: - Cloud AI Provider
 
 enum CloudAIProvider: String, CaseIterable, Codable {
+    case applePCC = "Apple PCC"  // Apple Private Cloud Compute via Shortcuts
     case openai = "OpenAI"
     case claude = "Claude"
     case gemini = "Gemini"
     case groq = "Groq"
     case grok = "Grok"
 
-    var displayName: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .applePCC: return "Apple Intelligence"
+        default: return rawValue
+        }
+    }
 
     var iconName: String {
         switch self {
+        case .applePCC: return "apple.intelligence"
         case .openai: return "brain.head.profile"
         case .claude: return "sparkles"
         case .gemini: return "diamond"
@@ -75,6 +82,7 @@ enum CloudAIProvider: String, CaseIterable, Codable {
 
     var apiKeyURL: URL? {
         switch self {
+        case .applePCC: return nil  // No API key needed
         case .openai: return URL(string: "https://platform.openai.com/api-keys")
         case .claude: return URL(string: "https://console.anthropic.com/settings/keys")
         case .gemini: return URL(string: "https://aistudio.google.com/app/apikey")
@@ -83,8 +91,13 @@ enum CloudAIProvider: String, CaseIterable, Codable {
         }
     }
 
+    var requiresAPIKey: Bool {
+        self != .applePCC
+    }
+
     var defaultModel: String {
         switch self {
+        case .applePCC: return "Apple Intelligence"
         case .openai: return "gpt-4o-mini"
         case .claude: return "claude-sonnet-4-5-20250929"
         case .gemini: return "gemini-2.0-flash"
@@ -95,6 +108,8 @@ enum CloudAIProvider: String, CaseIterable, Codable {
 
     var availableModels: [String] {
         switch self {
+        // Apple Intelligence via Shortcuts
+        case .applePCC: return ["Apple Intelligence"]
         // OpenAI models (Dec 2025)
         case .openai: return [
             "gpt-4o-mini",           // Fast, cheap
@@ -135,6 +150,7 @@ enum CloudAIProvider: String, CaseIterable, Codable {
 
     var contextWindowSize: Int {
         switch self {
+        case .applePCC: return 128_000  // Apple PCC via Shortcuts - large context
         case .openai: return 128_000
         case .claude: return 200_000
         case .gemini: return 1_000_000
@@ -145,12 +161,18 @@ enum CloudAIProvider: String, CaseIterable, Codable {
 
     var pricingNote: String {
         switch self {
+        case .applePCC: return "Free! Uses Apple Intelligence via Shortcuts"
         case .openai: return "gpt-4o-mini: $0.15/1M input tokens"
         case .claude: return "Haiku: $0.25/1M input tokens"
         case .gemini: return "Flash: Free tier available!"
         case .groq: return "Free tier available! Ultra-fast inference"
         case .grok: return "grok-beta: $5/1M input tokens"
         }
+    }
+
+    /// Whether this provider uses Shortcuts for AI processing
+    var usesShortcuts: Bool {
+        self == .applePCC
     }
 }
 
@@ -247,11 +269,16 @@ final class AISettingsManager {
     // MARK: - Computed Properties
 
     var hasConfiguredProvider: Bool {
-        !currentAPIKey.isEmpty
+        // Apple PCC doesn't need an API key
+        if selectedProvider == .applePCC {
+            return true
+        }
+        return !currentAPIKey.isEmpty
     }
 
     var currentAPIKey: String {
         switch selectedProvider {
+        case .applePCC: return ""  // No API key needed
         case .openai: return openAIKey
         case .claude: return claudeKey
         case .gemini: return geminiKey
@@ -262,6 +289,7 @@ final class AISettingsManager {
 
     var currentModel: String {
         switch selectedProvider {
+        case .applePCC: return "Apple Intelligence"
         case .openai: return selectedOpenAIModel
         case .claude: return selectedClaudeModel
         case .gemini: return selectedGeminiModel
@@ -272,6 +300,7 @@ final class AISettingsManager {
 
     func apiKey(for provider: CloudAIProvider) -> String {
         switch provider {
+        case .applePCC: return ""  // No API key needed
         case .openai: return openAIKey
         case .claude: return claudeKey
         case .gemini: return geminiKey
@@ -282,6 +311,7 @@ final class AISettingsManager {
 
     func setAPIKey(_ key: String, for provider: CloudAIProvider) {
         switch provider {
+        case .applePCC: break  // No API key needed
         case .openai: openAIKey = key
         case .claude: claudeKey = key
         case .gemini: geminiKey = key
