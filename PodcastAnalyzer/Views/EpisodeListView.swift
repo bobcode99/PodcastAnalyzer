@@ -62,55 +62,55 @@ struct EpisodeListView: View {
   private func episodeListContent(viewModel: EpisodeListViewModel)
     -> some View
   {
-    ScrollView {
-      LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-        // MARK: - Header Section
+    List {
+      // MARK: - Header Section
+      Section {
         headerSection(viewModel: viewModel)
+          .listRowInsets(EdgeInsets())
+          .listRowSeparator(.hidden)
+          .listRowBackground(Color.clear)
 
         // MARK: - Filter and Sort Bar
         filterSortBar(viewModel: viewModel)
+          .listRowInsets(EdgeInsets())
+          .listRowSeparator(.hidden)
+          .listRowBackground(Color.clear)
+      }
 
-        // MARK: - Episodes List
-        Section {
-          ForEach(viewModel.filteredEpisodes) { episode in
-            EpisodeRowView(
-              episode: episode,
-              podcastTitle: viewModel.podcastInfo.title,
-              fallbackImageURL: viewModel.podcastInfo.imageURL,
-              podcastLanguage: viewModel.podcastInfo.language,
-              downloadManager: downloadManager,
-              episodeModel: viewModel.episodeModels[
-                viewModel.makeEpisodeKey(episode)
-              ],
-              onToggleStar: {
-                viewModel.toggleStar(for: episode)
-              },
-              onDownload: { viewModel.downloadEpisode(episode) },
-              onDeleteRequested: {
-                episodeToDelete = episode
-                showDeleteConfirmation = true
-              },
-              onTogglePlayed: {
-                viewModel.togglePlayed(for: episode)
-              }
-            )
-            .padding(.horizontal, 16)
-
-            Divider()
-              .padding(.leading, 108)
-          }
-        } header: {
-          Text("Episodes (\(viewModel.filteredEpisodeCount))")
-            .font(.subheadline)
-            .fontWeight(.semibold)
-            .foregroundColor(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color(uiColor: .systemBackground))
+      // MARK: - Episodes List
+      Section {
+        ForEach(viewModel.filteredEpisodes) { episode in
+          EpisodeRowView(
+            episode: episode,
+            podcastTitle: viewModel.podcastInfo.title,
+            fallbackImageURL: viewModel.podcastInfo.imageURL,
+            podcastLanguage: viewModel.podcastInfo.language,
+            downloadManager: downloadManager,
+            episodeModel: viewModel.episodeModels[
+              viewModel.makeEpisodeKey(episode)
+            ],
+            onToggleStar: {
+              viewModel.toggleStar(for: episode)
+            },
+            onDownload: { viewModel.downloadEpisode(episode) },
+            onDeleteRequested: {
+              episodeToDelete = episode
+              showDeleteConfirmation = true
+            },
+            onTogglePlayed: {
+              viewModel.togglePlayed(for: episode)
+            }
+          )
+          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         }
+      } header: {
+        Text("Episodes (\(viewModel.filteredEpisodeCount))")
+          .font(.subheadline)
+          .fontWeight(.semibold)
+          .foregroundColor(.secondary)
       }
     }
+    .listStyle(.plain)
     .navigationTitle(viewModel.podcastInfo.title)
     .iosNavigationBarTitleDisplayModeInline()
     .toolbar {
