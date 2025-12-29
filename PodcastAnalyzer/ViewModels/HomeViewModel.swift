@@ -174,6 +174,11 @@ class HomeViewModel: ObservableObject {
     subscriptionSuccess = false
   }
 
+  /// Check if a podcast is already subscribed by name
+  func isAlreadySubscribed(_ podcast: AppleRSSPodcast) -> Bool {
+    podcastInfoModelList.contains { $0.podcastInfo.title == podcast.name }
+  }
+
   // MARK: - Subscribe to Podcast
 
   func subscribeToPodcast(_ podcast: AppleRSSPodcast) {

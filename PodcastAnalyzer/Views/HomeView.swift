@@ -375,7 +375,20 @@ struct PodcastPreviewSheet: View {
           }
 
           // Subscribe Button
-          if viewModel.isSubscribing {
+          if viewModel.isAlreadySubscribed(podcast) {
+            HStack {
+              Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(.green)
+              Text("Already Subscribed")
+                .font(.headline)
+                .foregroundColor(.green)
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.green.opacity(0.15))
+            .cornerRadius(12)
+            .padding(.horizontal)
+          } else if viewModel.isSubscribing {
             ProgressView("Subscribing...")
           } else if viewModel.subscriptionError != nil {
             VStack(spacing: 8) {
