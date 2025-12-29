@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
   @StateObject private var viewModel = SettingsViewModel()
+  @StateObject private var syncManager = BackgroundSyncManager.shared
   @Environment(\.modelContext) var modelContext
   @State private var showAddFeedSheet = false
 
@@ -11,6 +12,63 @@ struct SettingsView: View {
   var body: some View {
     NavigationStack {
       List {
+        // MARK: - Sync & Notifications Section
+        Section {
+          Toggle(isOn: $syncManager.isBackgroundSyncEnabled) {
+            HStack {
+              Image(systemName: "arrow.triangle.2.circlepath")
+                .foregroundColor(.blue)
+                .frame(width: 24)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Background Sync")
+                if let lastSync = syncManager.lastSyncDate {
+                  Text("Last: \(lastSync.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                }
+              }
+            }
+          }
+
+          Toggle(isOn: $syncManager.isNotificationsEnabled) {
+            HStack {
+              Image(systemName: "bell.badge")
+                .foregroundColor(.orange)
+                .frame(width: 24)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("New Episode Notifications")
+                notificationStatusText
+              }
+            }
+          }
+          .disabled(!syncManager.isBackgroundSyncEnabled)
+
+          if syncManager.isBackgroundSyncEnabled {
+            Button(action: {
+              Task {
+                await syncManager.syncNow()
+              }
+            }) {
+              HStack {
+                Image(systemName: "arrow.clockwise")
+                  .foregroundColor(.green)
+                  .frame(width: 24)
+                Text("Sync Now")
+                Spacer()
+                if syncManager.isSyncing {
+                  ProgressView()
+                    .scaleEffect(0.8)
+                }
+              }
+            }
+            .disabled(syncManager.isSyncing)
+          }
+        } header: {
+          Text("Sync & Notifications")
+        } footer: {
+          Text("Automatically check for new episodes every 5 minutes")
+        }
+
         // MARK: - Subscriptions Section
         Section {
           Button(action: {
@@ -196,6 +254,28 @@ struct SettingsView: View {
         viewModel.loadFeeds(modelContext: modelContext)
         viewModel.checkTranscriptModelStatus()
       }
+    }
+  }
+
+  // MARK: - Notification Status Text
+
+  @ViewBuilder
+  private var notificationStatusText: some View {
+    switch syncManager.notificationPermissionStatus {
+    case .authorized:
+      Text("Enabled")
+        .font(.caption2)
+        .foregroundColor(.green)
+    case .denied:
+      Text("Denied - Enable in Settings")
+        .font(.caption2)
+        .foregroundColor(.red)
+    case .notDetermined:
+      Text("Permission required")
+        .font(.caption2)
+        .foregroundColor(.orange)
+    default:
+      EmptyView()
     }
   }
 
