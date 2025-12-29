@@ -56,9 +56,78 @@ struct Episode: Decodable, Identifiable, Sendable {
     let episodeContentType: String?
     let episodeFileExtension: String?
 }
+// MARK: - Apple RSS Top Podcasts Response Models
+
+struct AppleRSSFeedResponse: Decodable {
+    let feed: AppleRSSFeed
+}
+
+struct AppleRSSFeed: Decodable {
+    let title: String
+    let country: String
+    let updated: String
+    let results: [AppleRSSPodcast]
+}
+
+struct AppleRSSPodcast: Decodable, Identifiable {
+    let id: String
+    let artistName: String
+    let name: String
+    let artworkUrl100: String
+    let url: String  // iTunes link
+    let genres: [AppleRSSGenre]?
+    let contentAdvisoryRating: String?
+}
+
+struct AppleRSSGenre: Decodable {
+    let genreId: String
+    let name: String
+    let url: String
+}
+
 class ApplePodcastService {
 
     private let baseURL = "https://itunes.apple.com"
+    private let rssBaseURL = Constants.appleRSSBaseURL
+
+    // MARK: - Top Podcasts from Apple RSS Marketing API
+
+    /// Fetches top podcasts for a given region
+    /// - Parameters:
+    ///   - region: Country code (e.g., "us", "tw", "jp")
+    ///   - limit: Number of podcasts to fetch (max 200)
+    /// - Returns: Publisher with array of top podcasts
+    func fetchTopPodcasts(region: String = "us", limit: Int = 10) -> AnyPublisher<[AppleRSSPodcast], Error> {
+        let urlString = "\(rssBaseURL)/\(region)/podcasts/top/\(limit)/podcasts.json"
+
+        guard let url = URL(string: urlString) else {
+            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+        }
+
+        return URLSession.shared.dataTaskPublisher(for: url)
+            .map { $0.data }
+            .decode(type: AppleRSSFeedResponse.self, decoder: JSONDecoder())
+            .map { $0.feed.results }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+
+    /// Looks up a podcast's RSS feed URL from its collection ID
+    func lookupPodcast(collectionId: String) -> AnyPublisher<Podcast?, Error> {
+        let urlString = "\(baseURL)/lookup?id=\(collectionId)&entity=podcast"
+
+        guard let url = URL(string: urlString) else {
+            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+        }
+
+        return URLSession.shared.dataTaskPublisher(for: url)
+            .map { $0.data }
+            .decode(type: SearchResponse.self, decoder: JSONDecoder())
+            .map { $0.results.first }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+
     func findAppleEpisodeUrl(
         episodeTitle: String,
         podcastCollectionId: Int,

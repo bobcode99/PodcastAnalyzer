@@ -17,9 +17,12 @@ struct ContentView: View {
 
   var body: some View {
     TabView {
-
       Tab(Constants.homeString, systemImage: Constants.homeIconName) {
         HomeView()
+      }
+
+      Tab(Constants.libraryString, systemImage: Constants.libraryIconName) {
+        LibraryView()
       }
 
       Tab(Constants.settingsString, systemImage: Constants.settingsIconName) {
@@ -27,7 +30,7 @@ struct ContentView: View {
       }
 
       Tab(role: .search) {
-          PodcastSearchView()
+        PodcastSearchView()
       }
     }
     .tabViewBottomAccessory {
