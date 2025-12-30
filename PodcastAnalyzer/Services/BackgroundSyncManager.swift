@@ -140,11 +140,14 @@ class BackgroundSyncManager: ObservableObject {
     logger.info("Starting podcast sync...")
 
     let context = ModelContext(container)
-    let descriptor = FetchDescriptor<PodcastInfoModel>()
+    // Only sync subscribed podcasts (not browsed/cached ones)
+    let descriptor = FetchDescriptor<PodcastInfoModel>(
+      predicate: #Predicate { $0.isSubscribed == true }
+    )
 
     do {
       let podcasts = try context.fetch(descriptor)
-      logger.info("Found \(podcasts.count) podcasts to sync")
+      logger.info("Found \(podcasts.count) subscribed podcasts to sync")
 
       var totalNewEpisodes = 0
       var newEpisodeDetails: [(podcastTitle: String, episodeTitle: String)] = []

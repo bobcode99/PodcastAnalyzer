@@ -21,7 +21,8 @@ enum SearchTab: String, CaseIterable {
 struct PodcastSearchView: View {
     @StateObject private var viewModel = PodcastSearchViewModel()
     @Environment(\.modelContext) private var modelContext
-    @Query private var subscribedPodcasts: [PodcastInfoModel]
+    @Query(filter: #Predicate<PodcastInfoModel> { $0.isSubscribed == true })
+    private var subscribedPodcasts: [PodcastInfoModel]
 
     @State private var selectedTab: SearchTab = .applePodcasts
     @State private var searchText = ""
@@ -141,7 +142,7 @@ struct PodcastSearchView: View {
             } else {
                 List {
                     ForEach(viewModel.podcasts, id: \.collectionId) { podcast in
-                        NavigationLink(destination: BrowsePodcastView(
+                        NavigationLink(destination: EpisodeListView(
                             podcastName: podcast.collectionName,
                             podcastArtwork: podcast.artworkUrl100 ?? "",
                             artistName: podcast.artistName,

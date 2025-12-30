@@ -219,7 +219,7 @@ struct TopPodcastRow: View {
   @ObservedObject var viewModel: HomeViewModel
 
   var body: some View {
-    NavigationLink(destination: BrowsePodcastView(
+    NavigationLink(destination: EpisodeListView(
       podcastName: podcast.name,
       podcastArtwork: podcast.artworkUrl100,
       artistName: podcast.artistName,

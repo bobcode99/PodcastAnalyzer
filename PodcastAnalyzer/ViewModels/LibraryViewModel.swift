@@ -45,6 +45,9 @@ class LibraryViewModel: ObservableObject {
   private var modelContext: ModelContext?
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "LibraryViewModel")
 
+  // All podcasts (subscribed + browsed) for episode lookups
+  private var allPodcasts: [PodcastInfoModel] = []
+
   // Use Unit Separator (U+001F) as delimiter
   private static let episodeKeyDelimiter = "\u{1F}"
 
@@ -63,10 +66,29 @@ class LibraryViewModel: ObservableObject {
   // MARK: - Load All Data
 
   private func loadAll() {
+    loadAllPodcasts()
     loadPodcastFeeds()
     loadSavedEpisodes()
     loadDownloadedEpisodes()
     loadLatestEpisodes()
+  }
+
+  // MARK: - Load All Podcasts (for episode lookups)
+
+  private func loadAllPodcasts() {
+    guard let context = modelContext else { return }
+
+    // Load ALL podcasts (subscribed + browsed) for episode lookups
+    let descriptor = FetchDescriptor<PodcastInfoModel>(
+      sortBy: [SortDescriptor(\.dateAdded, order: .reverse)]
+    )
+
+    do {
+      allPodcasts = try context.fetch(descriptor)
+      logger.info("Loaded \(self.allPodcasts.count) total podcasts for episode lookups")
+    } catch {
+      logger.error("Failed to load all podcasts: \(error.localizedDescription)")
+    }
   }
 
   // MARK: - Load Podcasts
@@ -77,13 +99,15 @@ class LibraryViewModel: ObservableObject {
       return
     }
 
+    // Only load subscribed podcasts (not browsed/cached ones)
     let descriptor = FetchDescriptor<PodcastInfoModel>(
+      predicate: #Predicate { $0.isSubscribed == true },
       sortBy: [SortDescriptor(\.dateAdded, order: .reverse)]
     )
 
     do {
       podcastInfoModelList = try context.fetch(descriptor)
-      logger.info("Loaded \(self.podcastInfoModelList.count) podcast feeds from database")
+      logger.info("Loaded \(self.podcastInfoModelList.count) subscribed podcast feeds from database")
     } catch {
       self.error = "Failed to load feeds: \(error.localizedDescription)"
       logger.error("Failed to load feeds: \(error.localizedDescription)")
@@ -116,8 +140,8 @@ class LibraryViewModel: ObservableObject {
   private func loadDownloadedEpisodes() {
     var allDownloaded: [LibraryEpisode] = []
 
-    // Check each episode from subscribed podcasts for download status
-    for podcast in podcastInfoModelList {
+    // Check each episode from ALL podcasts (subscribed + browsed) for download status
+    for podcast in allPodcasts {
       let podcastInfo = podcast.podcastInfo
 
       for episode in podcastInfo.episodes {
@@ -199,8 +223,8 @@ class LibraryViewModel: ObservableObject {
     let podcastTitle = parts[0]
     let episodeTitle = parts[1]
 
-    // Find the podcast
-    guard let podcast = podcastInfoModelList.first(where: { $0.podcastInfo.title == podcastTitle }) else {
+    // Find the podcast from ALL podcasts (subscribed + browsed)
+    guard let podcast = allPodcasts.first(where: { $0.podcastInfo.title == podcastTitle }) else {
       return nil
     }
 

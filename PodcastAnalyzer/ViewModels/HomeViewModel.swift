@@ -84,13 +84,15 @@ class HomeViewModel: ObservableObject {
       return
     }
 
+    // Only load subscribed podcasts (not browsed/cached ones)
     let descriptor = FetchDescriptor<PodcastInfoModel>(
+      predicate: #Predicate { $0.isSubscribed == true },
       sortBy: [SortDescriptor(\.dateAdded, order: .reverse)]
     )
 
     do {
       podcastInfoModelList = try context.fetch(descriptor)
-      logger.info("Loaded \(self.podcastInfoModelList.count) podcast feeds")
+      logger.info("Loaded \(self.podcastInfoModelList.count) subscribed podcast feeds")
     } catch {
       logger.error("Failed to load feeds: \(error.localizedDescription)")
     }
@@ -238,8 +240,8 @@ class HomeViewModel: ObservableObject {
             return
           }
 
-          // Create new subscription
-          let model = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date())
+          // Create new subscription (explicitly set isSubscribed to true)
+          let model = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date(), isSubscribed: true)
           context.insert(model)
 
           do {
