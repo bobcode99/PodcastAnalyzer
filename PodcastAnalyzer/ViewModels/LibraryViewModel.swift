@@ -40,6 +40,15 @@ class LibraryViewModel: ObservableObject {
   @Published var isLoading = false
   @Published var error: String?
 
+  /// Podcasts sorted by most recent episode date (for Library grid)
+  var podcastsSortedByRecentUpdate: [PodcastInfoModel] {
+    podcastInfoModelList.sorted { p1, p2 in
+      let date1 = p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      let date2 = p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      return date1 > date2
+    }
+  }
+
   private let service = PodcastRssService()
   private let downloadManager = DownloadManager.shared
   private var modelContext: ModelContext?

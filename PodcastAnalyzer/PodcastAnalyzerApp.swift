@@ -76,6 +76,9 @@ struct PodcastAnalyzerApp: App {
             // Set up podcast import manager
             PodcastImportManager.shared.setModelContainer(sharedModelContainer)
 
+            // Set up notification navigation manager
+            NotificationNavigationManager.shared.setModelContainer(sharedModelContainer)
+
             // Start foreground sync if enabled
             if BackgroundSyncManager.shared.isBackgroundSyncEnabled {
               BackgroundSyncManager.shared.startForegroundSync()

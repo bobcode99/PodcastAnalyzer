@@ -92,48 +92,6 @@ struct SettingsView: View {
           Text("Add podcasts by pasting their RSS feed URL")
         }
 
-        // MARK: - Your Feeds Section
-        Section {
-          if viewModel.podcastInfoModelList.isEmpty {
-            HStack {
-              Spacer()
-              VStack(spacing: 8) {
-                Image(systemName: "antenna.radiowaves.left.and.right")
-                  .font(.system(size: 36))
-                  .foregroundColor(.secondary)
-                Text("No podcasts yet")
-                  .font(.subheadline)
-                  .foregroundColor(.secondary)
-                Text("Tap \"Add RSS Feed\" to get started")
-                  .font(.caption)
-                  .foregroundColor(.gray)
-              }
-              .padding(.vertical, 20)
-              Spacer()
-            }
-          } else {
-            ForEach(viewModel.podcastInfoModelList) { feed in
-              FeedRowView(feed: feed)
-            }
-            .onDelete { indexSet in
-              for index in indexSet {
-                let feed = viewModel.podcastInfoModelList[index]
-                viewModel.removePodcastFeed(feed, modelContext: modelContext)
-              }
-            }
-          }
-        } header: {
-          HStack {
-            Text("Your Podcasts")
-            Spacer()
-            if !viewModel.podcastInfoModelList.isEmpty {
-              Text("\(viewModel.podcastInfoModelList.count)")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            }
-          }
-        }
-
         // MARK: - Playback Section
         Section {
           Picker(selection: $viewModel.defaultPlaybackSpeed) {

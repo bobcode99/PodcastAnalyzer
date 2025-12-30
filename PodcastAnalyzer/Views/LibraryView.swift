@@ -2,37 +2,25 @@
 //  LibraryView.swift
 //  PodcastAnalyzer
 //
-//  Library tab - shows subscribed podcasts, saved, downloaded, and latest episodes
+//  Redesigned Library tab - 2x2 grid of podcasts sorted by recent update,
+//  with navigation to Saved/Downloaded sub-pages
 //
 
 import SwiftData
 import SwiftUI
 import ZMarkupParser
 
-// MARK: - Library Filter Enum
-
-enum LibraryFilter: String, CaseIterable {
-  case podcasts = "Podcasts"
-  case saved = "Saved"
-  case downloaded = "Downloaded"
-  case latest = "Latest"
-
-  var icon: String {
-    switch self {
-    case .podcasts: return "square.stack.fill"
-    case .saved: return "star.fill"
-    case .downloaded: return "arrow.down.circle.fill"
-    case .latest: return "clock.fill"
-    }
-  }
-}
-
 // MARK: - Library View
 
 struct LibraryView: View {
   @StateObject private var viewModel: LibraryViewModel
   @Environment(\.modelContext) private var modelContext
-  @State private var selectedFilter: LibraryFilter = .podcasts
+
+  // Grid layout: 2 columns
+  private let columns = [
+    GridItem(.flexible(), spacing: 12),
+    GridItem(.flexible(), spacing: 12)
+  ]
 
   init() {
     _viewModel = StateObject(wrappedValue: LibraryViewModel(modelContext: nil))
@@ -40,24 +28,18 @@ struct LibraryView: View {
 
   var body: some View {
     NavigationStack {
-      VStack(spacing: 0) {
-        // Filter chips
-        filterBar
-          .padding(.horizontal, 16)
-          .padding(.vertical, 8)
+      ScrollView {
+        VStack(spacing: 24) {
+          // Quick access cards
+          quickAccessSection
+            .padding(.horizontal, 16)
 
-        // Content based on filter
-        Group {
-          if viewModel.isLoading {
-            ProgressView()
-              .scaleEffect(1.5)
-              .frame(maxHeight: .infinity)
-          } else if let error = viewModel.error {
-            errorView(error)
-          } else {
-            contentForFilter
-          }
+          // Subscribed Podcasts Grid
+          podcastsGridSection
+            .padding(.horizontal, 16)
         }
+        .padding(.top, 8)
+        .padding(.bottom, 40)
       }
       .navigationTitle(Constants.libraryString)
       .toolbar {
@@ -76,135 +58,111 @@ struct LibraryView: View {
       .refreshable {
         await viewModel.refreshAllPodcasts()
       }
+      .overlay {
+        if viewModel.isLoading {
+          ProgressView()
+            .scaleEffect(1.5)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemBackground).opacity(0.5))
+        }
+      }
     }
     .onAppear {
       viewModel.setModelContext(modelContext)
     }
   }
 
-  // MARK: - Filter Bar
+  // MARK: - Quick Access Section
 
   @ViewBuilder
-  private var filterBar: some View {
-    ScrollView(.horizontal, showsIndicators: false) {
-      HStack(spacing: 8) {
-        ForEach(LibraryFilter.allCases, id: \.self) { filter in
-          FilterChip(
-            title: filter.rawValue,
-            icon: filter.icon,
-            isSelected: selectedFilter == filter
-          ) {
-            withAnimation(.easeInOut(duration: 0.2)) {
-              selectedFilter = filter
+  private var quickAccessSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      // Row of quick access cards
+      HStack(spacing: 12) {
+        // Saved (Starred) card
+        NavigationLink(destination: SavedEpisodesView(viewModel: viewModel)) {
+          QuickAccessCard(
+            icon: "star.fill",
+            iconColor: .yellow,
+            title: "Saved",
+            count: viewModel.savedEpisodes.count
+          )
+        }
+        .buttonStyle(.plain)
+
+        // Downloaded card
+        NavigationLink(destination: DownloadedEpisodesView(viewModel: viewModel)) {
+          QuickAccessCard(
+            icon: "arrow.down.circle.fill",
+            iconColor: .green,
+            title: "Downloaded",
+            count: viewModel.downloadedEpisodes.count
+          )
+        }
+        .buttonStyle(.plain)
+      }
+
+      // Latest episodes row
+      NavigationLink(destination: LatestEpisodesView(viewModel: viewModel)) {
+        HStack {
+          HStack(spacing: 8) {
+            Image(systemName: "clock.fill")
+              .font(.system(size: 16))
+              .foregroundColor(.blue)
+            Text("Latest Episodes")
+              .font(.subheadline)
+              .fontWeight(.medium)
+              .foregroundColor(.primary)
+          }
+
+          Spacer()
+
+          HStack(spacing: 4) {
+            Text("\(viewModel.latestEpisodes.count)")
+              .font(.caption)
+              .foregroundColor(.secondary)
+            Image(systemName: "chevron.right")
+              .font(.caption)
+              .foregroundColor(.secondary)
+          }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+      }
+      .buttonStyle(.plain)
+    }
+  }
+
+  // MARK: - Podcasts Grid Section
+
+  @ViewBuilder
+  private var podcastsGridSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
+        Text("Your Podcasts")
+          .font(.headline)
+
+        Spacer()
+
+        Text("\(viewModel.podcastsSortedByRecentUpdate.count)")
+          .font(.subheadline)
+          .foregroundColor(.secondary)
+      }
+
+      if viewModel.podcastsSortedByRecentUpdate.isEmpty {
+        emptyPodcastsView
+      } else {
+        LazyVGrid(columns: columns, spacing: 16) {
+          ForEach(viewModel.podcastsSortedByRecentUpdate) { podcast in
+            NavigationLink(destination: EpisodeListView(podcastModel: podcast)) {
+              PodcastGridCell(podcast: podcast)
             }
+            .buttonStyle(.plain)
           }
         }
       }
-    }
-  }
-
-  // MARK: - Content Views
-
-  @ViewBuilder
-  private var contentForFilter: some View {
-    switch selectedFilter {
-    case .podcasts:
-      podcastsListView
-    case .saved:
-      savedEpisodesView
-    case .downloaded:
-      downloadedEpisodesView
-    case .latest:
-      latestEpisodesView
-    }
-  }
-
-  @ViewBuilder
-  private var podcastsListView: some View {
-    if viewModel.podcastInfoModelList.isEmpty {
-      emptyPodcastsView
-    } else {
-      List(viewModel.podcastInfoModelList) { model in
-        NavigationLink(destination: EpisodeListView(podcastModel: model)) {
-          LibraryPodcastRowView(podcast: model.podcastInfo)
-        }
-      }
-      .listStyle(.plain)
-    }
-  }
-
-  @ViewBuilder
-  private var savedEpisodesView: some View {
-    if viewModel.savedEpisodes.isEmpty {
-      emptyStateView(
-        icon: "star",
-        title: "No Saved Episodes",
-        message: "Star episodes to save them here"
-      )
-    } else {
-      List(viewModel.savedEpisodes) { episode in
-        NavigationLink(
-          destination: EpisodeDetailView(
-            episode: episode.episodeInfo,
-            podcastTitle: episode.podcastTitle,
-            fallbackImageURL: episode.imageURL,
-            podcastLanguage: episode.language
-          )
-        ) {
-          LibraryEpisodeRowView(episode: episode)
-        }
-      }
-      .listStyle(.plain)
-    }
-  }
-
-  @ViewBuilder
-  private var downloadedEpisodesView: some View {
-    if viewModel.downloadedEpisodes.isEmpty {
-      emptyStateView(
-        icon: "arrow.down.circle",
-        title: "No Downloads",
-        message: "Downloaded episodes will appear here"
-      )
-    } else {
-      List(viewModel.downloadedEpisodes) { episode in
-        NavigationLink(
-          destination: EpisodeDetailView(
-            episode: episode.episodeInfo,
-            podcastTitle: episode.podcastTitle,
-            fallbackImageURL: episode.imageURL,
-            podcastLanguage: episode.language
-          )
-        ) {
-          LibraryEpisodeRowView(episode: episode)
-        }
-      }
-      .listStyle(.plain)
-    }
-  }
-
-  @ViewBuilder
-  private var latestEpisodesView: some View {
-    if viewModel.latestEpisodes.isEmpty {
-      emptyStateView(
-        icon: "clock",
-        title: "No Episodes",
-        message: "Subscribe to podcasts to see latest episodes"
-      )
-    } else {
-      List(viewModel.latestEpisodes) { episode in
-        NavigationLink(
-          destination: EpisodeDetailView(
-            episode: episode.episodeInfo,
-            podcastTitle: episode.podcastTitle,
-            fallbackImageURL: episode.imageURL,
-            podcastLanguage: episode.language
-          )
-        ) {
-          LibraryEpisodeRowView(episode: episode)
-        }
-      }
-      .listStyle(.plain)
     }
   }
 
@@ -212,127 +170,253 @@ struct LibraryView: View {
   private var emptyPodcastsView: some View {
     VStack(spacing: 12) {
       Image(systemName: "square.stack.3d.up")
-        .font(.system(size: 50))
-        .foregroundColor(.gray)
+        .font(.system(size: 40))
+        .foregroundColor(.secondary)
       Text("No Subscriptions")
         .font(.headline)
       Text("Search and subscribe to podcasts to build your library")
         .font(.caption)
-        .foregroundColor(.gray)
+        .foregroundColor(.secondary)
         .multilineTextAlignment(.center)
     }
-    .padding()
-    .frame(maxHeight: .infinity)
-  }
-
-  @ViewBuilder
-  private func emptyStateView(icon: String, title: String, message: String) -> some View {
-    VStack(spacing: 12) {
-      Image(systemName: icon)
-        .font(.system(size: 50))
-        .foregroundColor(.gray)
-      Text(title)
-        .font(.headline)
-      Text(message)
-        .font(.caption)
-        .foregroundColor(.gray)
-        .multilineTextAlignment(.center)
-    }
-    .padding()
-    .frame(maxHeight: .infinity)
-  }
-
-  @ViewBuilder
-  private func errorView(_ error: String) -> some View {
-    VStack {
-      Image(systemName: "exclamationmark.circle")
-        .font(.largeTitle)
-        .foregroundColor(.red)
-      Text("Error")
-        .font(.headline)
-      Text(error)
-        .font(.caption)
-        .foregroundColor(.gray)
-    }
-    .frame(maxHeight: .infinity)
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 40)
   }
 }
 
-// MARK: - Library Podcast Row View
+// MARK: - Quick Access Card
 
-struct LibraryPodcastRowView: View {
-  let podcast: PodcastInfo
-  @State private var descriptionView: AnyView?
+struct QuickAccessCard: View {
+  let icon: String
+  let iconColor: Color
+  let title: String
+  let count: Int
 
   var body: some View {
-    HStack(spacing: 12) {
-      // Podcast artwork
-      if let url = URL(string: podcast.imageURL) {
-        AsyncImage(url: url) { phase in
-          if let image = phase.image {
-            image.resizable().scaledToFill()
-          } else if phase.error != nil {
-            Color.gray
-          } else {
-            ProgressView()
-          }
-        }
-        .frame(width: 60, height: 60)
-        .cornerRadius(8)
-        .clipped()
-      } else {
-        Color.gray
-          .frame(width: 60, height: 60)
-          .cornerRadius(8)
+    VStack(alignment: .leading, spacing: 8) {
+      HStack {
+        Image(systemName: icon)
+          .font(.system(size: 20))
+          .foregroundColor(iconColor)
+
+        Spacer()
+
+        Image(systemName: "chevron.right")
+          .font(.caption)
+          .foregroundColor(.secondary)
       }
 
-      VStack(alignment: .leading, spacing: 4) {
-        Text(podcast.title)
-          .font(.headline)
-          .lineLimit(1)
+      Spacer()
 
-        if let view = descriptionView {
-          view
-            .lineLimit(2)
-        } else if let description = podcast.podcastInfoDescription {
-          Text(description.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression))
-            .font(.caption)
-            .foregroundColor(.gray)
-            .lineLimit(2)
-        }
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+          .font(.subheadline)
+          .fontWeight(.semibold)
+          .foregroundColor(.primary)
 
-        Text("\(podcast.episodes.count) episodes")
-          .font(.caption2)
-          .foregroundColor(.blue)
+        Text("\(count) episodes")
+          .font(.caption)
+          .foregroundColor(.secondary)
       }
     }
-    .padding(.vertical, 4)
-    .onAppear {
-      parseDescription()
-    }
+    .padding(12)
+    .frame(maxWidth: .infinity, minHeight: 90)
+    .background(Color(.systemGray6))
+    .cornerRadius(12)
+  }
+}
+
+// MARK: - Podcast Grid Cell
+
+struct PodcastGridCell: View {
+  let podcast: PodcastInfoModel
+
+  private var latestEpisodeDate: String? {
+    guard let date = podcast.podcastInfo.episodes.first?.pubDate else { return nil }
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .abbreviated
+    return formatter.localizedString(for: date, relativeTo: Date())
   }
 
-  private func parseDescription() {
-    guard let html = podcast.podcastInfoDescription, !html.isEmpty else { return }
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      // Artwork
+      if let url = URL(string: podcast.podcastInfo.imageURL) {
+        AsyncImage(url: url) { phase in
+          switch phase {
+          case .success(let image):
+            image.resizable().aspectRatio(contentMode: .fill)
+          case .failure:
+            Color.gray.opacity(0.3)
+          case .empty:
+            Color.gray.opacity(0.2)
+              .overlay(ProgressView().scaleEffect(0.5))
+          @unknown default:
+            Color.gray.opacity(0.3)
+          }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(1, contentMode: .fit)
+        .cornerRadius(10)
+        .clipped()
+      } else {
+        Color.gray.opacity(0.3)
+          .aspectRatio(1, contentMode: .fit)
+          .cornerRadius(10)
+      }
 
-    let rootStyle = MarkupStyle(
-      font: MarkupStyleFont(size: 12),
-      foregroundColor: MarkupStyleColor(color: UIColor.secondaryLabel)
-    )
+      // Podcast title
+      Text(podcast.podcastInfo.title)
+        .font(.caption)
+        .fontWeight(.medium)
+        .lineLimit(2)
+        .foregroundColor(.primary)
 
-    let parser = ZHTMLParserBuilder.initWithDefault()
-      .set(rootStyle: rootStyle)
-      .build()
-
-    Task {
-      let attributedString = parser.render(html)
-
-      await MainActor.run {
-        descriptionView = AnyView(
-          HTMLTextView(attributedString: attributedString)
-        )
+      // Latest episode date
+      if let dateStr = latestEpisodeDate {
+        Text(dateStr)
+          .font(.caption2)
+          .foregroundColor(.secondary)
       }
     }
+  }
+}
+
+// MARK: - Saved Episodes View (Sub-page)
+
+struct SavedEpisodesView: View {
+  @ObservedObject var viewModel: LibraryViewModel
+
+  var body: some View {
+    Group {
+      if viewModel.savedEpisodes.isEmpty {
+        emptyStateView
+      } else {
+        List(viewModel.savedEpisodes) { episode in
+          NavigationLink(
+            destination: EpisodeDetailView(
+              episode: episode.episodeInfo,
+              podcastTitle: episode.podcastTitle,
+              fallbackImageURL: episode.imageURL,
+              podcastLanguage: episode.language
+            )
+          ) {
+            LibraryEpisodeRowView(episode: episode)
+          }
+        }
+        .listStyle(.plain)
+      }
+    }
+    .navigationTitle("Saved")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+
+  private var emptyStateView: some View {
+    VStack(spacing: 16) {
+      Image(systemName: "star")
+        .font(.system(size: 50))
+        .foregroundColor(.secondary)
+      Text("No Saved Episodes")
+        .font(.headline)
+      Text("Star episodes to save them here for later")
+        .font(.subheadline)
+        .foregroundColor(.secondary)
+        .multilineTextAlignment(.center)
+    }
+    .padding()
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+}
+
+// MARK: - Downloaded Episodes View (Sub-page)
+
+struct DownloadedEpisodesView: View {
+  @ObservedObject var viewModel: LibraryViewModel
+
+  var body: some View {
+    Group {
+      if viewModel.downloadedEpisodes.isEmpty {
+        emptyStateView
+      } else {
+        List(viewModel.downloadedEpisodes) { episode in
+          NavigationLink(
+            destination: EpisodeDetailView(
+              episode: episode.episodeInfo,
+              podcastTitle: episode.podcastTitle,
+              fallbackImageURL: episode.imageURL,
+              podcastLanguage: episode.language
+            )
+          ) {
+            LibraryEpisodeRowView(episode: episode)
+          }
+        }
+        .listStyle(.plain)
+      }
+    }
+    .navigationTitle("Downloaded")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+
+  private var emptyStateView: some View {
+    VStack(spacing: 16) {
+      Image(systemName: "arrow.down.circle")
+        .font(.system(size: 50))
+        .foregroundColor(.secondary)
+      Text("No Downloads")
+        .font(.headline)
+      Text("Downloaded episodes will appear here for offline listening")
+        .font(.subheadline)
+        .foregroundColor(.secondary)
+        .multilineTextAlignment(.center)
+    }
+    .padding()
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+}
+
+// MARK: - Latest Episodes View (Sub-page)
+
+struct LatestEpisodesView: View {
+  @ObservedObject var viewModel: LibraryViewModel
+
+  var body: some View {
+    Group {
+      if viewModel.latestEpisodes.isEmpty {
+        emptyStateView
+      } else {
+        List(viewModel.latestEpisodes) { episode in
+          NavigationLink(
+            destination: EpisodeDetailView(
+              episode: episode.episodeInfo,
+              podcastTitle: episode.podcastTitle,
+              fallbackImageURL: episode.imageURL,
+              podcastLanguage: episode.language
+            )
+          ) {
+            LibraryEpisodeRowView(episode: episode)
+          }
+        }
+        .listStyle(.plain)
+      }
+    }
+    .navigationTitle("Latest Episodes")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+
+  private var emptyStateView: some View {
+    VStack(spacing: 16) {
+      Image(systemName: "clock")
+        .font(.system(size: 50))
+        .foregroundColor(.secondary)
+      Text("No Episodes")
+        .font(.headline)
+      Text("Subscribe to podcasts to see latest episodes")
+        .font(.subheadline)
+        .foregroundColor(.secondary)
+        .multilineTextAlignment(.center)
+    }
+    .padding()
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 }
 
@@ -340,6 +424,8 @@ struct LibraryPodcastRowView: View {
 
 struct LibraryEpisodeRowView: View {
   let episode: LibraryEpisode
+  @Environment(\.modelContext) private var modelContext
+  @State private var hasAIAnalysis: Bool = false
 
   private var plainDescription: String? {
     guard let desc = episode.episodeInfo.podcastEpisodeDescription else { return nil }
@@ -350,6 +436,19 @@ struct LibraryEpisodeRowView: View {
     return stripped.isEmpty ? nil : stripped
   }
 
+  private func checkAIAnalysis() {
+    guard let audioURL = episode.episodeInfo.audioURL else { return }
+    let descriptor = FetchDescriptor<EpisodeAIAnalysis>(
+      predicate: #Predicate { $0.episodeAudioURL == audioURL }
+    )
+    if let model = try? modelContext.fetch(descriptor).first {
+      hasAIAnalysis =
+        model.hasFullAnalysis || model.hasSummary || model.hasEntities
+        || model.hasHighlights
+        || (model.qaHistoryJSON != nil && !model.qaHistoryJSON!.isEmpty)
+    }
+  }
+
   var body: some View {
     HStack(spacing: 12) {
       // Episode artwork
@@ -358,14 +457,14 @@ struct LibraryEpisodeRowView: View {
           if let image = phase.image {
             image.resizable().scaledToFill()
           } else {
-            Color.gray
+            Color.gray.opacity(0.3)
           }
         }
         .frame(width: 60, height: 60)
         .cornerRadius(8)
         .clipped()
       } else {
-        Color.gray
+        Color.gray.opacity(0.3)
           .frame(width: 60, height: 60)
           .cornerRadius(8)
       }
@@ -382,8 +481,8 @@ struct LibraryEpisodeRowView: View {
           .fontWeight(.medium)
           .lineLimit(2)
 
-        // Date and duration
-        HStack(spacing: 8) {
+        // Date, duration, and status indicators
+        HStack(spacing: 6) {
           if let date = episode.episodeInfo.pubDate {
             Text(date.formatted(date: .abbreviated, time: .omitted))
               .font(.caption2)
@@ -408,10 +507,23 @@ struct LibraryEpisodeRowView: View {
               .font(.system(size: 10))
               .foregroundColor(.yellow)
           }
+
+          if hasAIAnalysis {
+            Image(systemName: "sparkles")
+              .font(.system(size: 10))
+              .foregroundColor(.orange)
+          }
+
+          if episode.isCompleted {
+            Image(systemName: "checkmark.circle.fill")
+              .font(.system(size: 10))
+              .foregroundColor(.green)
+          }
         }
       }
     }
     .padding(.vertical, 4)
+    .onAppear { checkAIAnalysis() }
   }
 }
 

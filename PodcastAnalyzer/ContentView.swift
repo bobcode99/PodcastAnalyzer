@@ -11,6 +11,15 @@ import SwiftUI
 struct ContentView: View {
   @State private var audioManager = EnhancedAudioManager.shared
   @ObservedObject private var importManager = PodcastImportManager.shared
+  @ObservedObject private var notificationManager = NotificationNavigationManager.shared
+  @Environment(\.modelContext) private var modelContext
+
+  // Navigation state for notification-triggered navigation
+  @State private var notificationEpisode: PodcastEpisodeInfo?
+  @State private var notificationPodcastTitle: String = ""
+  @State private var notificationImageURL: String?
+  @State private var notificationLanguage: String = "en"
+  @State private var showNotificationEpisode: Bool = false
 
   private var showMiniPlayer: Bool {
     audioManager.currentEpisode != nil
@@ -19,7 +28,19 @@ struct ContentView: View {
   var body: some View {
     TabView {
       Tab(Constants.homeString, systemImage: Constants.homeIconName) {
-        HomeView()
+        NavigationStack {
+          HomeView()
+            .navigationDestination(isPresented: $showNotificationEpisode) {
+              if let episode = notificationEpisode {
+                EpisodeDetailView(
+                  episode: episode,
+                  podcastTitle: notificationPodcastTitle,
+                  fallbackImageURL: notificationImageURL,
+                  podcastLanguage: notificationLanguage
+                )
+              }
+            }
+        }
       }
 
       Tab(Constants.libraryString, systemImage: Constants.libraryIconName) {
@@ -47,6 +68,43 @@ struct ContentView: View {
     .sheet(isPresented: $importManager.showImportSheet) {
       PodcastImportSheet()
     }
+    .onChange(of: notificationManager.shouldNavigate) { _, shouldNavigate in
+      if shouldNavigate, let target = notificationManager.navigationTarget {
+        handleNotificationNavigation(target: target)
+      }
+    }
+  }
+
+  private func handleNotificationNavigation(target: NotificationNavigationTarget) {
+    // Try to find the episode from the database
+    if let result = notificationManager.findEpisode(
+      podcastTitle: target.podcastTitle,
+      episodeTitle: target.episodeTitle
+    ) {
+      notificationEpisode = result.episode
+      notificationPodcastTitle = target.podcastTitle
+      notificationImageURL = result.imageURL
+      notificationLanguage = result.language
+      showNotificationEpisode = true
+    } else {
+      // Fallback: create a minimal episode info from notification data
+      notificationEpisode = PodcastEpisodeInfo(
+        title: target.episodeTitle,
+        podcastEpisodeDescription: nil,
+        pubDate: nil,
+        audioURL: target.audioURL.isEmpty ? nil : target.audioURL,
+        imageURL: target.imageURL.isEmpty ? nil : target.imageURL,
+        duration: nil,
+        guid: nil
+      )
+      notificationPodcastTitle = target.podcastTitle
+      notificationImageURL = target.imageURL.isEmpty ? nil : target.imageURL
+      notificationLanguage = target.language
+      showNotificationEpisode = true
+    }
+
+    // Clear the navigation state
+    notificationManager.clearNavigation()
   }
 }
 

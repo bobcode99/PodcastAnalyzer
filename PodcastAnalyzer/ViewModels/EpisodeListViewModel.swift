@@ -68,6 +68,12 @@ final class EpisodeListViewModel {
         guard let model = episodeModels[key] else { return false }
         return model.isCompleted
       }
+    case .starred:
+      episodes = episodes.filter { episode in
+        let key = makeEpisodeKey(episode)
+        guard let model = episodeModels[key] else { return false }
+        return model.isStarred
+      }
     case .downloaded:
       episodes = episodes.filter { episode in
         let state = downloadManager.getDownloadState(

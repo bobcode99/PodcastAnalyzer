@@ -228,7 +228,11 @@ struct ExpandedPlayerView: View {
 
   // MARK: - Artwork Section
   private var artworkSection: some View {
-    Group {
+    let baseSize: CGFloat = 280
+    let playingScale: CGFloat = 1.08
+    let isPlaying = viewModel.isPlaying
+
+    return Group {
       if let imageURL = viewModel.imageURL {
         AsyncImage(url: imageURL) { phase in
           if let image = phase.image {
@@ -239,13 +243,17 @@ struct ExpandedPlayerView: View {
             artworkPlaceholder
           }
         }
-        .frame(width: 280, height: 280)
+        .frame(width: baseSize, height: baseSize)
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
+        .shadow(color: .black.opacity(isPlaying ? 0.4 : 0.25), radius: isPlaying ? 25 : 15, x: 0, y: isPlaying ? 12 : 8)
+        .scaleEffect(isPlaying ? playingScale : 1.0)
+        .animation(.spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0), value: isPlaying)
       } else {
         artworkPlaceholder
-          .frame(width: 280, height: 280)
+          .frame(width: baseSize, height: baseSize)
           .clipShape(RoundedRectangle(cornerRadius: 16))
+          .scaleEffect(isPlaying ? playingScale : 1.0)
+          .animation(.spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0), value: isPlaying)
       }
     }
   }
@@ -630,7 +638,7 @@ struct QueueOverlay: View {
   }
 }
 
-// MARK: - Speed Picker Overlay (Apple Podcasts Style)
+// MARK: - Speed Picker Overlay (Apple Podcasts Style with Slider)
 
 struct SpeedPickerOverlay: View {
   let currentSpeed: Float
@@ -640,6 +648,21 @@ struct SpeedPickerOverlay: View {
   let onDismiss: () -> Void
 
   @State private var showAllSpeeds = false
+  @State private var sliderValue: Float
+  @State private var lastHapticSpeed: Float = 0
+
+  // Speed stops for haptic feedback
+  private let speedStops: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+
+  init(currentSpeed: Float, quickSpeeds: [Float], allSpeeds: [Float], onSelectSpeed: @escaping (Float) -> Void, onDismiss: @escaping () -> Void) {
+    self.currentSpeed = currentSpeed
+    self.quickSpeeds = quickSpeeds
+    self.allSpeeds = allSpeeds
+    self.onSelectSpeed = onSelectSpeed
+    self.onDismiss = onDismiss
+    self._sliderValue = State(initialValue: currentSpeed)
+    self._lastHapticSpeed = State(initialValue: currentSpeed)
+  }
 
   var body: some View {
     ZStack {
@@ -659,10 +682,75 @@ struct SpeedPickerOverlay: View {
             .fontWeight(.medium)
             .foregroundColor(.primary)
           Spacer()
+
+          // Current speed display
+          Text(formatSpeed(sliderValue))
+            .font(.title2)
+            .fontWeight(.bold)
+            .foregroundColor(.blue)
+            .monospacedDigit()
         }
         .padding(.horizontal, 16)
         .padding(.top, 16)
         .padding(.bottom, 12)
+
+        Divider()
+          .padding(.horizontal, 12)
+
+        // Speed slider
+        VStack(spacing: 8) {
+          Slider(
+            value: $sliderValue,
+            in: 0.5...2.0,
+            step: 0.05
+          ) {
+            Text("Speed")
+          } minimumValueLabel: {
+            Text("0.5x")
+              .font(.caption2)
+              .foregroundColor(.secondary)
+          } maximumValueLabel: {
+            Text("2x")
+              .font(.caption2)
+              .foregroundColor(.secondary)
+          }
+          .tint(.blue)
+          .onChange(of: sliderValue) { oldValue, newValue in
+            // Check if we crossed a speed stop for haptic feedback
+            for stop in speedStops {
+              let crossedForward = oldValue < stop && newValue >= stop
+              let crossedBackward = oldValue > stop && newValue <= stop
+              if crossedForward || crossedBackward {
+                triggerHaptic()
+                break
+              }
+            }
+          }
+
+          // Speed stop markers
+          HStack {
+            ForEach(speedStops, id: \.self) { stop in
+              if stop == speedStops.first {
+                Circle()
+                  .fill(sliderValue >= stop ? Color.blue : Color.gray.opacity(0.3))
+                  .frame(width: 6, height: 6)
+              } else if stop == speedStops.last {
+                Spacer()
+                Circle()
+                  .fill(sliderValue >= stop ? Color.blue : Color.gray.opacity(0.3))
+                  .frame(width: 6, height: 6)
+              } else {
+                Spacer()
+                Circle()
+                  .fill(sliderValue >= stop ? Color.blue : Color.gray.opacity(0.3))
+                  .frame(width: 6, height: 6)
+              }
+            }
+          }
+          .padding(.horizontal, 4)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
 
         Divider()
           .padding(.horizontal, 12)
@@ -673,30 +761,52 @@ struct SpeedPickerOverlay: View {
             ForEach(showAllSpeeds ? allSpeeds : quickSpeeds, id: \.self) { speed in
               SpeedButton(
                 speed: speed,
-                isSelected: abs(currentSpeed - speed) < 0.01,
-                onTap: { onSelectSpeed(speed) }
+                isSelected: abs(sliderValue - speed) < 0.03,
+                onTap: {
+                  withAnimation(.easeInOut(duration: 0.2)) {
+                    sliderValue = speed
+                  }
+                  triggerHaptic()
+                  onSelectSpeed(speed)
+                }
               )
             }
           }
           .padding(.horizontal, 16)
-          .padding(.vertical, 16)
+          .padding(.vertical, 12)
         }
 
-        // "More Speeds" hint
-        Button(action: {
-          withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-            showAllSpeeds.toggle()
+        // "More Speeds" hint and Apply button
+        HStack {
+          Button(action: {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+              showAllSpeeds.toggle()
+            }
+          }) {
+            HStack(spacing: 4) {
+              Text(showAllSpeeds ? "Show Less" : "More Speeds")
+                .font(.caption)
+                .foregroundColor(.secondary)
+              Image(systemName: showAllSpeeds ? "chevron.up" : "chevron.down")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            }
           }
-        }) {
-          HStack(spacing: 4) {
-            Text(showAllSpeeds ? "Show Less" : "More Speeds")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            Image(systemName: showAllSpeeds ? "chevron.up" : "chevron.down")
-              .font(.caption2)
-              .foregroundColor(.secondary)
+
+          Spacer()
+
+          Button("Apply") {
+            onSelectSpeed(sliderValue)
           }
+          .font(.subheadline)
+          .fontWeight(.semibold)
+          .foregroundColor(.white)
+          .padding(.horizontal, 20)
+          .padding(.vertical, 8)
+          .background(Color.blue)
+          .cornerRadius(20)
         }
+        .padding(.horizontal, 16)
         .padding(.bottom, 16)
       }
       .background(
@@ -706,6 +816,21 @@ struct SpeedPickerOverlay: View {
       )
       .padding(.horizontal, 24)
     }
+  }
+
+  private func formatSpeed(_ speed: Float) -> String {
+    if speed == 1.0 {
+      return "1x"
+    } else if speed.truncatingRemainder(dividingBy: 1) == 0 {
+      return "\(Int(speed))x"
+    } else {
+      return String(format: "%.2gx", speed)
+    }
+  }
+
+  private func triggerHaptic() {
+    let generator = UIImpactFeedbackGenerator(style: .light)
+    generator.impactOccurred()
   }
 }
 

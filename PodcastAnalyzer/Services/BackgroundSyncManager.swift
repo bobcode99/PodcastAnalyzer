@@ -150,7 +150,7 @@ class BackgroundSyncManager: ObservableObject {
       logger.info("Found \(podcasts.count) subscribed podcasts to sync")
 
       var totalNewEpisodes = 0
-      var newEpisodeDetails: [(podcastTitle: String, episodeTitle: String)] = []
+      var newEpisodeDetails: [(podcastTitle: String, episodeTitle: String, audioURL: String?, imageURL: String?, language: String)] = []
 
       // Sync each podcast
       for podcast in podcasts {
@@ -165,7 +165,13 @@ class BackgroundSyncManager: ObservableObject {
           if !newEpisodes.isEmpty {
             totalNewEpisodes += newEpisodes.count
             for episode in newEpisodes.prefix(3) {  // Limit to first 3 for notification
-              newEpisodeDetails.append((podcastTitle: updatedPodcast.title, episodeTitle: episode.title))
+              newEpisodeDetails.append((
+                podcastTitle: updatedPodcast.title,
+                episodeTitle: episode.title,
+                audioURL: episode.audioURL,
+                imageURL: episode.imageURL ?? updatedPodcast.imageURL,
+                language: updatedPodcast.language
+              ))
             }
 
             // Update the podcast with new episodes
@@ -234,20 +240,31 @@ class BackgroundSyncManager: ObservableObject {
 
   private func sendNewEpisodesNotification(
     totalCount: Int,
-    details: [(podcastTitle: String, episodeTitle: String)]
+    details: [(podcastTitle: String, episodeTitle: String, audioURL: String?, imageURL: String?, language: String)]
   ) async {
     let content = UNMutableNotificationContent()
 
     if totalCount == 1, let first = details.first {
       content.title = "New Episode"
       content.body = "\(first.podcastTitle): \(first.episodeTitle)"
+      // Include episode info for navigation on tap
+      content.userInfo = [
+        "type": "newEpisode",
+        "podcastTitle": first.podcastTitle,
+        "episodeTitle": first.episodeTitle,
+        "audioURL": first.audioURL ?? "",
+        "imageURL": first.imageURL ?? "",
+        "language": first.language
+      ]
     } else if details.count <= 3 {
       content.title = "\(totalCount) New Episodes"
       content.body = details.map { $0.podcastTitle }.joined(separator: ", ")
+      content.userInfo = ["type": "multipleEpisodes"]
     } else {
       content.title = "\(totalCount) New Episodes"
       let podcastNames = Set(details.map { $0.podcastTitle })
       content.body = "From \(podcastNames.count) podcasts"
+      content.userInfo = ["type": "multipleEpisodes"]
     }
 
     content.sound = .default

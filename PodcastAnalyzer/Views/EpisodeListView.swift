@@ -15,6 +15,7 @@ enum EpisodeFilter: String, CaseIterable {
   case all = "All"
   case unplayed = "Unplayed"
   case played = "Played"
+  case starred = "Starred"
   case downloaded = "Downloaded"
 
   var icon: String {
@@ -22,6 +23,7 @@ enum EpisodeFilter: String, CaseIterable {
     case .all: return "list.bullet"
     case .unplayed: return "circle"
     case .played: return "checkmark.circle"
+    case .starred: return "star.fill"
     case .downloaded: return "arrow.down.circle.fill"
     }
   }
