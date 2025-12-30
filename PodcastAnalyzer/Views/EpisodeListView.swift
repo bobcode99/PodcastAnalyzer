@@ -732,7 +732,8 @@ struct EpisodeRowView: View {
           imageURL: episode.imageURL ?? fallbackImageURL,
           episodeDescription: episode.podcastEpisodeDescription,
           pubDate: episode.pubDate,
-          duration: episode.duration
+          duration: episode.duration,
+          guid: episode.guid
         )
         audioManager.playNext(playbackEpisode)
       }
@@ -802,7 +803,8 @@ struct EpisodeRowView: View {
       imageURL: imageURL,
       episodeDescription: episode.podcastEpisodeDescription,
       pubDate: episode.pubDate,
-      duration: episode.duration
+      duration: episode.duration,
+      guid: episode.guid
     )
 
     let startTime = episodeModel?.lastPlaybackPosition ?? 0
@@ -819,9 +821,9 @@ struct EpisodeRowView: View {
 
   private func shareEpisode() {
     // Try to find Apple Podcast URL first
-    shareCancellable = applePodcastService.findAppleEpisodeUrl(
+    shareCancellable = applePodcastService.getAppleEpisodeLink(
       episodeTitle: episode.title,
-      podcastCollectionId: 0  // Search by title only
+      episodeGuid: episode.guid
     )
     .timeout(.seconds(5), scheduler: DispatchQueue.main)
     .sink(

@@ -15,6 +15,7 @@ public struct PodcastEpisodeInfo: Sendable, Codable, Identifiable {
   public let audioURL: String?
   public let imageURL: String?
   public let duration: Int?  // Duration in seconds from itunes:duration
+  public let guid: String?  // Episode GUID from RSS feed
 
   /// Unique identifier for this episode (uses audioURL or title+pubDate combo)
   public var id: String {

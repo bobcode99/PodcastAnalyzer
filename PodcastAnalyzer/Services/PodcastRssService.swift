@@ -6,8 +6,10 @@
 import FeedKit
 import Foundation
 internal import XMLKit
+import os.log
 
 public actor PodcastRssService {
+    private let logger = Logger(subsystem: "com.podcast.analyzer", category: "PodcastRssService")
 
   /// Parses duration from iTunes duration field (FeedKit returns TimeInterval)
   private func parseDuration(_ duration: TimeInterval) -> Int {
@@ -39,13 +41,15 @@ public actor PodcastRssService {
         durationSeconds = parseDuration(duration)
       }
 
+
       return PodcastEpisodeInfo(
         title: title,
         podcastEpisodeDescription: item.description,
         pubDate: item.pubDate,
         audioURL: item.enclosure?.attributes?.url,
         imageURL: item.iTunes?.image?.attributes?.href,
-        duration: durationSeconds
+        duration: durationSeconds,
+        guid: item.guid?.text
       )
     }
 

@@ -492,7 +492,8 @@ struct LibraryEpisodeRow: View {
             imageURL: episode.imageURL ?? podcastImageURL,
             episodeDescription: episode.podcastEpisodeDescription,
             pubDate: episode.pubDate,
-            duration: episode.duration
+            duration: episode.duration,
+            guid: episode.guid
         )
 
         audioManager.play(

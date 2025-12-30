@@ -242,9 +242,9 @@ class ExpandedPlayerViewModel: ObservableObject {
     guard let episode = currentEpisode else { return }
 
     // Try to find Apple Podcast URL first
-    shareCancellable = applePodcastService.findAppleEpisodeUrl(
+    shareCancellable = applePodcastService.getAppleEpisodeLink(
       episodeTitle: episode.title,
-      podcastCollectionId: 0  // Search by title only
+      episodeGuid: episode.guid
     )
     .timeout(.seconds(5), scheduler: DispatchQueue.main)
     .sink(
@@ -297,7 +297,8 @@ class ExpandedPlayerViewModel: ObservableObject {
       pubDate: episode.pubDate,
       audioURL: episode.audioURL,
       imageURL: episode.imageURL,
-      duration: episode.duration
+      duration: episode.duration,
+      guid: episode.guid
     )
     downloadManager.downloadEpisode(
       episode: episodeInfo,

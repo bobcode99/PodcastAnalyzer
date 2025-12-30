@@ -719,6 +719,7 @@ struct PlaybackEpisode: Identifiable, Codable {
   var episodeDescription: String?
   var pubDate: Date?
   var duration: Int?
+  var guid: String?
 }
 
 struct CaptionSegment: Identifiable {
