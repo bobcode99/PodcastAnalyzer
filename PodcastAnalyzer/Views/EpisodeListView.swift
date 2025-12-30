@@ -36,6 +36,9 @@ struct EpisodeListView: View {
   @State private var viewModel: EpisodeListViewModel?
   @State private var episodeToDelete: PodcastEpisodeInfo?
   @State private var showDeleteConfirmation = false
+  @State private var applePodcastURL: URL?
+
+  private let applePodcastService = ApplePodcastService()
 
   var body: some View {
     Group {
@@ -116,6 +119,14 @@ struct EpisodeListView: View {
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         Menu {
+          if let url = applePodcastURL {
+            Link(destination: url) {
+              Label("View on Apple Podcasts", systemImage: "link")
+            }
+
+            Divider()
+          }
+
           Toggle(isOn: $downloadManager.autoTranscriptEnabled) {
             Label(
               "Auto-Generate Transcripts",
@@ -137,6 +148,9 @@ struct EpisodeListView: View {
           Image(systemName: "ellipsis.circle")
         }
       }
+    }
+    .task {
+      await lookupApplePodcastURL()
     }
     .refreshable {
       await viewModel.refreshPodcast()
@@ -166,6 +180,33 @@ struct EpisodeListView: View {
       Text(
         "Are you sure you want to delete this downloaded episode? You can download it again later."
       )
+    }
+  }
+
+  // MARK: - Apple Podcast Lookup
+
+  private func lookupApplePodcastURL() async {
+    let podcastTitle = podcastModel.podcastInfo.title
+
+    await withCheckedContinuation { continuation in
+      var cancellable: AnyCancellable?
+      cancellable = applePodcastService.searchPodcasts(term: podcastTitle, limit: 5)
+        .sink(
+          receiveCompletion: { _ in
+            continuation.resume()
+            cancellable?.cancel()
+          },
+          receiveValue: { [self] podcasts in
+            // Find matching podcast by name
+            if let match = podcasts.first(where: {
+              $0.collectionName.lowercased() == podcastTitle.lowercased()
+            }) ?? podcasts.first {
+              // Construct Apple Podcasts URL
+              let urlString = "https://podcasts.apple.com/podcast/id\(match.collectionId)"
+              applePodcastURL = URL(string: urlString)
+            }
+          }
+        )
     }
   }
 

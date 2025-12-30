@@ -219,9 +219,13 @@ struct TopPodcastRow: View {
   @ObservedObject var viewModel: HomeViewModel
 
   var body: some View {
-    Button(action: {
-      viewModel.showPodcastPreview(podcast)
-    }) {
+    NavigationLink(destination: BrowsePodcastView(
+      podcastName: podcast.name,
+      podcastArtwork: podcast.artworkUrl100,
+      artistName: podcast.artistName,
+      collectionId: podcast.id,
+      applePodcastUrl: podcast.url
+    )) {
       HStack(spacing: 12) {
         // Rank
         Text("\(rank)")
@@ -270,14 +274,6 @@ struct TopPodcastRow: View {
       .padding(.vertical, 8)
     }
     .buttonStyle(.plain)
-    .sheet(isPresented: Binding(
-      get: { viewModel.selectedPodcast?.id == podcast.id },
-      set: { if !$0 { viewModel.selectedPodcast = nil } }
-    )) {
-      if let podcast = viewModel.selectedPodcast {
-        PodcastPreviewSheet(podcast: podcast, viewModel: viewModel)
-      }
-    }
 
     Divider()
   }

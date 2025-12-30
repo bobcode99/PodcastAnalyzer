@@ -141,12 +141,20 @@ struct PodcastSearchView: View {
             } else {
                 List {
                     ForEach(viewModel.podcasts, id: \.collectionId) { podcast in
-                        ApplePodcastRow(
-                            podcast: podcast,
-                            isSubscribed: isSubscribed(podcast),
-                            onSubscribe: { subscribeToPodcast(podcast) },
-                            onTap: { }
-                        )
+                        NavigationLink(destination: BrowsePodcastView(
+                            podcastName: podcast.collectionName,
+                            podcastArtwork: podcast.artworkUrl100 ?? "",
+                            artistName: podcast.artistName,
+                            collectionId: String(podcast.collectionId),
+                            applePodcastUrl: nil
+                        )) {
+                            ApplePodcastRow(
+                                podcast: podcast,
+                                isSubscribed: isSubscribed(podcast),
+                                onSubscribe: { subscribeToPodcast(podcast) }
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .listStyle(.plain)
@@ -260,7 +268,6 @@ struct ApplePodcastRow: View {
     let podcast: Podcast
     let isSubscribed: Bool
     let onSubscribe: () -> Void
-    let onTap: () -> Void
 
     @State private var isSubscribing = false
 
@@ -308,7 +315,7 @@ struct ApplePodcastRow: View {
                 Image(systemName: "checkmark")
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                    .foregroundColor(.primary)
+                    .foregroundColor(.green)
             } else if isSubscribing {
                 ProgressView()
                     .scaleEffect(0.8)
@@ -323,14 +330,17 @@ struct ApplePodcastRow: View {
                 }) {
                     Image(systemName: "plus")
                         .font(.title3)
-                        .foregroundColor(.purple)
+                        .foregroundColor(.blue)
                 }
                 .buttonStyle(.plain)
             }
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(.secondary)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
     }
 
     private var artworkPlaceholder: some View {
