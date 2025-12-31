@@ -42,10 +42,12 @@ struct EpisodeListView: View {
   private let source: PodcastSource
 
   @Environment(\.modelContext) private var modelContext
+  @Environment(\.dismiss) private var dismiss
   @ObservedObject private var downloadManager = DownloadManager.shared
   @State private var viewModel: EpisodeListViewModel?
   @State private var episodeToDelete: PodcastEpisodeInfo?
   @State private var showDeleteConfirmation = false
+  @State private var showUnsubscribeConfirmation = false
   @State private var applePodcastURL: URL?
 
   // Browse mode state
@@ -304,6 +306,21 @@ struct EpisodeListView: View {
     }
   }
 
+  private func unsubscribe() {
+    guard let model = podcastModel else { return }
+
+    // Flip the isSubscribed flag to false
+    model.isSubscribed = false
+
+    do {
+      try modelContext.save()
+      // Navigate back after unsubscribing
+      dismiss()
+    } catch {
+      loadError = "Failed to unsubscribe: \(error.localizedDescription)"
+    }
+  }
+
   // MARK: - Episode List Content
 
   @ViewBuilder
@@ -368,13 +385,17 @@ struct EpisodeListView: View {
             Divider()
           }
 
-          Button(action: subscribe) {
-            Label(
-              isSubscribed ? "Subscribed" : "Subscribe",
-              systemImage: isSubscribed ? "checkmark.circle.fill" : "plus.circle"
-            )
+          if isSubscribed {
+            Button(role: .destructive) {
+              showUnsubscribeConfirmation = true
+            } label: {
+              Label("Unsubscribe", systemImage: "minus.circle")
+            }
+          } else {
+            Button(action: subscribe) {
+              Label("Subscribe", systemImage: "plus.circle")
+            }
           }
-          .disabled(isSubscribed)
 
           Divider()
 
@@ -427,6 +448,20 @@ struct EpisodeListView: View {
     } message: {
       Text(
         "Are you sure you want to delete this downloaded episode? You can download it again later."
+      )
+    }
+    .confirmationDialog(
+      "Unsubscribe from Podcast",
+      isPresented: $showUnsubscribeConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Unsubscribe", role: .destructive) {
+        unsubscribe()
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text(
+        "Are you sure you want to unsubscribe from this podcast? Downloaded episodes will remain available."
       )
     }
   }

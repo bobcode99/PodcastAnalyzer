@@ -22,6 +22,10 @@ struct LibraryView: View {
     GridItem(.flexible(), spacing: 12)
   ]
 
+  // Context menu state
+  @State private var podcastToUnsubscribe: PodcastInfoModel?
+  @State private var showUnsubscribeConfirmation = false
+
   init() {
     _viewModel = StateObject(wrappedValue: LibraryViewModel(modelContext: nil))
   }
@@ -69,6 +73,25 @@ struct LibraryView: View {
     }
     .onAppear {
       viewModel.setModelContext(modelContext)
+    }
+    .confirmationDialog(
+      "Unsubscribe from Podcast",
+      isPresented: $showUnsubscribeConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Unsubscribe", role: .destructive) {
+        if let podcast = podcastToUnsubscribe {
+          unsubscribePodcast(podcast)
+        }
+        podcastToUnsubscribe = nil
+      }
+      Button("Cancel", role: .cancel) {
+        podcastToUnsubscribe = nil
+      }
+    } message: {
+      if let podcast = podcastToUnsubscribe {
+        Text("Are you sure you want to unsubscribe from \"\(podcast.podcastInfo.title)\"? Downloaded episodes will remain available.")
+      }
     }
   }
 
@@ -160,9 +183,68 @@ struct LibraryView: View {
               PodcastGridCell(podcast: podcast)
             }
             .buttonStyle(.plain)
+            .contextMenu {
+              // View episodes
+              NavigationLink(destination: EpisodeListView(podcastModel: podcast)) {
+                Label("View Episodes", systemImage: "list.bullet")
+              }
+
+              Divider()
+
+              // Refresh podcast
+              Button {
+                Task {
+                  await refreshPodcast(podcast)
+                }
+              } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+              }
+
+              // Copy RSS URL
+              Button {
+                UIPasteboard.general.string = podcast.podcastInfo.rssUrl
+              } label: {
+                Label("Copy RSS URL", systemImage: "doc.on.doc")
+              }
+
+              Divider()
+
+              // Unsubscribe
+              Button(role: .destructive) {
+                podcastToUnsubscribe = podcast
+                showUnsubscribeConfirmation = true
+              } label: {
+                Label("Unsubscribe", systemImage: "minus.circle")
+              }
+            }
           }
         }
       }
+    }
+  }
+
+  // MARK: - Podcast Actions
+
+  private func refreshPodcast(_ podcast: PodcastInfoModel) async {
+    let rssService = PodcastRssService()
+    do {
+      let updatedPodcast = try await rssService.fetchPodcast(from: podcast.podcastInfo.rssUrl)
+      podcast.podcastInfo = updatedPodcast
+      podcast.lastUpdated = Date()
+      try modelContext.save()
+    } catch {
+      // Silently fail refresh
+    }
+  }
+
+  private func unsubscribePodcast(_ podcast: PodcastInfoModel) {
+    podcast.isSubscribed = false
+    do {
+      try modelContext.save()
+      // Reload the view model
+      viewModel.setModelContext(modelContext)
+    } catch {
+      // Silently fail
     }
   }
 
