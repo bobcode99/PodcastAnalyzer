@@ -36,18 +36,27 @@ struct LibraryView: View {
 
   var body: some View {
     NavigationStack {
-      ScrollView {
-        VStack(spacing: 24) {
-          // Quick access cards
-          quickAccessSection
-            .padding(.horizontal, 16)
+      ZStack {
+        ScrollView {
+          VStack(spacing: 24) {
+            // Quick access cards
+            quickAccessSection
+              .padding(.horizontal, 16)
 
-          // Subscribed Podcasts Grid
-          podcastsGridSection
-            .padding(.horizontal, 16)
+            // Subscribed Podcasts Grid
+            podcastsGridSection
+              .padding(.horizontal, 16)
+          }
+          .padding(.top, 8)
+          .padding(.bottom, 40)
         }
-        .padding(.top, 8)
-        .padding(.bottom, 40)
+
+        if viewModel.isLoading && viewModel.podcastInfoModelList.isEmpty {
+          ProgressView("Loading Library...")
+            .scaleEffect(1.5)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.platformBackground)
+        }
       }
       .navigationTitle(Constants.libraryString)
       .toolbar {
@@ -66,16 +75,9 @@ struct LibraryView: View {
       .refreshable {
         await viewModel.refreshAllPodcasts()
       }
-      .overlay {
-        if viewModel.isLoading {
-          ProgressView()
-            .scaleEffect(1.5)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.platformBackground.opacity(0.5))
-        }
-      }
     }
     .onAppear {
+      // This is the key: set the context once
       viewModel.setModelContext(modelContext)
     }
     .confirmationDialog(

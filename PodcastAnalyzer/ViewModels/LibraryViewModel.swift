@@ -57,34 +57,54 @@ class LibraryViewModel: ObservableObject {
   // All podcasts (subscribed + browsed) for episode lookups
   private var allPodcasts: [PodcastInfoModel] = []
 
+  // Flag to prevent redundant loads
+  private var isAlreadyLoaded = false
+
   // Use Unit Separator (U+001F) as delimiter
   private static let episodeKeyDelimiter = "\u{1F}"
 
   init(modelContext: ModelContext?) {
     self.modelContext = modelContext
     if modelContext != nil {
-      loadAll()
+      Task {
+        await loadAll()
+      }
     }
   }
 
   func setModelContext(_ context: ModelContext) {
     self.modelContext = context
-    loadAll()
+    // Only load if we haven't or if we need a fresh start
+    if !isAlreadyLoaded {
+      Task {
+        await loadAll()
+        isAlreadyLoaded = true
+      }
+    }
   }
 
   // MARK: - Load All Data
 
-  private func loadAll() {
-    loadAllPodcasts()
-    loadPodcastFeeds()
-    loadSavedEpisodes()
-    loadDownloadedEpisodes()
-    loadLatestEpisodes()
+  private func loadAll() async {
+    isLoading = true
+
+    // First, load all podcasts (needed by other loaders)
+    await loadAllPodcasts()
+
+    // Then run the rest in parallel
+    await withTaskGroup(of: Void.self) { group in
+      group.addTask { await self.loadPodcastFeeds() }
+      group.addTask { await self.loadSavedEpisodes() }
+      group.addTask { await self.loadDownloadedEpisodes() }
+      group.addTask { await self.loadLatestEpisodes() }
+    }
+
+    isLoading = false
   }
 
   // MARK: - Load All Podcasts (for episode lookups)
 
-  private func loadAllPodcasts() {
+  private func loadAllPodcasts() async {
     guard let context = modelContext else { return }
 
     // Load ALL podcasts (subscribed + browsed) for episode lookups
@@ -93,8 +113,11 @@ class LibraryViewModel: ObservableObject {
     )
 
     do {
-      allPodcasts = try context.fetch(descriptor)
-      logger.info("Loaded \(self.allPodcasts.count) total podcasts for episode lookups")
+      let podcasts = try context.fetch(descriptor)
+      await MainActor.run {
+        self.allPodcasts = podcasts
+        logger.info("Loaded \(self.allPodcasts.count) total podcasts for episode lookups")
+      }
     } catch {
       logger.error("Failed to load all podcasts: \(error.localizedDescription)")
     }
@@ -102,7 +125,7 @@ class LibraryViewModel: ObservableObject {
 
   // MARK: - Load Podcasts
 
-  private func loadPodcastFeeds() {
+  private func loadPodcastFeeds() async {
     guard let context = modelContext else {
       logger.warning("ModelContext is nil, cannot load feeds")
       return
@@ -115,17 +138,22 @@ class LibraryViewModel: ObservableObject {
     )
 
     do {
-      podcastInfoModelList = try context.fetch(descriptor)
-      logger.info("Loaded \(self.podcastInfoModelList.count) subscribed podcast feeds from database")
+      let podcasts = try context.fetch(descriptor)
+      await MainActor.run {
+        self.podcastInfoModelList = podcasts
+        logger.info("Loaded \(self.podcastInfoModelList.count) subscribed podcast feeds from database")
+      }
     } catch {
-      self.error = "Failed to load feeds: \(error.localizedDescription)"
-      logger.error("Failed to load feeds: \(error.localizedDescription)")
+      await MainActor.run {
+        self.error = "Failed to load feeds: \(error.localizedDescription)"
+        logger.error("Failed to load feeds: \(error.localizedDescription)")
+      }
     }
   }
 
   // MARK: - Load Saved Episodes
 
-  private func loadSavedEpisodes() {
+  private func loadSavedEpisodes() async {
     guard let context = modelContext else { return }
 
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
@@ -135,10 +163,16 @@ class LibraryViewModel: ObservableObject {
 
     do {
       let models = try context.fetch(descriptor)
-      savedEpisodes = models.compactMap { model in
-        findEpisodeInfo(for: model)
+      // Map models to LibraryEpisodes - need to access allPodcasts on MainActor
+      let results = await MainActor.run {
+        models.compactMap { model in
+          self.findEpisodeInfo(for: model)
+        }
       }
-      logger.info("Loaded \(self.savedEpisodes.count) saved episodes")
+      await MainActor.run {
+        self.savedEpisodes = results
+        logger.info("Loaded \(self.savedEpisodes.count) saved episodes")
+      }
     } catch {
       logger.error("Failed to load saved episodes: \(error.localizedDescription)")
     }
@@ -146,59 +180,52 @@ class LibraryViewModel: ObservableObject {
 
   // MARK: - Load Downloaded Episodes
 
-  private func loadDownloadedEpisodes() {
-    var allDownloaded: [LibraryEpisode] = []
+  private func loadDownloadedEpisodes() async {
+    guard let context = modelContext else { return }
 
-    // Check each episode from ALL podcasts (subscribed + browsed) for download status
-    for podcast in allPodcasts {
-      let podcastInfo = podcast.podcastInfo
+    // OPTIMIZATION: Instead of looping ALL episodes,
+    // query the EpisodeDownloadModel directly!
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.localAudioPath != nil },
+      sortBy: [SortDescriptor(\.downloadedDate, order: .reverse)]
+    )
 
-      for episode in podcastInfo.episodes {
-        let downloadState = downloadManager.getDownloadState(
-          episodeTitle: episode.title,
-          podcastTitle: podcastInfo.title
-        )
-
-        // Only include downloaded episodes
-        if case .downloaded = downloadState {
-          let episodeKey = "\(podcastInfo.title)\(Self.episodeKeyDelimiter)\(episode.title)"
-          let model = getEpisodeModel(for: episodeKey)
-
-          allDownloaded.append(LibraryEpisode(
-            id: episodeKey,
-            podcastTitle: podcastInfo.title,
-            imageURL: episode.imageURL ?? podcastInfo.imageURL,
-            language: podcastInfo.language,
-            episodeInfo: episode,
-            isStarred: model?.isStarred ?? false,
-            isDownloaded: true,
-            isCompleted: model?.isCompleted ?? false,
-            lastPlaybackPosition: model?.lastPlaybackPosition ?? 0
-          ))
+    do {
+      let downloadedModels = try context.fetch(descriptor)
+      // Map models to LibraryEpisodes - need to access allPodcasts on MainActor
+      let results = await MainActor.run {
+        downloadedModels.compactMap { model in
+          self.findEpisodeInfo(for: model)
         }
       }
+
+      await MainActor.run {
+        self.downloadedEpisodes = results
+        logger.info("Loaded \(self.downloadedEpisodes.count) downloaded episodes")
+      }
+    } catch {
+      logger.error("Download fetch failed: \(error)")
     }
-
-    // Sort by publication date (newest first)
-    downloadedEpisodes = allDownloaded
-      .sorted { ($0.episodeInfo.pubDate ?? .distantPast) > ($1.episodeInfo.pubDate ?? .distantPast) }
-
-    logger.info("Loaded \(self.downloadedEpisodes.count) downloaded episodes")
   }
 
   // MARK: - Load Latest Episodes
 
-  private func loadLatestEpisodes() {
+  private func loadLatestEpisodes() async {
+    // Wait for podcastInfoModelList to be loaded
+    let pods = await MainActor.run { self.podcastInfoModelList }
     var allEpisodes: [LibraryEpisode] = []
 
-    for podcast in podcastInfoModelList {
+    for podcast in pods {
       let podcastInfo = podcast.podcastInfo
       // Get latest 5 episodes from each podcast
-      let latestFromPodcast = podcastInfo.episodes.prefix(5).map { episode in
+      for episode in podcastInfo.episodes.prefix(5) {
         let episodeKey = "\(podcastInfo.title)\(Self.episodeKeyDelimiter)\(episode.title)"
-        let model = getEpisodeModel(for: episodeKey)
+        // Note: getEpisodeModel still hits DB, but we batch this better now
+        let model = await MainActor.run {
+          self.getEpisodeModel(for: episodeKey)
+        }
 
-        return LibraryEpisode(
+        allEpisodes.append(LibraryEpisode(
           id: episodeKey,
           podcastTitle: podcastInfo.title,
           imageURL: episode.imageURL ?? podcastInfo.imageURL,
@@ -208,18 +235,19 @@ class LibraryViewModel: ObservableObject {
           isDownloaded: model?.localAudioPath != nil,
           isCompleted: model?.isCompleted ?? false,
           lastPlaybackPosition: model?.lastPlaybackPosition ?? 0
-        )
+        ))
       }
-      allEpisodes.append(contentsOf: latestFromPodcast)
     }
 
     // Sort by date and take latest 50
-    latestEpisodes = allEpisodes
+    let sorted = allEpisodes
       .sorted { ($0.episodeInfo.pubDate ?? .distantPast) > ($1.episodeInfo.pubDate ?? .distantPast) }
       .prefix(50)
-      .map { $0 }
 
-    logger.info("Loaded \(self.latestEpisodes.count) latest episodes")
+    await MainActor.run {
+      self.latestEpisodes = Array(sorted)
+      logger.info("Loaded \(self.latestEpisodes.count) latest episodes")
+    }
   }
 
   // MARK: - Helper Methods
@@ -233,7 +261,9 @@ class LibraryViewModel: ObservableObject {
     let episodeTitle = parts[1]
 
     // Find the podcast from ALL podcasts (subscribed + browsed)
-    guard let podcast = allPodcasts.first(where: { $0.podcastInfo.title == podcastTitle }) else {
+    // Access allPodcasts on MainActor since it's a @MainActor class
+    let podcasts = allPodcasts
+    guard let podcast = podcasts.first(where: { $0.podcastInfo.title == podcastTitle }) else {
       return nil
     }
 
@@ -323,7 +353,7 @@ class LibraryViewModel: ObservableObject {
     }
 
     // Reload all data
-    loadAll()
+    await loadAll()
 
     isLoading = false
     logger.info("Finished refreshing all podcasts")
