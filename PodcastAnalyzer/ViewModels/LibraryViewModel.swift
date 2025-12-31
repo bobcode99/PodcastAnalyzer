@@ -91,13 +91,14 @@ class LibraryViewModel: ObservableObject {
     // First, load all podcasts (needed by other loaders)
     await loadAllPodcasts()
 
-    // Then run the rest in parallel
-    await withTaskGroup(of: Void.self) { group in
-      group.addTask { await self.loadPodcastFeeds() }
-      group.addTask { await self.loadSavedEpisodes() }
-      group.addTask { await self.loadDownloadedEpisodes() }
-      group.addTask { await self.loadLatestEpisodes() }
-    }
+    // Load feeds first (other loaders depend on podcastInfoModelList)
+    await loadPodcastFeeds()
+
+    // Then load the rest using async let for parallelism while staying on MainActor
+    async let savedTask: () = loadSavedEpisodes()
+    async let downloadedTask: () = loadDownloadedEpisodes()
+    async let latestTask: () = loadLatestEpisodes()
+    _ = await (savedTask, downloadedTask, latestTask)
 
     isLoading = false
   }
@@ -114,10 +115,9 @@ class LibraryViewModel: ObservableObject {
 
     do {
       let podcasts = try context.fetch(descriptor)
-      await MainActor.run {
-        self.allPodcasts = podcasts
-        logger.info("Loaded \(self.allPodcasts.count) total podcasts for episode lookups")
-      }
+      // Since we're @MainActor, update directly
+      self.allPodcasts = podcasts
+      logger.info("Loaded \(self.allPodcasts.count) total podcasts for episode lookups")
     } catch {
       logger.error("Failed to load all podcasts: \(error.localizedDescription)")
     }
@@ -139,15 +139,12 @@ class LibraryViewModel: ObservableObject {
 
     do {
       let podcasts = try context.fetch(descriptor)
-      await MainActor.run {
-        self.podcastInfoModelList = podcasts
-        logger.info("Loaded \(self.podcastInfoModelList.count) subscribed podcast feeds from database")
-      }
+      // Since we're @MainActor, update directly
+      self.podcastInfoModelList = podcasts
+      logger.info("Loaded \(self.podcastInfoModelList.count) subscribed podcast feeds from database")
     } catch {
-      await MainActor.run {
-        self.error = "Failed to load feeds: \(error.localizedDescription)"
-        logger.error("Failed to load feeds: \(error.localizedDescription)")
-      }
+      self.error = "Failed to load feeds: \(error.localizedDescription)"
+      logger.error("Failed to load feeds: \(error.localizedDescription)")
     }
   }
 
@@ -163,16 +160,12 @@ class LibraryViewModel: ObservableObject {
 
     do {
       let models = try context.fetch(descriptor)
-      // Map models to LibraryEpisodes - need to access allPodcasts on MainActor
-      let results = await MainActor.run {
-        models.compactMap { model in
-          self.findEpisodeInfo(for: model)
-        }
+      // Since we're @MainActor, map directly
+      let results = models.compactMap { model in
+        self.findEpisodeInfo(for: model)
       }
-      await MainActor.run {
-        self.savedEpisodes = results
-        logger.info("Loaded \(self.savedEpisodes.count) saved episodes")
-      }
+      self.savedEpisodes = results
+      logger.info("Loaded \(self.savedEpisodes.count) saved episodes")
     } catch {
       logger.error("Failed to load saved episodes: \(error.localizedDescription)")
     }
@@ -192,17 +185,12 @@ class LibraryViewModel: ObservableObject {
 
     do {
       let downloadedModels = try context.fetch(descriptor)
-      // Map models to LibraryEpisodes - need to access allPodcasts on MainActor
-      let results = await MainActor.run {
-        downloadedModels.compactMap { model in
-          self.findEpisodeInfo(for: model)
-        }
+      // Since we're @MainActor, map directly
+      let results = downloadedModels.compactMap { model in
+        self.findEpisodeInfo(for: model)
       }
-
-      await MainActor.run {
-        self.downloadedEpisodes = results
-        logger.info("Loaded \(self.downloadedEpisodes.count) downloaded episodes")
-      }
+      self.downloadedEpisodes = results
+      logger.info("Loaded \(self.downloadedEpisodes.count) downloaded episodes")
     } catch {
       logger.error("Download fetch failed: \(error)")
     }
@@ -211,8 +199,8 @@ class LibraryViewModel: ObservableObject {
   // MARK: - Load Latest Episodes
 
   private func loadLatestEpisodes() async {
-    // Wait for podcastInfoModelList to be loaded
-    let pods = await MainActor.run { self.podcastInfoModelList }
+    // Since we're @MainActor, access podcastInfoModelList directly
+    let pods = podcastInfoModelList
     var allEpisodes: [LibraryEpisode] = []
 
     for podcast in pods {
@@ -220,10 +208,8 @@ class LibraryViewModel: ObservableObject {
       // Get latest 5 episodes from each podcast
       for episode in podcastInfo.episodes.prefix(5) {
         let episodeKey = "\(podcastInfo.title)\(Self.episodeKeyDelimiter)\(episode.title)"
-        // Note: getEpisodeModel still hits DB, but we batch this better now
-        let model = await MainActor.run {
-          self.getEpisodeModel(for: episodeKey)
-        }
+        // Since we're @MainActor, access getEpisodeModel directly
+        let model = getEpisodeModel(for: episodeKey)
 
         allEpisodes.append(LibraryEpisode(
           id: episodeKey,
@@ -244,10 +230,9 @@ class LibraryViewModel: ObservableObject {
       .sorted { ($0.episodeInfo.pubDate ?? .distantPast) > ($1.episodeInfo.pubDate ?? .distantPast) }
       .prefix(50)
 
-    await MainActor.run {
-      self.latestEpisodes = Array(sorted)
-      logger.info("Loaded \(self.latestEpisodes.count) latest episodes")
-    }
+    // Since we're @MainActor, update directly
+    self.latestEpisodes = Array(sorted)
+    logger.info("Loaded \(self.latestEpisodes.count) latest episodes")
   }
 
   // MARK: - Helper Methods

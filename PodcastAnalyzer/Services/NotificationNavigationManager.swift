@@ -78,8 +78,23 @@ extension NotificationNavigationManager: UNUserNotificationCenterDelegate {
   ) {
     let userInfo = response.notification.request.content.userInfo
 
+    // Extract Sendable values before Task to avoid capturing non-Sendable [AnyHashable: Any]
+    let type = userInfo["type"] as? String
+    let podcastTitle = userInfo["podcastTitle"] as? String
+    let episodeTitle = userInfo["episodeTitle"] as? String
+    let audioURL = userInfo["audioURL"] as? String
+    let imageURL = userInfo["imageURL"] as? String
+    let language = userInfo["language"] as? String
+
     Task { @MainActor in
-      handleNotificationTap(userInfo: userInfo)
+      handleNotificationTap(
+        type: type,
+        podcastTitle: podcastTitle,
+        episodeTitle: episodeTitle,
+        audioURL: audioURL,
+        imageURL: imageURL,
+        language: language
+      )
     }
 
     completionHandler()
@@ -100,18 +115,25 @@ extension NotificationNavigationManager: UNUserNotificationCenterDelegate {
   }
 
   @MainActor
-  private func handleNotificationTap(userInfo: [AnyHashable: Any]) {
-    guard let type = userInfo["type"] as? String else {
+  private func handleNotificationTap(
+    type: String?,
+    podcastTitle: String?,
+    episodeTitle: String?,
+    audioURL: String?,
+    imageURL: String?,
+    language: String?
+  ) {
+    guard let type = type else {
       logger.warning("Notification tap without type")
       return
     }
 
     if type == "newEpisode" {
-      guard let podcastTitle = userInfo["podcastTitle"] as? String,
-            let episodeTitle = userInfo["episodeTitle"] as? String,
-            let audioURL = userInfo["audioURL"] as? String,
-            let imageURL = userInfo["imageURL"] as? String,
-            let language = userInfo["language"] as? String
+      guard let podcastTitle = podcastTitle,
+            let episodeTitle = episodeTitle,
+            let audioURL = audioURL,
+            let imageURL = imageURL,
+            let language = language
       else {
         logger.warning("Notification tap missing required fields")
         return

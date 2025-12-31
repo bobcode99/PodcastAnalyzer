@@ -74,12 +74,12 @@ class HomeViewModel: ObservableObject {
   // MARK: - Load All Data
 
   private func loadAll() async {
-    // Run operations in parallel using TaskGroup
-    await withTaskGroup(of: Void.self) { group in
-      group.addTask { await self.loadPodcastFeeds() }
-      group.addTask { await self.loadUpNextEpisodes() }
-      group.addTask { await self.loadTopPodcasts() }
-    }
+    // Load feeds first, then episodes (episodes depend on feeds)
+    await loadPodcastFeeds()
+    // Load up next and top podcasts can run in parallel via async let
+    async let upNextTask: () = loadUpNextEpisodes()
+    async let topPodcastsTask: () = loadTopPodcasts()
+    _ = await (upNextTask, topPodcastsTask)
   }
 
   func refresh() async {
@@ -102,10 +102,9 @@ class HomeViewModel: ObservableObject {
 
     do {
       let podcasts = try context.fetch(descriptor)
-      await MainActor.run {
-        self.podcastInfoModelList = podcasts
-        logger.info("Loaded \(self.podcastInfoModelList.count) subscribed podcast feeds")
-      }
+      // Since we're @MainActor, update directly
+      self.podcastInfoModelList = podcasts
+      logger.info("Loaded \(self.podcastInfoModelList.count) subscribed podcast feeds")
     } catch {
       logger.error("Failed to load feeds: \(error.localizedDescription)")
     }
@@ -116,13 +115,13 @@ class HomeViewModel: ObservableObject {
   private func loadUpNextEpisodes() async {
     guard let context = modelContext else { return }
 
-    // Get podcasts list first
-    let pods = await MainActor.run { self.podcastInfoModelList }
-    
+    // Since we're @MainActor, access podcastInfoModelList directly
+    let pods = podcastInfoModelList
+
     // Collect all episode keys first
     var episodeKeys: [String] = []
     var episodeMap: [String: (podcast: PodcastInfoModel, episode: PodcastEpisodeInfo)] = [:]
-    
+
     for podcast in pods {
       let podcastInfo = podcast.podcastInfo
       for episode in podcastInfo.episodes {
@@ -183,10 +182,9 @@ class HomeViewModel: ObservableObject {
       .sorted { ($0.episodeInfo.pubDate ?? .distantPast) > ($1.episodeInfo.pubDate ?? .distantPast) }
       .prefix(50)
 
-    await MainActor.run {
-      self.upNextEpisodes = Array(sorted)
-      logger.info("Loaded \(self.upNextEpisodes.count) up next episodes")
-    }
+    // Since we're @MainActor, update directly
+    self.upNextEpisodes = Array(sorted)
+    logger.info("Loaded \(self.upNextEpisodes.count) up next episodes")
   }
 
   private func getEpisodeModel(for key: String) -> EpisodeDownloadModel? {

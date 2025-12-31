@@ -54,9 +54,16 @@ actor FileStorageManager {
     fileManager.urls(for: .libraryDirectory, in: .userDomainMask)[0]
   }
 
-  // Audio files in Library (app-managed, won't appear in Files app)
+  // Audio files in Application Support (proper location for macOS app-managed files)
   private var audioDirectory: URL {
-    libraryDirectory.appendingPathComponent("Audio", isDirectory: true)
+    #if os(macOS)
+    // On macOS, use Application Support directory for better permissions
+    let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    return appSupport.appendingPathComponent("PodcastAnalyzer/Audio", isDirectory: true)
+    #else
+    // On iOS, use Library directory
+    return libraryDirectory.appendingPathComponent("Audio", isDirectory: true)
+    #endif
   }
 
   // Captions/SRT files in Documents (user can access via Files app)
@@ -140,14 +147,32 @@ actor FileStorageManager {
   /// Saves downloaded audio file
   func saveAudioFile(from sourceURL: URL, episodeTitle: String, podcastTitle: String) throws -> URL
   {
-    // Ensure audio directory exists
-    if !fileManager.fileExists(atPath: self.audioDirectory.path) {
+    // Ensure audio directory exists with proper permissions
+    let directoryURL = self.audioDirectory
+    if !fileManager.fileExists(atPath: directoryURL.path) {
       do {
-        try fileManager.createDirectory(at: self.audioDirectory, withIntermediateDirectories: true)
-        logger.info("Created audio directory: \(self.audioDirectory.path)")
+        // Create with intermediate directories and proper attributes
+        try fileManager.createDirectory(
+          at: directoryURL,
+          withIntermediateDirectories: true,
+          attributes: nil
+        )
+        logger.info("Created audio directory: \(directoryURL.path)")
       } catch {
         logger.error("Failed to create audio directory: \(error.localizedDescription)")
         throw FileStorageError.directoryCreationFailed(error)
+      }
+    } else {
+      // Verify directory is writable
+      guard fileManager.isWritableFile(atPath: directoryURL.path) else {
+        logger.error("Audio directory exists but is not writable: \(directoryURL.path)")
+        throw FileStorageError.directoryCreationFailed(
+          NSError(
+            domain: "FileStorageError",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Audio directory is not writable"]
+          )
+        )
       }
     }
 
@@ -179,10 +204,22 @@ actor FileStorageManager {
     }
 
     do {
-      try fileManager.moveItem(at: sourceURL, to: destinationURL)
-      logger.info(
-        "Saved audio file: \(destinationURL.lastPathComponent) with extension: \(fileExtension)")
-      return destinationURL
+      // Try move first (faster), fall back to copy+delete if move fails
+      do {
+        try fileManager.moveItem(at: sourceURL, to: destinationURL)
+        logger.info(
+          "Saved audio file: \(destinationURL.lastPathComponent) with extension: \(fileExtension)")
+        return destinationURL
+      } catch {
+        // If move fails (e.g., cross-volume), try copy + delete
+        logger.warning("Move failed, trying copy: \(error.localizedDescription)")
+        try fileManager.copyItem(at: sourceURL, to: destinationURL)
+        // Try to remove source, but don't fail if it doesn't exist
+        try? fileManager.removeItem(at: sourceURL)
+        logger.info(
+          "Saved audio file (via copy): \(destinationURL.lastPathComponent) with extension: \(fileExtension)")
+        return destinationURL
+      }
     } catch {
       logger.error("Failed to save audio: \(error.localizedDescription)")
       throw FileStorageError.saveFailed(error)

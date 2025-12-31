@@ -12,10 +12,15 @@ import SwiftUI
 
 // MARK: - Sidebar Navigation Item
 
-enum MacSidebarItem: String, CaseIterable, Identifiable {
+enum MacSidebarItem: String, CaseIterable, Identifiable, Hashable {
   case home = "Home"
   case library = "Library"
   case search = "Search"
+  // Library sub-items with unique identifiers
+  case libraryPodcasts = "Library.Podcasts"
+  case librarySaved = "Library.Saved"
+  case libraryDownloaded = "Library.Downloaded"
+  case libraryLatest = "Library.Latest"
 
   var id: String { rawValue }
 
@@ -24,6 +29,21 @@ enum MacSidebarItem: String, CaseIterable, Identifiable {
     case .home: return "house"
     case .library: return "books.vertical"
     case .search: return "magnifyingglass"
+    case .libraryPodcasts: return "square.stack"
+    case .librarySaved: return "star.fill"
+    case .libraryDownloaded: return "arrow.down.circle.fill"
+    case .libraryLatest: return "clock.fill"
+    }
+  }
+  
+  // Convert to LibrarySubItem if applicable
+  var librarySubItem: LibrarySubItem? {
+    switch self {
+    case .libraryPodcasts: return .podcasts
+    case .librarySaved: return .saved
+    case .libraryDownloaded: return .downloaded
+    case .libraryLatest: return .latest
+    default: return nil
     }
   }
 }
@@ -60,13 +80,14 @@ enum LibrarySubItem: String, CaseIterable, Identifiable {
 // MARK: - macOS Content View
 
 struct MacContentView: View {
-  @State private var audioManager = EnhancedAudioManager.shared
+  // Use the shared instance directly - @Observable will be observed automatically
+  private let audioManager = EnhancedAudioManager.shared
   @ObservedObject private var importManager = PodcastImportManager.shared
   @ObservedObject private var notificationManager = NotificationNavigationManager.shared
   @Environment(\.modelContext) private var modelContext
 
   @State private var selectedSidebarItem: MacSidebarItem? = .home
-  @State private var selectedLibrarySubItem: LibrarySubItem?
+  @State private var selectedLibrarySubItem: LibrarySubItem? = .podcasts
   @State private var searchText: String = ""
   @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
@@ -76,10 +97,6 @@ struct MacContentView: View {
   @State private var notificationImageURL: String?
   @State private var notificationLanguage: String = "en"
   @State private var showNotificationEpisode: Bool = false
-
-  private var showMiniPlayer: Bool {
-    audioManager.currentEpisode != nil
-  }
 
   var body: some View {
     NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -92,8 +109,8 @@ struct MacContentView: View {
         mainContent
           .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-        // Mini player at bottom
-        if showMiniPlayer {
+        // Mini player at bottom - access currentEpisode directly so SwiftUI observes changes
+        if audioManager.currentEpisode != nil {
           MacMiniPlayerBar()
         }
       }
@@ -120,26 +137,42 @@ struct MacContentView: View {
   private var sidebarContent: some View {
     List(selection: $selectedSidebarItem) {
       Section("Browse") {
-        ForEach([MacSidebarItem.home], id: \.id) { item in
-          Label(item.rawValue, systemImage: item.iconName)
-            .tag(item)
-        }
+        Label("Home", systemImage: "house")
+          .tag(MacSidebarItem.home)
       }
 
       Section("Library") {
-        ForEach(LibrarySubItem.allCases) { subItem in
-          Label {
-            Text(subItem.rawValue)
-          } icon: {
-            Image(systemName: subItem.iconName)
-              .foregroundColor(subItem.iconColor)
-          }
-          .tag(MacSidebarItem.library)
-          .onTapGesture {
-            selectedSidebarItem = .library
-            selectedLibrarySubItem = subItem
-          }
+        Label {
+          Text("Your Podcasts")
+        } icon: {
+          Image(systemName: "square.stack")
+            .foregroundColor(.blue)
         }
+        .tag(MacSidebarItem.libraryPodcasts)
+        
+        Label {
+          Text("Saved")
+        } icon: {
+          Image(systemName: "star.fill")
+            .foregroundColor(.yellow)
+        }
+        .tag(MacSidebarItem.librarySaved)
+        
+        Label {
+          Text("Downloaded")
+        } icon: {
+          Image(systemName: "arrow.down.circle.fill")
+            .foregroundColor(.green)
+        }
+        .tag(MacSidebarItem.libraryDownloaded)
+        
+        Label {
+          Text("Latest Episodes")
+        } icon: {
+          Image(systemName: "clock.fill")
+            .foregroundColor(.blue)
+        }
+        .tag(MacSidebarItem.libraryLatest)
       }
 
       Section {
@@ -149,6 +182,12 @@ struct MacContentView: View {
     }
     .listStyle(.sidebar)
     .navigationTitle("Podcasts")
+    .onChange(of: selectedSidebarItem) { _, newValue in
+      // Update selectedLibrarySubItem when a library sub-item is selected
+      if let subItem = newValue?.librarySubItem {
+        selectedLibrarySubItem = subItem
+      }
+    }
     .toolbar {
       ToolbarItem(placement: .primaryAction) {
         Button(action: {}) {
@@ -164,31 +203,29 @@ struct MacContentView: View {
 
   @ViewBuilder
   private var mainContent: some View {
-    switch selectedSidebarItem {
-    case .home:
-      MacHomeContentView()
+    NavigationStack {
+      switch selectedSidebarItem {
+      case .home:
+        MacHomeContentView()
 
-    case .library:
-      if let subItem = selectedLibrarySubItem {
-        switch subItem {
-        case .podcasts:
-          MacLibraryPodcastsView()
-        case .saved:
-          MacLibrarySavedView()
-        case .downloaded:
-          MacLibraryDownloadedView()
-        case .latest:
-          MacLibraryLatestView()
-        }
-      } else {
+      case .libraryPodcasts:
         MacLibraryPodcastsView()
+      case .librarySaved:
+        MacLibrarySavedView()
+      case .libraryDownloaded:
+        MacLibraryDownloadedView()
+      case .libraryLatest:
+        MacLibraryLatestView()
+      case .library:
+        // Fallback to podcasts if somehow .library is selected
+        MacLibraryPodcastsView()
+
+      case .search:
+        MacSearchView()
+
+      case .none:
+        MacHomeContentView()
       }
-
-    case .search:
-      MacSearchView()
-
-    case .none:
-      MacHomeContentView()
     }
   }
 
@@ -244,7 +281,17 @@ struct MacHomeContentView: View {
               GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 16)
             ], spacing: 16) {
               ForEach(viewModel.upNextEpisodes.prefix(8)) { episode in
-                MacUpNextCard(episode: episode)
+                NavigationLink(
+                  destination: EpisodeDetailView(
+                    episode: episode.episodeInfo,
+                    podcastTitle: episode.podcastTitle,
+                    fallbackImageURL: episode.imageURL,
+                    podcastLanguage: episode.language
+                  )
+                ) {
+                  MacUpNextCard(episode: episode)
+                }
+                .buttonStyle(.plain)
               }
             }
           }
@@ -283,7 +330,18 @@ struct MacHomeContentView: View {
               GridItem(.flexible(), spacing: 12)
             ], spacing: 8) {
               ForEach(Array(viewModel.topPodcasts.enumerated()), id: \.element.id) { index, podcast in
-                MacTopPodcastRow(podcast: podcast, rank: index + 1)
+                NavigationLink(
+                  destination: EpisodeListView(
+                    podcastName: podcast.name,
+                    podcastArtwork: podcast.artworkUrl100,
+                    artistName: podcast.artistName,
+                    collectionId: podcast.id,
+                    applePodcastUrl: podcast.url
+                  )
+                ) {
+                  MacTopPodcastRow(podcast: podcast, rank: index + 1)
+                }
+                .buttonStyle(.plain)
               }
             }
           }
@@ -379,7 +437,12 @@ struct MacLibraryPodcastsView: View {
       } else {
         LazyVGrid(columns: columns, spacing: 20) {
           ForEach(viewModel.podcastsSortedByRecentUpdate) { podcast in
-            MacPodcastGridCell(podcast: podcast)
+            NavigationLink(
+              destination: EpisodeListView(podcastModel: podcast)
+            ) {
+              MacPodcastGridCell(podcast: podcast)
+            }
+            .buttonStyle(.plain)
           }
         }
         .padding(24)
@@ -452,22 +515,425 @@ struct MacLibraryLatestView: View {
 }
 
 struct MacSearchView: View {
+  @StateObject private var viewModel = PodcastSearchViewModel()
+  @Environment(\.modelContext) private var modelContext
+  @Query(filter: #Predicate<PodcastInfoModel> { $0.isSubscribed == true })
+  private var subscribedPodcasts: [PodcastInfoModel]
+
+  @State private var selectedTab: SearchTab = .applePodcasts
   @State private var searchText = ""
 
   var body: some View {
-    VStack {
+    VStack(spacing: 0) {
+      // Tab selector
+      tabSelector
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+
+      // Search results
       if searchText.isEmpty {
-        ContentUnavailableView(
-          "Search Podcasts",
-          systemImage: "magnifyingglass",
-          description: Text("Find new podcasts to subscribe")
-        )
+        emptySearchView
       } else {
-        Text("Search results for: \(searchText)")
+        switch selectedTab {
+        case .applePodcasts:
+          applePodcastsResultsView
+        case .library:
+          libraryResultsView
+        }
       }
     }
     .navigationTitle("Search")
-    .searchable(text: $searchText, prompt: "Podcasts")
+    .searchable(text: $searchText, prompt: "Podcasts & Episodes")
+    .onSubmit(of: .search) {
+      if selectedTab == .applePodcasts {
+        viewModel.searchText = searchText
+        viewModel.performSearch()
+      }
+    }
+    .onChange(of: searchText) { _, newValue in
+      viewModel.searchText = newValue
+      if selectedTab == .applePodcasts && !newValue.isEmpty {
+        viewModel.performSearch()
+      }
+    }
+    .onChange(of: selectedTab) { _, newTab in
+      if newTab == .applePodcasts && !searchText.isEmpty {
+        viewModel.searchText = searchText
+        viewModel.performSearch()
+      }
+    }
+  }
+
+  // MARK: - Tab Selector
+
+  private var tabSelector: some View {
+    HStack(spacing: 0) {
+      ForEach(SearchTab.allCases, id: \.self) { tab in
+        Button(action: {
+          withAnimation(.easeInOut(duration: 0.2)) {
+            selectedTab = tab
+          }
+        }) {
+          Text(tab.rawValue)
+            .font(.subheadline)
+            .fontWeight(selectedTab == tab ? .semibold : .regular)
+            .foregroundColor(selectedTab == tab ? .primary : .secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+              RoundedRectangle(cornerRadius: 8)
+                .fill(selectedTab == tab ? Color.gray.opacity(0.2) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+      }
+    }
+    .padding(4)
+    .background(Color.gray.opacity(0.1))
+    .cornerRadius(10)
+  }
+
+  // MARK: - Empty Search View
+
+  private var emptySearchView: some View {
+    VStack(spacing: 16) {
+      Spacer()
+      Image(systemName: "magnifyingglass")
+        .font(.system(size: 50))
+        .foregroundColor(.secondary)
+      Text("Search for podcasts")
+        .font(.title3)
+        .foregroundColor(.secondary)
+      Text(selectedTab == .applePodcasts
+           ? "Find new podcasts to subscribe"
+           : "Search your subscribed podcasts and episodes")
+        .font(.subheadline)
+        .foregroundColor(.secondary)
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 40)
+      Spacer()
+    }
+  }
+
+  // MARK: - Apple Podcasts Results
+
+  private var applePodcastsResultsView: some View {
+    Group {
+      if viewModel.isLoading {
+        VStack {
+          Spacer()
+          ProgressView("Searching...")
+          Spacer()
+        }
+      } else if viewModel.podcasts.isEmpty {
+        VStack {
+          Spacer()
+          Text("No results found")
+            .foregroundColor(.secondary)
+          Spacer()
+        }
+      } else {
+        List {
+          ForEach(viewModel.podcasts, id: \.collectionId) { podcast in
+            NavigationLink(destination: EpisodeListView(
+              podcastName: podcast.collectionName,
+              podcastArtwork: podcast.artworkUrl100 ?? "",
+              artistName: podcast.artistName,
+              collectionId: String(podcast.collectionId),
+              applePodcastUrl: nil
+            )) {
+              MacApplePodcastRow(
+                podcast: podcast,
+                isSubscribed: isSubscribed(podcast),
+                onSubscribe: { subscribeToPodcast(podcast) }
+              )
+            }
+            .buttonStyle(.plain)
+          }
+        }
+        .listStyle(.plain)
+      }
+    }
+  }
+
+  // MARK: - Library Results
+
+  private var libraryResultsView: some View {
+    let filteredPodcasts = filterLibraryPodcasts()
+    let filteredEpisodes = filterLibraryEpisodes()
+
+    return Group {
+      if filteredPodcasts.isEmpty && filteredEpisodes.isEmpty {
+        VStack {
+          Spacer()
+          Text("No results in your library")
+            .foregroundColor(.secondary)
+          Spacer()
+        }
+      } else {
+        List {
+          // Podcasts section
+          if !filteredPodcasts.isEmpty {
+            Section {
+              ForEach(filteredPodcasts) { podcastModel in
+                NavigationLink {
+                  EpisodeListView(podcastModel: podcastModel)
+                } label: {
+                  MacLibraryPodcastRow(podcastModel: podcastModel)
+                }
+              }
+            }
+          }
+
+          // Episodes section
+          if !filteredEpisodes.isEmpty {
+            Section {
+              ForEach(filteredEpisodes, id: \.episode.id) { item in
+                NavigationLink {
+                  EpisodeDetailView(
+                    episode: item.episode,
+                    podcastTitle: item.podcastTitle,
+                    fallbackImageURL: item.podcastImageURL,
+                    podcastLanguage: item.podcastLanguage
+                  )
+                } label: {
+                  MacLibraryEpisodeRow(
+                    episode: item.episode,
+                    podcastTitle: item.podcastTitle,
+                    podcastImageURL: item.podcastImageURL,
+                    podcastLanguage: item.podcastLanguage
+                  )
+                }
+              }
+            }
+          }
+        }
+        .listStyle(.plain)
+      }
+    }
+  }
+
+  // MARK: - Helper Methods
+
+  private func isSubscribed(_ podcast: Podcast) -> Bool {
+    subscribedPodcasts.contains { $0.podcastInfo.title == podcast.collectionName }
+  }
+
+  private func subscribeToPodcast(_ podcast: Podcast) {
+    guard let feedUrl = podcast.feedUrl else { return }
+
+    Task {
+      do {
+        let rssService = PodcastRssService()
+        let podcastInfo = try await rssService.fetchPodcast(from: feedUrl)
+        let podcastInfoModel = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date.now)
+
+        await MainActor.run {
+          modelContext.insert(podcastInfoModel)
+          try? modelContext.save()
+        }
+      } catch {
+        print("Failed to subscribe: \(error)")
+      }
+    }
+  }
+
+  private func filterLibraryPodcasts() -> [PodcastInfoModel] {
+    let query = searchText.lowercased()
+    return subscribedPodcasts.filter { podcast in
+      podcast.podcastInfo.title.lowercased().contains(query)
+    }
+  }
+
+  private func filterLibraryEpisodes() -> [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] {
+    let query = searchText.lowercased()
+    var results: [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
+
+    for podcast in subscribedPodcasts {
+      let matchingEpisodes = podcast.podcastInfo.episodes.filter { episode in
+        episode.title.lowercased().contains(query) ||
+        (episode.podcastEpisodeDescription?.lowercased().contains(query) ?? false)
+      }
+
+      for episode in matchingEpisodes {
+        results.append((
+          episode: episode,
+          podcastTitle: podcast.podcastInfo.title,
+          podcastImageURL: podcast.podcastInfo.imageURL,
+          podcastLanguage: podcast.podcastInfo.language
+        ))
+      }
+    }
+
+    return results
+  }
+}
+
+// MARK: - Mac Apple Podcast Row
+
+struct MacApplePodcastRow: View {
+  let podcast: Podcast
+  let isSubscribed: Bool
+  let onSubscribe: () -> Void
+
+  @State private var isSubscribing = false
+
+  var body: some View {
+    HStack(spacing: 12) {
+      CachedArtworkImage(urlString: podcast.artworkUrl100, size: 56, cornerRadius: 8)
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text(podcast.collectionName)
+          .font(.subheadline)
+          .fontWeight(.medium)
+          .lineLimit(1)
+          .foregroundColor(.primary)
+
+        Text("Show · \(podcast.artistName)")
+          .font(.caption)
+          .foregroundColor(.secondary)
+          .lineLimit(1)
+      }
+
+      Spacer()
+
+      if isSubscribed {
+        Image(systemName: "checkmark")
+          .font(.subheadline)
+          .fontWeight(.semibold)
+          .foregroundColor(.green)
+      } else if isSubscribing {
+        ProgressView()
+          .scaleEffect(0.8)
+      } else {
+        Button(action: {
+          isSubscribing = true
+          onSubscribe()
+          DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            isSubscribing = false
+          }
+        }) {
+          Image(systemName: "plus")
+            .font(.title3)
+            .foregroundColor(.blue)
+        }
+        .buttonStyle(.plain)
+      }
+
+      Image(systemName: "chevron.right")
+        .font(.caption)
+        .foregroundColor(.secondary)
+    }
+    .padding(.vertical, 4)
+    .contentShape(Rectangle())
+  }
+}
+
+// MARK: - Mac Library Podcast Row
+
+struct MacLibraryPodcastRow: View {
+  let podcastModel: PodcastInfoModel
+
+  var body: some View {
+    HStack(spacing: 12) {
+      CachedArtworkImage(urlString: podcastModel.podcastInfo.imageURL, size: 56, cornerRadius: 8)
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text(podcastModel.podcastInfo.title)
+          .font(.subheadline)
+          .fontWeight(.medium)
+          .lineLimit(1)
+
+        Text("Show · \(podcastModel.podcastInfo.episodes.count) episodes")
+          .font(.caption)
+          .foregroundColor(.secondary)
+      }
+
+      Spacer()
+
+      Image(systemName: "checkmark")
+        .font(.subheadline)
+        .fontWeight(.semibold)
+        .foregroundColor(.primary)
+    }
+    .padding(.vertical, 4)
+  }
+}
+
+// MARK: - Mac Library Episode Row
+
+struct MacLibraryEpisodeRow: View {
+  let episode: PodcastEpisodeInfo
+  let podcastTitle: String
+  let podcastImageURL: String
+  let podcastLanguage: String
+
+  private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
+
+  var body: some View {
+    HStack(spacing: 12) {
+      CachedArtworkImage(urlString: episode.imageURL ?? podcastImageURL, size: 56, cornerRadius: 8)
+
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 4) {
+          if let date = episode.pubDate {
+            Text(date.formatted(date: .abbreviated, time: .omitted))
+          }
+          if let duration = episode.formattedDuration {
+            Text("·")
+            Text(duration)
+          }
+        }
+        .font(.caption2)
+        .foregroundColor(.secondary)
+
+        Text(episode.title)
+          .font(.subheadline)
+          .fontWeight(.medium)
+          .lineLimit(1)
+      }
+
+      Spacer()
+
+      if episode.audioURL != nil {
+        Button(action: {
+          playEpisode()
+        }) {
+          Image(systemName: "play.fill")
+            .font(.title3)
+            .foregroundColor(.white)
+            .frame(width: 32, height: 32)
+            .background(Color.purple)
+            .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+      }
+    }
+    .padding(.vertical, 4)
+  }
+
+  private func playEpisode() {
+    guard let audioURL = episode.audioURL else { return }
+
+    let playbackEpisode = PlaybackEpisode(
+      id: "\(podcastTitle)\u{1F}\(episode.title)",
+      title: episode.title,
+      podcastTitle: podcastTitle,
+      audioURL: audioURL,
+      imageURL: episode.imageURL ?? podcastImageURL,
+      episodeDescription: episode.podcastEpisodeDescription,
+      pubDate: episode.pubDate,
+      duration: episode.duration,
+      guid: episode.guid
+    )
+
+    audioManager.play(
+      episode: playbackEpisode,
+      audioURL: audioURL,
+      startTime: 0,
+      imageURL: episode.imageURL ?? podcastImageURL,
+      useDefaultSpeed: true
+    )
   }
 }
 

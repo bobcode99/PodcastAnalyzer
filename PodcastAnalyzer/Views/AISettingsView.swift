@@ -560,7 +560,12 @@ struct AISettingsView: View {
 }
 
 #Preview {
+    #if os(macOS)
+    AISettingsView()
+        .frame(width: 600, height: 500)
+    #else
     NavigationStack {
         AISettingsView()
     }
+    #endif
 }
