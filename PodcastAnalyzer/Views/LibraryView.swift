@@ -322,30 +322,19 @@ struct PodcastGridCell: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      // Artwork
-      if let url = URL(string: podcast.podcastInfo.imageURL) {
-        AsyncImage(url: url) { phase in
-          switch phase {
-          case .success(let image):
-            image.resizable().aspectRatio(contentMode: .fill)
-          case .failure:
-            Color.gray.opacity(0.3)
-          case .empty:
-            Color.gray.opacity(0.2)
-              .overlay(ProgressView().scaleEffect(0.5))
-          @unknown default:
-            Color.gray.opacity(0.3)
-          }
+      // Artwork - using CachedAsyncImage for better performance
+      GeometryReader { geo in
+        CachedAsyncImage(url: URL(string: podcast.podcastInfo.imageURL)) { image in
+          image.resizable().aspectRatio(contentMode: .fill)
+        } placeholder: {
+          Color.gray.opacity(0.2)
+            .overlay(ProgressView().scaleEffect(0.5))
         }
-        .frame(maxWidth: .infinity)
-        .aspectRatio(1, contentMode: .fit)
+        .frame(width: geo.size.width, height: geo.size.width)
         .cornerRadius(10)
         .clipped()
-      } else {
-        Color.gray.opacity(0.3)
-          .aspectRatio(1, contentMode: .fit)
-          .cornerRadius(10)
       }
+      .aspectRatio(1, contentMode: .fit)
 
       // Podcast title
       Text(podcast.podcastInfo.title)
@@ -533,23 +522,8 @@ struct LibraryEpisodeRowView: View {
 
   var body: some View {
     HStack(spacing: 12) {
-      // Episode artwork
-      if let url = URL(string: episode.imageURL ?? "") {
-        AsyncImage(url: url) { phase in
-          if let image = phase.image {
-            image.resizable().scaledToFill()
-          } else {
-            Color.gray.opacity(0.3)
-          }
-        }
-        .frame(width: 60, height: 60)
-        .cornerRadius(8)
-        .clipped()
-      } else {
-        Color.gray.opacity(0.3)
-          .frame(width: 60, height: 60)
-          .cornerRadius(8)
-      }
+      // Episode artwork - using CachedAsyncImage for better performance
+      CachedArtworkImage(urlString: episode.imageURL, size: 60, cornerRadius: 8)
 
       VStack(alignment: .leading, spacing: 4) {
         // Podcast title

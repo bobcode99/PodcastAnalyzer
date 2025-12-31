@@ -14,6 +14,10 @@ struct HomeView: View {
   @Environment(\.modelContext) private var modelContext
   @State private var showRegionPicker = false
 
+  // Context menu state for popular shows
+  @State private var podcastToSubscribe: AppleRSSPodcast?
+  @State private var showSubscribeSheet = false
+
   var body: some View {
     NavigationStack {
       ScrollView {
@@ -112,6 +116,12 @@ struct HomeView: View {
                 UpNextCard(episode: episode)
               }
               .buttonStyle(.plain)
+              .contextMenu {
+                UpNextContextMenu(
+                  episode: episode,
+                  viewModel: viewModel
+                )
+              }
             }
           }
           .padding(.horizontal)
@@ -169,23 +179,8 @@ struct UpNextCard: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      // Episode artwork
-      if let url = URL(string: episode.imageURL ?? "") {
-        AsyncImage(url: url) { phase in
-          if let image = phase.image {
-            image.resizable().scaledToFill()
-          } else {
-            Color.gray
-          }
-        }
-        .frame(width: 140, height: 140)
-        .cornerRadius(12)
-        .clipped()
-      } else {
-        Color.gray
-          .frame(width: 140, height: 140)
-          .cornerRadius(12)
-      }
+      // Episode artwork - using CachedAsyncImage for better performance
+      CachedArtworkImage(urlString: episode.imageURL, size: 140, cornerRadius: 12)
 
       // Podcast title
       Text(episode.podcastTitle)
@@ -211,6 +206,140 @@ struct UpNextCard: View {
   }
 }
 
+// MARK: - Up Next Context Menu
+
+struct UpNextContextMenu: View {
+  let episode: LibraryEpisode
+  @ObservedObject var viewModel: HomeViewModel
+  @ObservedObject private var downloadManager = DownloadManager.shared
+  private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
+
+  private var downloadState: DownloadState {
+    downloadManager.getDownloadState(
+      episodeTitle: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle
+    )
+  }
+
+  private var isDownloaded: Bool {
+    if case .downloaded = downloadState { return true }
+    return false
+  }
+
+  var body: some View {
+    // Star/Unstar
+    Button {
+      viewModel.toggleStar(for: episode)
+    } label: {
+      Label(
+        episode.isStarred ? "Unstar" : "Star",
+        systemImage: episode.isStarred ? "star.fill" : "star"
+      )
+    }
+
+    // Mark as Played/Unplayed
+    Button {
+      viewModel.togglePlayed(for: episode)
+    } label: {
+      Label(
+        episode.isCompleted ? "Mark as Unplayed" : "Mark as Played",
+        systemImage: episode.isCompleted ? "arrow.counterclockwise" : "checkmark.circle"
+      )
+    }
+
+    Divider()
+
+    // Play Next
+    if let audioURL = episode.episodeInfo.audioURL {
+      Button {
+        let playbackEpisode = PlaybackEpisode(
+          id: episode.id,
+          title: episode.episodeInfo.title,
+          podcastTitle: episode.podcastTitle,
+          audioURL: audioURL,
+          imageURL: episode.imageURL,
+          episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+          pubDate: episode.episodeInfo.pubDate,
+          duration: episode.episodeInfo.duration,
+          guid: episode.episodeInfo.guid
+        )
+        audioManager.playNext(playbackEpisode)
+      } label: {
+        Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+      }
+
+      Divider()
+    }
+
+    // Download actions
+    switch downloadState {
+    case .notDownloaded:
+      Button {
+        downloadManager.downloadEpisode(
+          episode: episode.episodeInfo,
+          podcastTitle: episode.podcastTitle,
+          language: episode.language
+        )
+      } label: {
+        Label("Download", systemImage: "arrow.down.circle")
+      }
+
+    case .downloading:
+      Button {
+        downloadManager.cancelDownload(
+          episodeTitle: episode.episodeInfo.title,
+          podcastTitle: episode.podcastTitle
+        )
+      } label: {
+        Label("Cancel Download", systemImage: "xmark.circle")
+      }
+
+    case .finishing:
+      Label("Saving...", systemImage: "arrow.down.circle.dotted")
+
+    case .downloaded:
+      Button(role: .destructive) {
+        downloadManager.deleteDownload(
+          episodeTitle: episode.episodeInfo.title,
+          podcastTitle: episode.podcastTitle
+        )
+      } label: {
+        Label("Delete Download", systemImage: "trash")
+      }
+
+    case .failed:
+      Button {
+        downloadManager.downloadEpisode(
+          episode: episode.episodeInfo,
+          podcastTitle: episode.podcastTitle,
+          language: episode.language
+        )
+      } label: {
+        Label("Retry Download", systemImage: "arrow.clockwise")
+      }
+    }
+
+    Divider()
+
+    // Share
+    if let audioURL = episode.episodeInfo.audioURL, let url = URL(string: audioURL) {
+      Button {
+        let activityVC = UIActivityViewController(
+          activityItems: [url],
+          applicationActivities: nil
+        )
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootVC = window.rootViewController {
+          rootVC.present(activityVC, animated: true)
+        }
+      } label: {
+        Label("Share Episode", systemImage: "square.and.arrow.up")
+      }
+    }
+  }
+}
+
 // MARK: - Top Podcast Row
 
 struct TopPodcastRow: View {
@@ -233,17 +362,8 @@ struct TopPodcastRow: View {
           .foregroundColor(.secondary)
           .frame(width: 24)
 
-        // Artwork
-        AsyncImage(url: URL(string: podcast.artworkUrl100)) { phase in
-          if let image = phase.image {
-            image.resizable().scaledToFill()
-          } else {
-            Color.gray
-          }
-        }
-        .frame(width: 56, height: 56)
-        .cornerRadius(8)
-        .clipped()
+        // Artwork - using CachedAsyncImage for better performance
+        CachedArtworkImage(urlString: podcast.artworkUrl100, size: 56, cornerRadius: 8)
 
         // Info
         VStack(alignment: .leading, spacing: 2) {
@@ -274,6 +394,61 @@ struct TopPodcastRow: View {
       .padding(.vertical, 8)
     }
     .buttonStyle(.plain)
+    .contextMenu {
+      // View episodes
+      NavigationLink(destination: EpisodeListView(
+        podcastName: podcast.name,
+        podcastArtwork: podcast.artworkUrl100,
+        artistName: podcast.artistName,
+        collectionId: podcast.id,
+        applePodcastUrl: podcast.url
+      )) {
+        Label("View Episodes", systemImage: "list.bullet")
+      }
+
+      Divider()
+
+      // Subscribe
+      if viewModel.isAlreadySubscribed(podcast) {
+        Label("Already Subscribed", systemImage: "checkmark.circle.fill")
+          .foregroundColor(.green)
+      } else {
+        Button {
+          viewModel.subscribeToPodcast(podcast)
+        } label: {
+          Label("Subscribe", systemImage: "plus.circle")
+        }
+      }
+
+      // View on Apple Podcasts
+      Link(destination: URL(string: podcast.url)!) {
+        Label("View on Apple Podcasts", systemImage: "link")
+      }
+
+      Divider()
+
+      // Copy name
+      Button {
+        UIPasteboard.general.string = podcast.name
+      } label: {
+        Label("Copy Name", systemImage: "doc.on.doc")
+      }
+
+      // Share
+      Button {
+        let activityVC = UIActivityViewController(
+          activityItems: [URL(string: podcast.url)!],
+          applicationActivities: nil
+        )
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootVC = window.rootViewController {
+          rootVC.present(activityVC, animated: true)
+        }
+      } label: {
+        Label("Share", systemImage: "square.and.arrow.up")
+      }
+    }
 
     Divider()
   }
