@@ -64,6 +64,7 @@ struct HomeView: View {
       }
     }
     .onAppear {
+      // This is the key: set the context once
       viewModel.setModelContext(modelContext)
     }
   }

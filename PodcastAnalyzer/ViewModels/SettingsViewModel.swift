@@ -239,7 +239,6 @@ class SettingsViewModel: ObservableObject {
         await MainActor.run {
           if isReady {
             transcriptModelStatus = .ready
-            logger.info("Transcript model is ready")
           } else {
             transcriptModelStatus = .notDownloaded
             logger.info("Transcript model not downloaded")

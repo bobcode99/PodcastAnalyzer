@@ -173,7 +173,6 @@ class ApplePodcastService {
         let urlString =
             "\(baseURL)/search?media=podcast&entity=podcast&term=\(encoded)&limit=\(limit)"
 
-        print(urlString)
         guard let url = URL(string: urlString) else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
         }
