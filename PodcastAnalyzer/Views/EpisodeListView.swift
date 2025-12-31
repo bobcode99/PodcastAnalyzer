@@ -842,27 +842,8 @@ struct EpisodeRowView: View {
   @ViewBuilder
   private var episodeThumbnail: some View {
     ZStack(alignment: .bottomTrailing) {
-      if let url = URL(string: episodeImageURL) {
-        AsyncImage(url: url) { phase in
-          switch phase {
-          case .success(let image):
-            image.resizable().scaledToFill()
-          case .failure:
-            Color.gray
-          case .empty:
-            Color.gray.opacity(0.3)
-          @unknown default:
-            Color.gray
-          }
-        }
-        .frame(width: 90, height: 90)
-        .cornerRadius(8)
-        .clipped()
-      } else {
-        Color.gray
-          .frame(width: 90, height: 90)
-          .cornerRadius(8)
-      }
+      // Using CachedAsyncImage for better performance
+      CachedArtworkImage(urlString: episodeImageURL, size: 90, cornerRadius: 8)
 
       // Playing indicator overlay
       if isPlayingThisEpisode {

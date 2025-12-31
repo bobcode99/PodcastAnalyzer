@@ -274,26 +274,8 @@ struct ApplePodcastRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Artwork
-            if let artworkURL = podcast.artworkUrl100, let url = URL(string: artworkURL) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    case .failure:
-                        artworkPlaceholder
-                    case .empty:
-                        Color.gray.opacity(0.3)
-                    @unknown default:
-                        artworkPlaceholder
-                    }
-                }
-                .frame(width: 56, height: 56)
-                .cornerRadius(8)
-                .clipped()
-            } else {
-                artworkPlaceholder
-            }
+            // Artwork - using CachedAsyncImage for better performance
+            CachedArtworkImage(urlString: podcast.artworkUrl100, size: 56, cornerRadius: 8)
 
             // Info
             VStack(alignment: .leading, spacing: 2) {
@@ -343,16 +325,6 @@ struct ApplePodcastRow: View {
         .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
-
-    private var artworkPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(Color.purple.opacity(0.2))
-            .frame(width: 56, height: 56)
-            .overlay(
-                Image(systemName: "mic.fill")
-                    .foregroundColor(.purple)
-            )
-    }
 }
 
 // MARK: - Library Podcast Row
@@ -365,26 +337,8 @@ struct LibraryPodcastRow: View {
             EpisodeListView(podcastModel: podcastModel)
         } label: {
             HStack(spacing: 12) {
-                // Artwork
-                if let url = URL(string: podcastModel.podcastInfo.imageURL) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        case .failure, .empty:
-                            Color.gray.opacity(0.3)
-                        @unknown default:
-                            Color.gray.opacity(0.3)
-                        }
-                    }
-                    .frame(width: 56, height: 56)
-                    .cornerRadius(8)
-                    .clipped()
-                } else {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(width: 56, height: 56)
-                }
+                // Artwork - using CachedAsyncImage for better performance
+                CachedArtworkImage(urlString: podcastModel.podcastInfo.imageURL, size: 56, cornerRadius: 8)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(podcastModel.podcastInfo.title)
@@ -429,26 +383,8 @@ struct LibraryEpisodeRow: View {
             )
         } label: {
             HStack(spacing: 12) {
-                // Artwork
-                if let url = URL(string: episode.imageURL ?? podcastImageURL) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        case .failure, .empty:
-                            Color.gray.opacity(0.3)
-                        @unknown default:
-                            Color.gray.opacity(0.3)
-                        }
-                    }
-                    .frame(width: 56, height: 56)
-                    .cornerRadius(8)
-                    .clipped()
-                } else {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(width: 56, height: 56)
-                }
+                // Artwork - using CachedAsyncImage for better performance
+                CachedArtworkImage(urlString: episode.imageURL ?? podcastImageURL, size: 56, cornerRadius: 8)
 
                 VStack(alignment: .leading, spacing: 4) {
                     // Date and duration

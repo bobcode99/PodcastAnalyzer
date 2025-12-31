@@ -346,6 +346,39 @@ actor FileStorageManager {
     return formatter.string(fromByteCount: bytes)
   }
 
+  /// Calculates total audio size (async wrapper)
+  func calculateTotalAudioSize() -> Int64 {
+    getTotalAudioSize()
+  }
+
+  // MARK: - Bulk Delete Operations
+
+  /// Clears all audio files from storage
+  func clearAllAudioFiles() {
+    do {
+      let contents = try fileManager.contentsOfDirectory(at: audioDirectory, includingPropertiesForKeys: nil)
+      for fileURL in contents {
+        try fileManager.removeItem(at: fileURL)
+      }
+      logger.info("Cleared all audio files (\(contents.count) files)")
+    } catch {
+      logger.error("Failed to clear audio files: \(error.localizedDescription)")
+    }
+  }
+
+  /// Clears all caption files from storage
+  func clearAllCaptionFiles() {
+    do {
+      let contents = try fileManager.contentsOfDirectory(at: captionsDirectory, includingPropertiesForKeys: nil)
+      for fileURL in contents {
+        try fileManager.removeItem(at: fileURL)
+      }
+      logger.info("Cleared all caption files (\(contents.count) files)")
+    } catch {
+      logger.error("Failed to clear caption files: \(error.localizedDescription)")
+    }
+  }
+
   // MARK: - Helpers
 
   private func sanitizeFileName(_ fileName: String) -> String {

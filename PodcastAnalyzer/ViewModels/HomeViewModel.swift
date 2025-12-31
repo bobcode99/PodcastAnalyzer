@@ -147,6 +147,57 @@ class HomeViewModel: ObservableObject {
     return try? context.fetch(descriptor).first
   }
 
+  // MARK: - Episode Actions
+
+  func toggleStar(for episode: LibraryEpisode) {
+    guard let context = modelContext else { return }
+
+    if let model = getEpisodeModel(for: episode.id) {
+      model.isStarred.toggle()
+      try? context.save()
+    } else {
+      guard let audioURL = episode.episodeInfo.audioURL else { return }
+      let model = EpisodeDownloadModel(
+        episodeTitle: episode.episodeInfo.title,
+        podcastTitle: episode.podcastTitle,
+        audioURL: audioURL,
+        imageURL: episode.imageURL,
+        pubDate: episode.episodeInfo.pubDate
+      )
+      model.isStarred = true
+      context.insert(model)
+      try? context.save()
+    }
+    // Reload to reflect changes
+    loadUpNextEpisodes()
+  }
+
+  func togglePlayed(for episode: LibraryEpisode) {
+    guard let context = modelContext else { return }
+
+    if let model = getEpisodeModel(for: episode.id) {
+      model.isCompleted.toggle()
+      if !model.isCompleted {
+        model.lastPlaybackPosition = 0
+      }
+      try? context.save()
+    } else {
+      guard let audioURL = episode.episodeInfo.audioURL else { return }
+      let model = EpisodeDownloadModel(
+        episodeTitle: episode.episodeInfo.title,
+        podcastTitle: episode.podcastTitle,
+        audioURL: audioURL,
+        imageURL: episode.imageURL,
+        pubDate: episode.episodeInfo.pubDate
+      )
+      model.isCompleted = true
+      context.insert(model)
+      try? context.save()
+    }
+    // Reload to reflect changes (episode will disappear from Up Next when marked as played)
+    loadUpNextEpisodes()
+  }
+
   // MARK: - Load Top Podcasts
 
   private func loadTopPodcasts() {
