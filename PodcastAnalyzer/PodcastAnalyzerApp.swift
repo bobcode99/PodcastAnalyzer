@@ -13,6 +13,8 @@ private let logger = Logger(subsystem: "com.podcast.analyzer", category: "App")
 
 @main
 struct PodcastAnalyzerApp: App {
+  @Environment(\.scenePhase) private var scenePhase
+
   let sharedModelContainer: ModelContainer = {
     let schema = Schema([
       PodcastInfoModel.self,
@@ -53,6 +55,11 @@ struct PodcastAnalyzerApp: App {
     }
   }()
 
+  init() {
+    // Register background task for episode sync
+    BackgroundSyncManager.registerBackgroundTask()
+  }
+
   var body: some Scene {
     WindowGroup {
       ContentView()
@@ -62,6 +69,21 @@ struct PodcastAnalyzerApp: App {
             if PlaybackStateCoordinator.shared == nil {
               _ = PlaybackStateCoordinator(modelContext: sharedModelContainer.mainContext)
             }
+
+            // Set up background sync manager
+            BackgroundSyncManager.shared.setModelContainer(sharedModelContainer)
+
+            // Set up podcast import manager
+            PodcastImportManager.shared.setModelContainer(sharedModelContainer)
+
+            // Set up notification navigation manager
+            NotificationNavigationManager.shared.setModelContainer(sharedModelContainer)
+
+            // Start foreground sync if enabled
+            if BackgroundSyncManager.shared.isBackgroundSyncEnabled {
+              BackgroundSyncManager.shared.startForegroundSync()
+              BackgroundSyncManager.shared.scheduleBackgroundRefresh()
+            }
           }
         }
         .onOpenURL { url in
@@ -70,6 +92,25 @@ struct PodcastAnalyzerApp: App {
         }
     }
     .modelContainer(sharedModelContainer)
+    .onChange(of: scenePhase) { _, newPhase in
+      switch newPhase {
+      case .active:
+        // App became active - start foreground sync
+        if BackgroundSyncManager.shared.isBackgroundSyncEnabled {
+          BackgroundSyncManager.shared.startForegroundSync()
+        }
+      case .background:
+        // App going to background - stop foreground timer, schedule background task
+        BackgroundSyncManager.shared.stopForegroundSync()
+        if BackgroundSyncManager.shared.isBackgroundSyncEnabled {
+          BackgroundSyncManager.shared.scheduleBackgroundRefresh()
+        }
+      case .inactive:
+        break
+      @unknown default:
+        break
+      }
+    }
   }
 
   private func handleIncomingURL(_ url: URL) {

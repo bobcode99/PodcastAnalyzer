@@ -28,12 +28,19 @@ class ExpandedPlayerViewModel: ObservableObject {
   @Published var downloadState: DownloadState = .notDownloaded
   @Published var podcastModel: PodcastInfoModel?
 
+  // Transcript properties
+  @Published var hasTranscript: Bool = false
+  @Published var transcriptSegments: [TranscriptSegment] = []
+  @Published var transcriptSearchQuery: String = ""
+
   private let audioManager = EnhancedAudioManager.shared
   private let downloadManager = DownloadManager.shared
+  private let fileStorage = FileStorageManager.shared
   private var updateTimer: Timer?
   private let applePodcastService = ApplePodcastService()
   private var shareCancellable: AnyCancellable?
   private var modelContext: ModelContext?
+  private var lastLoadedEpisodeId: String?
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
   private static let episodeKeyDelimiter = "\u{1F}"
@@ -95,6 +102,7 @@ class ExpandedPlayerViewModel: ObservableObject {
       if previousEpisodeId != episode.id {
         loadEpisodeState()
         loadPodcastModel()
+        loadTranscript()
       }
     }
   }
@@ -234,9 +242,9 @@ class ExpandedPlayerViewModel: ObservableObject {
     guard let episode = currentEpisode else { return }
 
     // Try to find Apple Podcast URL first
-    shareCancellable = applePodcastService.findAppleEpisodeUrl(
+    shareCancellable = applePodcastService.getAppleEpisodeLink(
       episodeTitle: episode.title,
-      podcastCollectionId: 0  // Search by title only
+      episodeGuid: episode.guid
     )
     .timeout(.seconds(5), scheduler: DispatchQueue.main)
     .sink(
@@ -289,7 +297,8 @@ class ExpandedPlayerViewModel: ObservableObject {
       pubDate: episode.pubDate,
       audioURL: episode.audioURL,
       imageURL: episode.imageURL,
-      duration: episode.duration
+      duration: episode.duration,
+      guid: episode.guid
     )
     downloadManager.downloadEpisode(
       episode: episodeInfo,
@@ -333,6 +342,169 @@ class ExpandedPlayerViewModel: ObservableObject {
 
   func moveInQueue(from source: IndexSet, to destination: Int) {
     audioManager.moveInQueue(from: source, to: destination)
+  }
+
+  // MARK: - Transcript
+
+  /// Current segment based on playback time
+  var currentSegmentId: Int? {
+    let time = currentTime
+    return transcriptSegments.first { segment in
+      time >= segment.startTime && time <= segment.endTime
+    }?.id
+  }
+
+  /// Current segment text for display
+  var currentSegmentText: String? {
+    guard let id = currentSegmentId else { return nil }
+    return transcriptSegments.first { $0.id == id }?.text
+  }
+
+  /// Filtered segments based on search query
+  var filteredTranscriptSegments: [TranscriptSegment] {
+    guard !transcriptSearchQuery.isEmpty else {
+      return transcriptSegments
+    }
+    let query = transcriptSearchQuery.lowercased()
+    return transcriptSegments.filter { segment in
+      segment.text.lowercased().contains(query)
+    }
+  }
+
+  private func loadTranscript() {
+    guard let episode = currentEpisode else {
+      hasTranscript = false
+      transcriptSegments = []
+      return
+    }
+
+    // Avoid reloading if already loaded for this episode
+    let episodeId = episode.id
+    if lastLoadedEpisodeId == episodeId && !transcriptSegments.isEmpty {
+      return
+    }
+
+    Task {
+      let exists = await fileStorage.captionFileExists(
+        for: episode.title,
+        podcastTitle: episode.podcastTitle
+      )
+
+      if exists {
+        do {
+          let content = try await fileStorage.loadCaptionFile(
+            for: episode.title,
+            podcastTitle: episode.podcastTitle
+          )
+          let segments = parseTranscriptSegments(from: content)
+
+          await MainActor.run {
+            self.hasTranscript = true
+            self.transcriptSegments = segments
+            self.lastLoadedEpisodeId = episodeId
+          }
+        } catch {
+          await MainActor.run {
+            self.hasTranscript = false
+            self.transcriptSegments = []
+          }
+        }
+      } else {
+        await MainActor.run {
+          self.hasTranscript = false
+          self.transcriptSegments = []
+        }
+      }
+    }
+  }
+
+  /// Parses SRT content into transcript segments
+  private func parseTranscriptSegments(from srtContent: String) -> [TranscriptSegment] {
+    var segments: [TranscriptSegment] = []
+
+    let normalizedText = srtContent.replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    let entryPattern =
+      #"(?:^|\n)(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n"#
+
+    guard let regex = try? NSRegularExpression(pattern: entryPattern, options: []) else {
+      return []
+    }
+
+    let nsText = normalizedText as NSString
+    let matches = regex.matches(
+      in: normalizedText, options: [], range: NSRange(location: 0, length: nsText.length))
+
+    for (index, match) in matches.enumerated() {
+      guard match.numberOfRanges >= 4 else { continue }
+
+      let startTimeRange = match.range(at: 2)
+      let endTimeRange = match.range(at: 3)
+
+      guard startTimeRange.location != NSNotFound,
+        endTimeRange.location != NSNotFound
+      else { continue }
+
+      let startTimeStr = nsText.substring(with: startTimeRange)
+      let endTimeStr = nsText.substring(with: endTimeRange)
+
+      guard let startTime = parseSRTTime(startTimeStr),
+        let endTime = parseSRTTime(endTimeStr)
+      else { continue }
+
+      let textStart = match.range.location + match.range.length
+      let textEnd: Int
+      if index + 1 < matches.count {
+        textEnd = matches[index + 1].range.location
+      } else {
+        textEnd = nsText.length
+      }
+
+      guard textStart < textEnd else { continue }
+
+      let textRange = NSRange(location: textStart, length: textEnd - textStart)
+      var text = nsText.substring(with: textRange)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "\n", with: " ")
+
+      text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !text.isEmpty else { continue }
+
+      segments.append(
+        TranscriptSegment(
+          id: index,
+          startTime: startTime,
+          endTime: endTime,
+          text: text
+        ))
+    }
+
+    return segments
+  }
+
+  private func parseSRTTime(_ timeString: String) -> TimeInterval? {
+    let components = timeString.replacingOccurrences(of: ",", with: ".").components(
+      separatedBy: ":")
+    guard components.count == 3 else { return nil }
+
+    guard let hours = Double(components[0]),
+      let minutes = Double(components[1]),
+      let seconds = Double(components[2])
+    else {
+      return nil
+    }
+
+    return hours * 3600 + minutes * 60 + seconds
+  }
+
+  /// Seek to a specific transcript segment
+  func seekToSegment(_ segment: TranscriptSegment) {
+    audioManager.seek(to: segment.startTime)
+    if !isPlaying {
+      audioManager.resume()
+    }
   }
 
   // MARK: - Helpers

@@ -8,6 +8,78 @@
 
 import AppIntents
 import Foundation
+import SwiftData
+
+// MARK: - Import Podcasts Intent
+
+/// Intent that allows Shortcuts to import podcasts from Apple Podcasts export
+/// Accepts combined text with RSS URLs and subscribes to all podcasts
+@available(iOS 16.0, macOS 13.0, *)
+struct ImportPodcastsIntent: AppIntent {
+    static var title: LocalizedStringResource = "Import Podcasts from List"
+    static var description = IntentDescription(
+        "Import and subscribe to podcasts from an Apple Podcasts export list. Pass the combined text containing RSS feed URLs."
+    )
+
+    @Parameter(title: "Combined Text", description: "The exported podcast list containing RSS feed URLs")
+    var combinedText: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Import podcasts from \(\.$combinedText)")
+    }
+
+    // Opens the app when this intent runs
+    static var openAppWhenRun: Bool = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        // Parse the combined text to extract RSS URLs
+        let rssURLs = parseRSSURLs(from: combinedText)
+
+        if rssURLs.isEmpty {
+            return .result(value: "No RSS feed URLs found in the provided text.")
+        }
+
+        // Post notification to trigger import in the app
+        NotificationCenter.default.post(
+            name: .importPodcastsRequested,
+            object: nil,
+            userInfo: ["rssURLs": rssURLs]
+        )
+
+        return .result(value: "Importing \(rssURLs.count) podcasts. Please wait...")
+    }
+
+    private func parseRSSURLs(from text: String) -> [String] {
+        var urls: [String] = []
+        let lines = text.components(separatedBy: .newlines)
+
+        var inURLSection = false
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            if trimmed == "__PodcastFeedURLs__" {
+                inURLSection = true
+                continue
+            }
+
+            if trimmed == "__PodcastNames__" {
+                inURLSection = false
+                continue
+            }
+
+            if inURLSection && !trimmed.isEmpty {
+                // Validate it looks like a URL
+                if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
+                    urls.append(trimmed)
+                }
+            }
+        }
+
+        return urls
+    }
+}
 
 // MARK: - Analyze Transcript Intent
 
@@ -295,6 +367,18 @@ struct AnalysisTypeQuery: EntityQuery {
 struct PodcastAnalyzerShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
+            intent: ImportPodcastsIntent(),
+            phrases: [
+                "Import podcasts to \(.applicationName)",
+                "Import podcast list with \(.applicationName)",
+                "Subscribe to podcasts using \(.applicationName)",
+                "Import Apple Podcasts to \(.applicationName)"
+            ],
+            shortTitle: "Import Podcasts",
+            systemImageName: "square.and.arrow.down"
+        )
+
+        AppShortcut(
             intent: GetCurrentTranscriptIntent(),
             phrases: [
                 "Get transcript from \(.applicationName)",
@@ -323,4 +407,5 @@ struct PodcastAnalyzerShortcuts: AppShortcutsProvider {
 extension Notification.Name {
     static let shortcutsAnalysisCompleted = Notification.Name("shortcutsAnalysisCompleted")
     static let shortcutsAnalysisRequested = Notification.Name("shortcutsAnalysisRequested")
+    static let importPodcastsRequested = Notification.Name("importPodcastsRequested")
 }

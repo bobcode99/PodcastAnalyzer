@@ -401,99 +401,93 @@ struct EpisodeDetailView: View {
         }
     }
 
-    // MARK: - Live Captions View (FIXED)
+    // MARK: - Live Captions View (Redesigned - Clean Full Page)
     private var liveCaptionsView: some View {
         VStack(spacing: 0) {
-            // Header with search and Options
-            VStack(spacing: 12) {
+            // Compact header with search and menu
+            HStack(spacing: 12) {
                 // Search bar
                 HStack {
-                    Image(systemName: "magnifyingglass").foregroundColor(
-                        .secondary
-                    )
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 14))
                     TextField(
                         "Search transcript...",
                         text: $viewModel.transcriptSearchQuery
                     )
                     .textFieldStyle(.plain)
+                    .font(.subheadline)
                     if !viewModel.transcriptSearchQuery.isEmpty {
-                        Button(action: { viewModel.transcriptSearchQuery = "" })
-                        {
+                        Button(action: { viewModel.transcriptSearchQuery = "" }) {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(.secondary)
+                                .font(.system(size: 14))
                         }
                     }
                 }
-                .padding(10)
-                .background(Color.gray.opacity(0.1))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(.systemGray6))
                 .cornerRadius(10)
 
-                // Stats and actions row
-                HStack {
-                    Text(
-                        "\(viewModel.filteredTranscriptSegments.count) segments"
-                    )
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                    Spacer()
-
-                    // FIXED: Replaced single "Copy" button with a Menu including Regenerate
-                    Menu {
-                        Button(action: {
-                            viewModel.copyTranscriptToClipboard()
-                            showCopySuccess = true
-                        }) {
-                            Label("Copy All", systemImage: "doc.on.doc")
-                        }
-
-                        Divider()
-
-                        Button(
-                            role: .destructive,
-                            action: {
-                                viewModel.generateTranscript()
-                            }
-                        ) {
+                // Options menu
+                Menu {
+                    // Info section
+                    Section {
+                        if let date = viewModel.cachedTranscriptDate {
                             Label(
-                                "Regenerate Transcript",
-                                systemImage: "arrow.clockwise"
+                                "Generated \(date.formatted(date: .abbreviated, time: .shortened))",
+                                systemImage: "clock"
                             )
                         }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("Options")
-                            Image(systemName: "chevron.down")
-                        }
-                        .font(.caption)
-                        .fontWeight(.medium)
+                        Label(
+                            "\(viewModel.filteredTranscriptSegments.count) segments",
+                            systemImage: "text.alignleft"
+                        )
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+
+                    Divider()
+
+                    Button(action: {
+                        viewModel.copyTranscriptToClipboard()
+                        showCopySuccess = true
+                    }) {
+                        Label("Copy All", systemImage: "doc.on.doc")
+                    }
+
+                    Button(
+                        role: .destructive,
+                        action: {
+                            viewModel.generateTranscript()
+                        }
+                    ) {
+                        Label("Regenerate", systemImage: "arrow.clockwise")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 22))
+                        .foregroundColor(.secondary)
                 }
             }
-            .padding(.horizontal)
-            .padding(.top, 12)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
 
-            Divider().padding(.top, 12)
-
-            // Scrollable transcript segments
+            // Full page transcript segments
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(viewModel.filteredTranscriptSegments) {
-                            segment in
+                    LazyVStack(spacing: 2) {
+                        ForEach(viewModel.filteredTranscriptSegments) { segment in
                             TranscriptSegmentRow(
                                 segment: segment,
-                                isCurrentSegment: viewModel.currentSegmentId
-                                    == segment.id,
+                                isCurrentSegment: viewModel.currentSegmentId == segment.id,
                                 searchQuery: viewModel.transcriptSearchQuery,
+                                showTimestamp: true,
                                 onTap: { viewModel.seekToSegment(segment) }
                             )
                             .id(segment.id)
                         }
                     }
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 4)
                 }
                 .onChange(of: viewModel.currentSegmentId) { _, newId in
                     if let id = newId, viewModel.transcriptSearchQuery.isEmpty {
@@ -892,17 +886,34 @@ struct TranscriptSegmentRow: View {
     let segment: TranscriptSegment
     let isCurrentSegment: Bool
     let searchQuery: String
+    let showTimestamp: Bool
     let onTap: () -> Void
+
+    init(
+        segment: TranscriptSegment,
+        isCurrentSegment: Bool,
+        searchQuery: String,
+        showTimestamp: Bool = false,
+        onTap: @escaping () -> Void
+    ) {
+        self.segment = segment
+        self.isCurrentSegment = isCurrentSegment
+        self.searchQuery = searchQuery
+        self.showTimestamp = showTimestamp
+        self.onTap = onTap
+    }
 
     var body: some View {
         Button(action: onTap) {
-            HStack(alignment: .top, spacing: 12) {
-                // Timestamp
-                Text(segment.formattedStartTime)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(isCurrentSegment ? .white : .blue)
-                    .frame(width: 50, alignment: .leading)
+            HStack(alignment: .top, spacing: showTimestamp ? 12 : 0) {
+                // Timestamp (optional)
+                if showTimestamp {
+                    Text(segment.formattedStartTime)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(isCurrentSegment ? .white : .blue)
+                        .frame(width: 50, alignment: .leading)
+                }
 
                 // Text content with highlighted search terms
                 highlightedText
@@ -920,7 +931,7 @@ struct TranscriptSegmentRow: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isCurrentSegment ? Color.blue : Color.clear)

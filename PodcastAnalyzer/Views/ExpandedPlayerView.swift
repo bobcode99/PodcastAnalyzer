@@ -17,6 +17,7 @@ struct ExpandedPlayerView: View {
   @State private var showSpeedPicker = false
   @State private var showQueue = false
   @State private var showEllipsisMenu = false
+  @State private var showFullTranscript = false
 
   // Speed options matching Apple Podcasts
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -33,29 +34,37 @@ struct ExpandedPlayerView: View {
         )
         .ignoresSafeArea()
 
-        VStack(spacing: 0) {
-          // Large artwork
-          artworkSection
-            .padding(.top, 20)
+        ScrollView {
+          VStack(spacing: 0) {
+            // Large artwork
+            artworkSection
+              .padding(.top, 20)
 
-          // Episode info
-          episodeInfoSection
-            .padding(.top, 24)
+            // Episode info
+            episodeInfoSection
+              .padding(.top, 24)
 
-          Spacer()
+            // Progress bar
+            progressSection
+              .padding(.horizontal, 24)
+              .padding(.top, 32)
 
-          // Progress bar
-          progressSection
-            .padding(.horizontal, 24)
+            // Playback controls
+            controlsSection
+              .padding(.top, 24)
 
-          // Playback controls
-          controlsSection
-            .padding(.top, 24)
+            // Bottom actions
+            bottomActionsSection
+              .padding(.top, 24)
 
-          // Bottom actions
-          bottomActionsSection
-            .padding(.top, 24)
-            .padding(.bottom, 20)
+            // Transcript preview section (if available)
+            if viewModel.hasTranscript {
+              transcriptPreviewSection
+                .padding(.top, 24)
+            }
+
+            Spacer(minLength: 40)
+          }
         }
         .blur(radius: showSpeedPicker || showQueue ? 3 : 0)
 
@@ -110,7 +119,8 @@ struct ExpandedPlayerView: View {
               pubDate: episode.pubDate,
               audioURL: episode.audioURL,
               imageURL: episode.imageURL,
-              duration: episode.duration
+              duration: episode.duration,
+              guid: episode.guid
             ),
             podcastTitle: episode.podcastTitle,
             fallbackImageURL: episode.imageURL
@@ -125,12 +135,104 @@ struct ExpandedPlayerView: View {
       .onAppear {
         viewModel.setModelContext(modelContext)
       }
+      .sheet(isPresented: $showFullTranscript) {
+        TranscriptFullScreenView(viewModel: viewModel)
+      }
     }
+  }
+
+  // MARK: - Transcript Preview Section
+  private var transcriptPreviewSection: some View {
+    VStack(spacing: 12) {
+      // Header
+      HStack {
+        HStack(spacing: 6) {
+          Image(systemName: "captions.bubble.fill")
+            .foregroundColor(.purple)
+          Text("Transcript")
+            .font(.headline)
+        }
+
+        Spacer()
+
+        Button(action: { showFullTranscript = true }) {
+          HStack(spacing: 4) {
+            Text("Expand")
+              .font(.subheadline)
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+              .font(.caption)
+          }
+          .foregroundColor(.blue)
+        }
+      }
+      .padding(.horizontal, 20)
+
+      // Current segment highlight
+      if let currentText = viewModel.currentSegmentText {
+        Text(currentText)
+          .font(.body)
+          .foregroundColor(.primary)
+          .multilineTextAlignment(.center)
+          .padding(.horizontal, 20)
+          .padding(.vertical, 12)
+          .frame(maxWidth: .infinity)
+          .background(Color.blue.opacity(0.1))
+          .cornerRadius(12)
+          .padding(.horizontal, 16)
+      }
+
+      // Preview of segments (show 3 upcoming)
+      VStack(spacing: 0) {
+        ForEach(getPreviewSegments(), id: \.id) { segment in
+          Button(action: { viewModel.seekToSegment(segment) }) {
+            HStack(alignment: .top, spacing: 10) {
+              Text(segment.formattedStartTime)
+                .font(.caption)
+                .foregroundColor(.blue)
+                .frame(width: 50, alignment: .leading)
+
+              Text(segment.text)
+                .font(.subheadline)
+                .foregroundColor(viewModel.currentSegmentId == segment.id ? .primary : .secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(
+              viewModel.currentSegmentId == segment.id
+                ? Color.blue.opacity(0.15)
+                : Color.clear
+            )
+          }
+          .buttonStyle(.plain)
+        }
+      }
+      .background(Color(.systemGray6))
+      .cornerRadius(12)
+      .padding(.horizontal, 16)
+    }
+  }
+
+  private func getPreviewSegments() -> [TranscriptSegment] {
+    let segments = viewModel.transcriptSegments
+    guard !segments.isEmpty else { return [] }
+
+    let currentId = viewModel.currentSegmentId ?? 0
+    let startIndex = max(0, currentId - 1)
+    let endIndex = min(segments.count, startIndex + 4)
+
+    return Array(segments[startIndex..<endIndex])
   }
 
   // MARK: - Artwork Section
   private var artworkSection: some View {
-    Group {
+    let baseSize: CGFloat = 280
+    let playingScale: CGFloat = 1.08
+    let isPlaying = viewModel.isPlaying
+
+    return Group {
       if let imageURL = viewModel.imageURL {
         AsyncImage(url: imageURL) { phase in
           if let image = phase.image {
@@ -141,13 +243,17 @@ struct ExpandedPlayerView: View {
             artworkPlaceholder
           }
         }
-        .frame(width: 280, height: 280)
+        .frame(width: baseSize, height: baseSize)
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
+        .shadow(color: .black.opacity(isPlaying ? 0.4 : 0.25), radius: isPlaying ? 25 : 15, x: 0, y: isPlaying ? 12 : 8)
+        .scaleEffect(isPlaying ? playingScale : 1.0)
+        .animation(.spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0), value: isPlaying)
       } else {
         artworkPlaceholder
-          .frame(width: 280, height: 280)
+          .frame(width: baseSize, height: baseSize)
           .clipShape(RoundedRectangle(cornerRadius: 16))
+          .scaleEffect(isPlaying ? playingScale : 1.0)
+          .animation(.spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0), value: isPlaying)
       }
     }
   }
@@ -164,93 +270,107 @@ struct ExpandedPlayerView: View {
 
   // MARK: - Episode Info Section
   private var episodeInfoSection: some View {
-    VStack(spacing: 8) {
-      // Date
-      if let date = viewModel.episodeDate {
-        Text(date.formatted(date: .abbreviated, time: .omitted))
-          .font(.caption)
-          .foregroundColor(.secondary)
-      }
-
-      // Episode title with ellipsis menu
-      HStack(alignment: .top) {
-        Text(viewModel.episodeTitle)
-          .font(.title3)
-          .fontWeight(.semibold)
-          .lineLimit(2)
-          .multilineTextAlignment(.center)
-
-        Menu {
-          ellipsisMenuContent
-        } label: {
-          Image(systemName: "ellipsis")
+    VStack(spacing: 12) {
+      // 1. Fixed height container for Title and Ellipsis
+      HStack(alignment: .center, spacing: 16) {
+        // Spacer to keep title centered if you want,
+        // but usually, it's better to let title take space and fix the button.
+        VStack(alignment: .center, spacing: 4) {
+          Text(viewModel.episodeTitle)
             .font(.title3)
-            .foregroundColor(.secondary)
-            .padding(8)
-        }
-      }
-      .padding(.horizontal, 24)
+            .fontWeight(.bold)
+            .lineLimit(2)
+            .multilineTextAlignment(.center)
+            .foregroundColor(.primary)
 
-      // Podcast name - tappable to go to episode list
-      Button(action: {
-        if viewModel.podcastModel != nil {
-          showPodcastEpisodeList = true
-        }
-      }) {
-        HStack(spacing: 4) {
-          Text(viewModel.podcastTitle)
-            .font(.subheadline)
-            .foregroundColor(.blue)
-            .lineLimit(1)
-          if viewModel.podcastModel != nil {
-            Image(systemName: "chevron.right")
-              .font(.caption)
+          // Podcast name button
+          Button(action: { showPodcastEpisodeList = true }) {
+            Text(viewModel.podcastTitle)
+              .font(.subheadline)
+              .fontWeight(.medium)
               .foregroundColor(.blue)
           }
         }
+        .frame(maxWidth: .infinity)
+        // This ensures the title doesn't overlap the button
+        .padding(.leading, 44)
+
+        // 2. Enhanced Ellipsis Button
+        Menu {
+          ellipsisMenuContent
+        } label: {
+          Image(systemName: "ellipsis.circle.fill")
+            .font(.system(size: 24))
+            .foregroundColor(.secondary.opacity(0.5))
+            .frame(width: 44, height: 44)  // Large touch target
+            .contentShape(Rectangle())  // Makes the whole 44x44 area tappable
+        }
       }
-      .buttonStyle(.plain)
+      .padding(.horizontal, 20)
+
+      // Date Label
+      if let date = viewModel.episodeDate {
+        Text(date.formatted(date: .abbreviated, time: .omitted))
+          .font(.caption2)
+          .fontWeight(.bold)
+          .foregroundColor(.secondary)
+          .textCase(.uppercase)
+      }
     }
   }
 
   // MARK: - Ellipsis Menu Content (Apple Podcasts Style)
   @ViewBuilder
   private var ellipsisMenuContent: some View {
-    // Use consistent EpisodeMenuActions component
-    EpisodeMenuActions(
-      isStarred: viewModel.isStarred,
-      isCompleted: viewModel.isCompleted,
-      hasLocalAudio: viewModel.hasLocalAudio,
-      downloadState: viewModel.downloadState,
-      audioURL: viewModel.audioURL,
-      onToggleStar: { viewModel.toggleStar() },
-      onTogglePlayed: { viewModel.togglePlayed() },
-      onDownload: { viewModel.startDownload() },
-      onCancelDownload: { viewModel.cancelDownload() },
-      onDeleteDownload: { viewModel.deleteDownload() },
-      onShare: { viewModel.shareEpisode() },
-      onPlayNext: { viewModel.playNextCurrentEpisode() }
-    )
+    // SECTION 1: Immediate Actions
+    Section {
+      Button(action: { viewModel.playNextCurrentEpisode() }) {
+        Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+      }
 
-    Divider()
-
-    Button(action: { showEpisodeDetail = true }) {
-      Label("Go to Episode", systemImage: "info.circle")
+      Button(action: { viewModel.shareEpisode() }) {
+        Label("Share Episode...", systemImage: "square.and.arrow.up")
+      }
     }
 
-    if viewModel.podcastModel != nil {
+    // SECTION 2: Library Management
+    Section {
+      Button(action: { viewModel.toggleStar() }) {
+        Label(
+          viewModel.isStarred ? "Unstar Episode" : "Star Episode",
+          systemImage: viewModel.isStarred ? "star.fill" : "star"
+        )
+      }
+
+      if viewModel.hasLocalAudio {
+        Button(role: .destructive, action: { viewModel.deleteDownload() }) {
+          Label("Remove Download", systemImage: "minus.circle")
+        }
+      } else {
+        Button(action: { viewModel.startDownload() }) {
+          Label("Download Episode", systemImage: "arrow.down.circle")
+        }
+      }
+    }
+
+    // SECTION 3: Navigation & Info
+    Section {
+      Button(action: { showEpisodeDetail = true }) {
+        Label("View Episode Description", systemImage: "doc.text")
+      }
+
       Button(action: { showPodcastEpisodeList = true }) {
         Label("Go to Show", systemImage: "square.stack")
       }
     }
 
-    Divider()
-
-    Button(action: { viewModel.reportConcern() }) {
-      Label("Report a Concern", systemImage: "exclamationmark.bubble")
+    // SECTION 4: Feedback
+    Section {
+      Button(role: .destructive, action: { viewModel.reportConcern() }) {
+        Label("Report a Concern", systemImage: "exclamationmark.bubble")
+      }
     }
   }
-
   // MARK: - Progress Section
   private var progressSection: some View {
     VStack(spacing: 8) {
@@ -276,7 +396,9 @@ struct ExpandedPlayerView: View {
             .frame(width: 14, height: 14)
             .offset(
               x: max(
-                0, min(geometry.size.width * CGFloat(viewModel.progress) - 7, geometry.size.width - 14))
+                0,
+                min(geometry.size.width * CGFloat(viewModel.progress) - 7, geometry.size.width - 14)
+              )
             )
         }
         .gesture(
@@ -516,7 +638,7 @@ struct QueueOverlay: View {
   }
 }
 
-// MARK: - Speed Picker Overlay (Apple Podcasts Style)
+// MARK: - Speed Picker Overlay (Apple Podcasts Style with Slider)
 
 struct SpeedPickerOverlay: View {
   let currentSpeed: Float
@@ -526,6 +648,21 @@ struct SpeedPickerOverlay: View {
   let onDismiss: () -> Void
 
   @State private var showAllSpeeds = false
+  @State private var sliderValue: Float
+  @State private var lastHapticSpeed: Float = 0
+
+  // Speed stops for haptic feedback
+  private let speedStops: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+
+  init(currentSpeed: Float, quickSpeeds: [Float], allSpeeds: [Float], onSelectSpeed: @escaping (Float) -> Void, onDismiss: @escaping () -> Void) {
+    self.currentSpeed = currentSpeed
+    self.quickSpeeds = quickSpeeds
+    self.allSpeeds = allSpeeds
+    self.onSelectSpeed = onSelectSpeed
+    self.onDismiss = onDismiss
+    self._sliderValue = State(initialValue: currentSpeed)
+    self._lastHapticSpeed = State(initialValue: currentSpeed)
+  }
 
   var body: some View {
     ZStack {
@@ -545,10 +682,75 @@ struct SpeedPickerOverlay: View {
             .fontWeight(.medium)
             .foregroundColor(.primary)
           Spacer()
+
+          // Current speed display
+          Text(formatSpeed(sliderValue))
+            .font(.title2)
+            .fontWeight(.bold)
+            .foregroundColor(.blue)
+            .monospacedDigit()
         }
         .padding(.horizontal, 16)
         .padding(.top, 16)
         .padding(.bottom, 12)
+
+        Divider()
+          .padding(.horizontal, 12)
+
+        // Speed slider
+        VStack(spacing: 8) {
+          Slider(
+            value: $sliderValue,
+            in: 0.5...2.0,
+            step: 0.05
+          ) {
+            Text("Speed")
+          } minimumValueLabel: {
+            Text("0.5x")
+              .font(.caption2)
+              .foregroundColor(.secondary)
+          } maximumValueLabel: {
+            Text("2x")
+              .font(.caption2)
+              .foregroundColor(.secondary)
+          }
+          .tint(.blue)
+          .onChange(of: sliderValue) { oldValue, newValue in
+            // Check if we crossed a speed stop for haptic feedback
+            for stop in speedStops {
+              let crossedForward = oldValue < stop && newValue >= stop
+              let crossedBackward = oldValue > stop && newValue <= stop
+              if crossedForward || crossedBackward {
+                triggerHaptic()
+                break
+              }
+            }
+          }
+
+          // Speed stop markers
+          HStack {
+            ForEach(speedStops, id: \.self) { stop in
+              if stop == speedStops.first {
+                Circle()
+                  .fill(sliderValue >= stop ? Color.blue : Color.gray.opacity(0.3))
+                  .frame(width: 6, height: 6)
+              } else if stop == speedStops.last {
+                Spacer()
+                Circle()
+                  .fill(sliderValue >= stop ? Color.blue : Color.gray.opacity(0.3))
+                  .frame(width: 6, height: 6)
+              } else {
+                Spacer()
+                Circle()
+                  .fill(sliderValue >= stop ? Color.blue : Color.gray.opacity(0.3))
+                  .frame(width: 6, height: 6)
+              }
+            }
+          }
+          .padding(.horizontal, 4)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
 
         Divider()
           .padding(.horizontal, 12)
@@ -559,30 +761,52 @@ struct SpeedPickerOverlay: View {
             ForEach(showAllSpeeds ? allSpeeds : quickSpeeds, id: \.self) { speed in
               SpeedButton(
                 speed: speed,
-                isSelected: abs(currentSpeed - speed) < 0.01,
-                onTap: { onSelectSpeed(speed) }
+                isSelected: abs(sliderValue - speed) < 0.03,
+                onTap: {
+                  withAnimation(.easeInOut(duration: 0.2)) {
+                    sliderValue = speed
+                  }
+                  triggerHaptic()
+                  onSelectSpeed(speed)
+                }
               )
             }
           }
           .padding(.horizontal, 16)
-          .padding(.vertical, 16)
+          .padding(.vertical, 12)
         }
 
-        // "More Speeds" hint
-        Button(action: {
-          withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-            showAllSpeeds.toggle()
+        // "More Speeds" hint and Apply button
+        HStack {
+          Button(action: {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+              showAllSpeeds.toggle()
+            }
+          }) {
+            HStack(spacing: 4) {
+              Text(showAllSpeeds ? "Show Less" : "More Speeds")
+                .font(.caption)
+                .foregroundColor(.secondary)
+              Image(systemName: showAllSpeeds ? "chevron.up" : "chevron.down")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            }
           }
-        }) {
-          HStack(spacing: 4) {
-            Text(showAllSpeeds ? "Show Less" : "More Speeds")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            Image(systemName: showAllSpeeds ? "chevron.up" : "chevron.down")
-              .font(.caption2)
-              .foregroundColor(.secondary)
+
+          Spacer()
+
+          Button("Apply") {
+            onSelectSpeed(sliderValue)
           }
+          .font(.subheadline)
+          .fontWeight(.semibold)
+          .foregroundColor(.white)
+          .padding(.horizontal, 20)
+          .padding(.vertical, 8)
+          .background(Color.blue)
+          .cornerRadius(20)
         }
+        .padding(.horizontal, 16)
         .padding(.bottom, 16)
       }
       .background(
@@ -592,6 +816,21 @@ struct SpeedPickerOverlay: View {
       )
       .padding(.horizontal, 24)
     }
+  }
+
+  private func formatSpeed(_ speed: Float) -> String {
+    if speed == 1.0 {
+      return "1x"
+    } else if speed.truncatingRemainder(dividingBy: 1) == 0 {
+      return "\(Int(speed))x"
+    } else {
+      return String(format: "%.2gx", speed)
+    }
+  }
+
+  private func triggerHaptic() {
+    let generator = UIImpactFeedbackGenerator(style: .light)
+    generator.impactOccurred()
   }
 }
 
@@ -626,6 +865,142 @@ struct SpeedButton: View {
     } else {
       return String(format: "%.2gx", speed)
     }
+  }
+}
+
+// MARK: - Transcript Full Screen View
+
+struct TranscriptFullScreenView: View {
+  @Environment(\.dismiss) private var dismiss
+  @ObservedObject var viewModel: ExpandedPlayerViewModel
+
+  var body: some View {
+    NavigationStack {
+      VStack(spacing: 0) {
+        // Search bar
+        HStack {
+          Image(systemName: "magnifyingglass")
+            .foregroundColor(.secondary)
+            .font(.system(size: 14))
+          TextField(
+            "Search transcript...",
+            text: $viewModel.transcriptSearchQuery
+          )
+          .textFieldStyle(.plain)
+          .font(.subheadline)
+          if !viewModel.transcriptSearchQuery.isEmpty {
+            Button(action: { viewModel.transcriptSearchQuery = "" }) {
+              Image(systemName: "xmark.circle.fill")
+                .foregroundColor(.secondary)
+                .font(.system(size: 14))
+            }
+          }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(.systemGray6))
+        .cornerRadius(10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+
+        // Mini player bar
+        miniPlayerBar
+          .padding(.horizontal, 16)
+          .padding(.bottom, 8)
+
+        Divider()
+
+        // Transcript segments
+        ScrollViewReader { proxy in
+          ScrollView {
+            LazyVStack(spacing: 0) {
+              ForEach(viewModel.filteredTranscriptSegments, id: \.id) { segment in
+                TranscriptSegmentRow(
+                  segment: segment,
+                  isCurrentSegment: viewModel.currentSegmentId == segment.id,
+                  searchQuery: viewModel.transcriptSearchQuery,
+                  showTimestamp: true,
+                  onTap: { viewModel.seekToSegment(segment) }
+                )
+                .id(segment.id)
+              }
+            }
+            .padding(.vertical, 8)
+          }
+          .onChange(of: viewModel.currentSegmentId) { _, newId in
+            if let id = newId, viewModel.transcriptSearchQuery.isEmpty {
+              withAnimation(.easeInOut(duration: 0.3)) {
+                proxy.scrollTo(id, anchor: .center)
+              }
+            }
+          }
+        }
+      }
+      .navigationTitle("Transcript")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("Done") {
+            dismiss()
+          }
+        }
+      }
+    }
+  }
+
+  // Mini player bar inside transcript sheet
+  private var miniPlayerBar: some View {
+    HStack(spacing: 12) {
+      // Small artwork
+      if let imageURL = viewModel.imageURL {
+        AsyncImage(url: imageURL) { phase in
+          if let image = phase.image {
+            image.resizable().aspectRatio(contentMode: .fill)
+          } else {
+            Color.gray.opacity(0.3)
+          }
+        }
+        .frame(width: 44, height: 44)
+        .cornerRadius(6)
+      }
+
+      // Episode info
+      VStack(alignment: .leading, spacing: 2) {
+        Text(viewModel.episodeTitle)
+          .font(.subheadline)
+          .fontWeight(.medium)
+          .lineLimit(1)
+        Text(viewModel.currentTimeString)
+          .font(.caption)
+          .foregroundColor(.secondary)
+      }
+
+      Spacer()
+
+      // Playback controls
+      HStack(spacing: 16) {
+        Button(action: { viewModel.skipBackward() }) {
+          Image(systemName: "gobackward.15")
+            .font(.system(size: 20))
+            .foregroundColor(.primary)
+        }
+
+        Button(action: { viewModel.togglePlayPause() }) {
+          Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
+            .font(.system(size: 24))
+            .foregroundColor(.primary)
+        }
+
+        Button(action: { viewModel.skipForward() }) {
+          Image(systemName: "goforward.30")
+            .font(.system(size: 20))
+            .foregroundColor(.primary)
+        }
+      }
+    }
+    .padding(12)
+    .background(Color(.systemGray6))
+    .cornerRadius(12)
   }
 }
 

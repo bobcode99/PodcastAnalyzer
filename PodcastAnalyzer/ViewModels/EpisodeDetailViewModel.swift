@@ -215,7 +215,8 @@ final class EpisodeDetailViewModel {
       imageURL: imageURLString,
       episodeDescription: episode.podcastEpisodeDescription,
       pubDate: episode.pubDate,
-      duration: episode.duration
+      duration: episode.duration,
+      guid: episode.guid
     )
 
     // Resume from saved position if available
@@ -445,9 +446,9 @@ final class EpisodeDetailViewModel {
     logger.debug("Share episode: \(self.episode.title)")
 
     // Try to find Apple Podcast URL first
-    shareCancellable = applePodcastService.findAppleEpisodeUrl(
+    shareCancellable = applePodcastService.getAppleEpisodeLink(
       episodeTitle: episode.title,
-      podcastCollectionId: 0  // We don't have collectionId in this context, search by title only
+      episodeGuid: episode.guid
     )
     .timeout(.seconds(5), scheduler: DispatchQueue.main)
     .sink(
@@ -543,7 +544,8 @@ final class EpisodeDetailViewModel {
       imageURL: imageURLString,
       episodeDescription: episode.podcastEpisodeDescription,
       pubDate: episode.pubDate,
-      duration: episode.duration
+      duration: episode.duration,
+      guid: episode.guid
     )
 
     audioManager.playNext(playbackEpisode)
@@ -663,8 +665,15 @@ final class EpisodeDetailViewModel {
         podcastTitle: podcastTitle
       )
 
+      // Also get the file date
+      let fileDate = await fileStorage.getCaptionFileDate(
+        for: episode.title,
+        podcastTitle: podcastTitle
+      )
+
       await MainActor.run {
         transcriptText = content
+        cachedTranscriptDate = fileDate
         transcriptState = .completed
         parseTranscriptSegments()
       }
@@ -675,6 +684,29 @@ final class EpisodeDetailViewModel {
 
   var hasTranscript: Bool {
     !transcriptText.isEmpty
+  }
+
+  /// Get the transcript generation date from the SRT file's modification date
+  var transcriptGeneratedAt: Date? {
+    get async {
+      return await fileStorage.getCaptionFileDate(
+        for: episode.title,
+        podcastTitle: podcastTitle
+      )
+    }
+  }
+
+  /// Cached transcript generation date (for synchronous access in View)
+  var cachedTranscriptDate: Date?
+
+  /// Load transcript generation date
+  func loadTranscriptDate() {
+    Task {
+      let date = await transcriptGeneratedAt
+      await MainActor.run {
+        cachedTranscriptDate = date
+      }
+    }
   }
 
   var hasAIAnalysis: Bool {

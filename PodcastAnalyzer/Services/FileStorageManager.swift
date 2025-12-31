@@ -234,6 +234,27 @@ actor FileStorageManager {
     return fileManager.fileExists(atPath: path.path)
   }
 
+  /// Gets the creation/modification date of a caption file
+  func getCaptionFileDate(for episodeTitle: String, podcastTitle: String) -> Date? {
+    let path = captionFilePath(for: episodeTitle, podcastTitle: podcastTitle)
+
+    guard fileManager.fileExists(atPath: path.path) else {
+      return nil
+    }
+
+    do {
+      let attributes = try fileManager.attributesOfItem(atPath: path.path)
+      // Prefer modification date, fall back to creation date
+      if let modDate = attributes[.modificationDate] as? Date {
+        return modDate
+      }
+      return attributes[.creationDate] as? Date
+    } catch {
+      logger.error("Failed to get caption file date: \(error.localizedDescription)")
+      return nil
+    }
+  }
+
   /// Saves caption/SRT file
   func saveCaptionFile(content: String, episodeTitle: String, podcastTitle: String) throws -> URL {
     // Ensure captions directory exists

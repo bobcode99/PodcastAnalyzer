@@ -2,7 +2,7 @@
 //  EpisodeListView.swift
 //  PodcastAnalyzer
 //
-//  Created by Bob on 2025/11/23.
+//  Unified view for browsing podcast episodes - works for both subscribed and unsubscribed podcasts.
 //
 
 import Combine
@@ -15,6 +15,7 @@ enum EpisodeFilter: String, CaseIterable {
   case all = "All"
   case unplayed = "Unplayed"
   case played = "Played"
+  case starred = "Starred"
   case downloaded = "Downloaded"
 
   var icon: String {
@@ -22,22 +23,103 @@ enum EpisodeFilter: String, CaseIterable {
     case .all: return "list.bullet"
     case .unplayed: return "circle"
     case .played: return "checkmark.circle"
+    case .starred: return "star.fill"
     case .downloaded: return "arrow.down.circle.fill"
     }
   }
 }
 
+// MARK: - Podcast Source (subscribed vs browse)
+
+enum PodcastSource {
+  case model(PodcastInfoModel)
+  case browse(collectionId: String, podcastName: String, artistName: String, artworkURL: String, applePodcastURL: String?)
+}
+
 // MARK: - Episode List View
 
 struct EpisodeListView: View {
-  let podcastModel: PodcastInfoModel
+  private let source: PodcastSource
+
   @Environment(\.modelContext) private var modelContext
+  @Environment(\.dismiss) private var dismiss
   @ObservedObject private var downloadManager = DownloadManager.shared
   @State private var viewModel: EpisodeListViewModel?
   @State private var episodeToDelete: PodcastEpisodeInfo?
   @State private var showDeleteConfirmation = false
+  @State private var showUnsubscribeConfirmation = false
+  @State private var applePodcastURL: URL?
+
+  // Browse mode state
+  @State private var isLoadingRSS = false
+  @State private var loadError: String?
+  @State private var podcastModel: PodcastInfoModel?
+
+  private let applePodcastService = ApplePodcastService()
+
+  // MARK: - Initializers
+
+  /// Initialize with a podcast model (subscribed or browsed)
+  init(podcastModel: PodcastInfoModel) {
+    self.source = .model(podcastModel)
+  }
+
+  /// Initialize for browsing an unsubscribed podcast (will be persisted with isSubscribed=false)
+  init(
+    podcastName: String,
+    podcastArtwork: String,
+    artistName: String,
+    collectionId: String,
+    applePodcastUrl: String?
+  ) {
+    self.source = .browse(
+      collectionId: collectionId,
+      podcastName: podcastName,
+      artistName: artistName,
+      artworkURL: podcastArtwork,
+      applePodcastURL: applePodcastUrl
+    )
+  }
+
+  private var navigationTitle: String {
+    switch source {
+    case .model(let model):
+      return model.podcastInfo.title
+    case .browse(_, let name, _, _, _):
+      return name
+    }
+  }
+
+  private var artistName: String {
+    switch source {
+    case .model:
+      return ""
+    case .browse(_, _, let artist, _, _):
+      return artist
+    }
+  }
+
+  private var isSubscribed: Bool {
+    podcastModel?.isSubscribed ?? false
+  }
 
   var body: some View {
+    Group {
+      switch source {
+      case .model(let model):
+        modelContent(podcastModel: model)
+      case .browse:
+        browseContent
+      }
+    }
+    .navigationTitle(navigationTitle)
+    .navigationBarTitleDisplayMode(.inline)
+  }
+
+  // MARK: - Model Content (for existing PodcastInfoModel)
+
+  @ViewBuilder
+  private func modelContent(podcastModel: PodcastInfoModel) -> some View {
     Group {
       if let vm = viewModel {
         episodeListContent(viewModel: vm)
@@ -46,6 +128,7 @@ struct EpisodeListView: View {
       }
     }
     .onAppear {
+      self.podcastModel = podcastModel
       if viewModel == nil {
         let vm = EpisodeListViewModel(podcastModel: podcastModel)
         vm.setModelContext(modelContext)
@@ -56,12 +139,192 @@ struct EpisodeListView: View {
     .onDisappear {
       viewModel?.stopRefreshTimer()
     }
+    .task {
+      await lookupApplePodcastURL(title: podcastModel.podcastInfo.title)
+    }
   }
 
+  // MARK: - Browse Content
+
   @ViewBuilder
-  private func episodeListContent(viewModel: EpisodeListViewModel)
-    -> some View
-  {
+  private var browseContent: some View {
+    Group {
+      if isLoadingRSS {
+        loadingView
+      } else if let error = loadError {
+        errorView(error)
+      } else if let vm = viewModel {
+        episodeListContent(viewModel: vm)
+      } else {
+        loadingView
+      }
+    }
+    .task {
+      await loadBrowsePodcast()
+    }
+  }
+
+  private var loadingView: some View {
+    VStack(spacing: 20) {
+      if case .browse(_, let name, _, let artwork, _) = source {
+        AsyncImage(url: URL(string: artwork.replacingOccurrences(of: "100x100", with: "300x300"))) { phase in
+          if let image = phase.image {
+            image.resizable().scaledToFit()
+          } else {
+            Color.gray
+          }
+        }
+        .frame(width: 150, height: 150)
+        .cornerRadius(12)
+
+        Text(name)
+          .font(.headline)
+      }
+
+      ProgressView("Loading episodes...")
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+
+  private func errorView(_ error: String) -> some View {
+    VStack(spacing: 16) {
+      Image(systemName: "exclamationmark.triangle")
+        .font(.system(size: 50))
+        .foregroundColor(.orange)
+
+      Text("Unable to load podcast")
+        .font(.headline)
+
+      Text(error)
+        .font(.subheadline)
+        .foregroundColor(.secondary)
+        .multilineTextAlignment(.center)
+        .padding(.horizontal)
+
+      Button("Try Again") {
+        Task { await loadBrowsePodcast() }
+      }
+      .buttonStyle(.borderedProminent)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+
+  private func loadBrowsePodcast() async {
+    guard case .browse(let collectionId, let podcastName, _, _, let appleURL) = source else { return }
+
+    isLoadingRSS = true
+    loadError = nil
+
+    // Set Apple URL if provided
+    if let urlStr = appleURL, let url = URL(string: urlStr) {
+      applePodcastURL = url
+    }
+
+    // Check if this podcast already exists in SwiftData (subscribed or browsed before)
+    let existingModel = findExistingPodcast(podcastName: podcastName)
+    if let existing = existingModel {
+      // Use existing model
+      self.podcastModel = existing
+      let vm = EpisodeListViewModel(podcastModel: existing)
+      vm.setModelContext(modelContext)
+      self.viewModel = vm
+      vm.startRefreshTimer()
+
+      if applePodcastURL == nil {
+        await lookupApplePodcastURL(title: existing.podcastInfo.title)
+      }
+
+      isLoadingRSS = false
+      return
+    }
+
+    // Look up RSS URL from Apple
+    do {
+      let feedUrl = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+        var cancellable: AnyCancellable?
+        cancellable = applePodcastService.lookupPodcast(collectionId: collectionId)
+          .sink(
+            receiveCompletion: { completion in
+              if case .failure(let error) = completion {
+                continuation.resume(throwing: error)
+              }
+              cancellable?.cancel()
+            },
+            receiveValue: { podcast in
+              if let feedUrl = podcast?.feedUrl {
+                continuation.resume(returning: feedUrl)
+              } else {
+                continuation.resume(throwing: URLError(.badServerResponse))
+              }
+            }
+          )
+      }
+
+      // Fetch RSS with caching
+      let info = try await RSSCacheService.shared.fetchPodcast(from: feedUrl)
+
+      // Persist to SwiftData with isSubscribed = false (browsed podcast)
+      let model = PodcastInfoModel(podcastInfo: info, lastUpdated: Date(), isSubscribed: false)
+      modelContext.insert(model)
+      try modelContext.save()
+
+      self.podcastModel = model
+      let vm = EpisodeListViewModel(podcastModel: model)
+      vm.setModelContext(modelContext)
+      self.viewModel = vm
+      vm.startRefreshTimer()
+
+      // Lookup Apple URL if not provided
+      if applePodcastURL == nil {
+        await lookupApplePodcastURL(title: info.title)
+      }
+
+      isLoadingRSS = false
+    } catch {
+      loadError = error.localizedDescription
+      isLoadingRSS = false
+    }
+  }
+
+  private func findExistingPodcast(podcastName: String) -> PodcastInfoModel? {
+    let descriptor = FetchDescriptor<PodcastInfoModel>(
+      predicate: #Predicate { $0.podcastInfo.title == podcastName }
+    )
+    return try? modelContext.fetch(descriptor).first
+  }
+
+  private func subscribe() {
+    guard let model = podcastModel else { return }
+
+    // Just flip the isSubscribed flag
+    model.isSubscribed = true
+
+    do {
+      try modelContext.save()
+    } catch {
+      loadError = "Failed to subscribe: \(error.localizedDescription)"
+    }
+  }
+
+  private func unsubscribe() {
+    guard let model = podcastModel else { return }
+
+    // Flip the isSubscribed flag to false
+    model.isSubscribed = false
+
+    do {
+      try modelContext.save()
+      // Navigate back after unsubscribing
+      dismiss()
+    } catch {
+      loadError = "Failed to unsubscribe: \(error.localizedDescription)"
+    }
+  }
+
+  // MARK: - Episode List Content
+
+  @ViewBuilder
+  private func episodeListContent(viewModel: EpisodeListViewModel) -> some View {
     List {
       // MARK: - Header Section
       Section {
@@ -111,11 +374,31 @@ struct EpisodeListView: View {
       }
     }
     .listStyle(.plain)
-    .navigationTitle(viewModel.podcastInfo.title)
-    .iosNavigationBarTitleDisplayModeInline()
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         Menu {
+          if let url = applePodcastURL {
+            Link(destination: url) {
+              Label("View on Apple Podcasts", systemImage: "link")
+            }
+
+            Divider()
+          }
+
+          if isSubscribed {
+            Button(role: .destructive) {
+              showUnsubscribeConfirmation = true
+            } label: {
+              Label("Unsubscribe", systemImage: "minus.circle")
+            }
+          } else {
+            Button(action: subscribe) {
+              Label("Subscribe", systemImage: "plus.circle")
+            }
+          }
+
+          Divider()
+
           Toggle(isOn: $downloadManager.autoTranscriptEnabled) {
             Label(
               "Auto-Generate Transcripts",
@@ -167,7 +450,48 @@ struct EpisodeListView: View {
         "Are you sure you want to delete this downloaded episode? You can download it again later."
       )
     }
+    .confirmationDialog(
+      "Unsubscribe from Podcast",
+      isPresented: $showUnsubscribeConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Unsubscribe", role: .destructive) {
+        unsubscribe()
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text(
+        "Are you sure you want to unsubscribe from this podcast? Downloaded episodes will remain available."
+      )
+    }
   }
+
+  // MARK: - Apple Podcast Lookup
+
+  private func lookupApplePodcastURL(title: String) async {
+    await withCheckedContinuation { continuation in
+      var cancellable: AnyCancellable?
+      cancellable = applePodcastService.searchPodcasts(term: title, limit: 5)
+        .sink(
+          receiveCompletion: { _ in
+            continuation.resume()
+            cancellable?.cancel()
+          },
+          receiveValue: { podcasts in
+            // Find matching podcast by name
+            if let match = podcasts.first(where: {
+              $0.collectionName.lowercased() == title.lowercased()
+            }) ?? podcasts.first {
+              // Construct Apple Podcasts URL
+              let urlString = "https://podcasts.apple.com/podcast/id\(match.collectionId)"
+              applePodcastURL = URL(string: urlString)
+            }
+          }
+        )
+    }
+  }
+
+  // MARK: - Header Section
 
   @ViewBuilder
   private func headerSection(viewModel: EpisodeListViewModel) -> some View {
@@ -193,6 +517,12 @@ struct EpisodeListView: View {
           Text(viewModel.podcastInfo.title)
             .font(.headline)
 
+          if !artistName.isEmpty {
+            Text(artistName)
+              .font(.subheadline)
+              .foregroundColor(.secondary)
+          }
+
           // Language badge
           HStack(spacing: 4) {
             Image(systemName: "globe")
@@ -209,6 +539,23 @@ struct EpisodeListView: View {
           .padding(.vertical, 2)
           .background(Color.gray.opacity(0.15))
           .cornerRadius(4)
+
+          // Subscribe button
+          Button(action: subscribe) {
+            HStack {
+              Image(systemName: isSubscribed ? "checkmark.circle.fill" : "plus.circle.fill")
+              Text(isSubscribed ? "Subscribed" : "Subscribe")
+            }
+            .font(.subheadline)
+            .fontWeight(.medium)
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(isSubscribed ? Color.green : Color.blue)
+            .cornerRadius(16)
+          }
+          .disabled(isSubscribed)
+          .padding(.top, 4)
 
           if viewModel.podcastInfo.podcastInfoDescription != nil {
             VStack(alignment: .leading, spacing: 2) {
@@ -384,12 +731,18 @@ struct EpisodeRowView: View {
     case .queued:
       return 0.0
     case .downloadingModel(let progress):
-      return progress * 0.1
+      return progress
     case .transcribing(let progress):
-      return 0.1 + (progress * 0.9)
+      return progress
     default:
       return nil
     }
+  }
+
+  private var isDownloadingModel: Bool {
+    guard let status = transcriptJobStatus else { return false }
+    if case .downloadingModel = status { return true }
+    return false
   }
 
   private var isStarred: Bool { episodeModel?.isStarred ?? false }
@@ -454,7 +807,6 @@ struct EpisodeRowView: View {
       predicate: #Predicate { $0.episodeAudioURL == audioURL }
     )
     if let model = try? modelContext.fetch(descriptor).first {
-      // Check if ANY AI analysis is available
       hasAIAnalysis =
         model.hasFullAnalysis || model.hasSummary || model.hasEntities
         || model.hasHighlights
@@ -538,14 +890,14 @@ struct EpisodeRowView: View {
           .foregroundColor(.secondary)
       }
 
-      // Title - more lines
+      // Title
       Text(episode.title)
         .font(.subheadline)
         .fontWeight(.semibold)
         .lineLimit(3)
         .foregroundColor(.primary)
 
-      // Description - more lines
+      // Description
       if let description = plainDescription {
         Text(description)
           .font(.caption)
@@ -555,7 +907,7 @@ struct EpisodeRowView: View {
 
       Spacer(minLength: 4)
 
-      // Bottom status bar with all indicators
+      // Bottom status bar
       bottomStatusBar
     }
   }
@@ -651,6 +1003,11 @@ struct EpisodeRowView: View {
         } else if isTranscribing {
           HStack(spacing: 2) {
             ProgressView().scaleEffect(0.35)
+            if isDownloadingModel {
+              Text("Model")
+                .font(.system(size: 8))
+                .foregroundColor(.purple)
+            }
             if let progress = transcriptProgress {
               Text("\(Int(progress * 100))%")
                 .font(.system(size: 8))
@@ -720,7 +1077,8 @@ struct EpisodeRowView: View {
           imageURL: episode.imageURL ?? fallbackImageURL,
           episodeDescription: episode.podcastEpisodeDescription,
           pubDate: episode.pubDate,
-          duration: episode.duration
+          duration: episode.duration,
+          guid: episode.guid
         )
         audioManager.playNext(playbackEpisode)
       }
@@ -790,7 +1148,8 @@ struct EpisodeRowView: View {
       imageURL: imageURL,
       episodeDescription: episode.podcastEpisodeDescription,
       pubDate: episode.pubDate,
-      duration: episode.duration
+      duration: episode.duration,
+      guid: episode.guid
     )
 
     let startTime = episodeModel?.lastPlaybackPosition ?? 0
@@ -806,21 +1165,18 @@ struct EpisodeRowView: View {
   }
 
   private func shareEpisode() {
-    // Try to find Apple Podcast URL first
-    shareCancellable = applePodcastService.findAppleEpisodeUrl(
+    shareCancellable = applePodcastService.getAppleEpisodeLink(
       episodeTitle: episode.title,
-      podcastCollectionId: 0  // Search by title only
+      episodeGuid: episode.guid
     )
     .timeout(.seconds(5), scheduler: DispatchQueue.main)
     .sink(
       receiveCompletion: { completion in
         if case .failure = completion {
-          // On error, fall back to audio URL
           shareWithURL(episode.audioURL)
         }
       },
       receiveValue: { appleUrl in
-        // Use Apple URL if found, otherwise fall back to audio URL
         shareWithURL(appleUrl ?? episode.audioURL)
       }
     )

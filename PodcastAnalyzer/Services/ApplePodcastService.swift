@@ -21,6 +21,12 @@ struct Podcast: Decodable, Identifiable, Sendable {
     let contentAdvisoryRating: String?  // e.g., "Explicit"
     let genres: [String]?  // Like List<String> in Java
 }
+/// Genre object from Apple API
+struct EpisodeGenre: Decodable, Sendable {
+    let name: String
+    let id: String
+}
+
 struct Episode: Decodable, Identifiable, Sendable {
     var id: UUID { UUID() }  // ← computed, no warning
     let wrapperType: String?
@@ -36,17 +42,17 @@ struct Episode: Decodable, Identifiable, Sendable {
 
     let contentAdvisoryRating: String?
 
-    let trackViewUrl: String?  // Apple episode link; nil from RSS
+    let trackViewUrl: String?  // Apple episode link
     let previewUrl: String?
-    let episodeUrl: String?  // Audio URL from RSS <enclosure>
+    let episodeUrl: String?  // Audio URL
 
     let artworkUrl600: String?
     let artworkUrl160: String?
 
-    let country: String?  // From Apple
-    let language: String?  // New: From RSS <language> tag (e.g., "zh-tw")
+    let country: String?
+    let language: String?
 
-    let genres: [String]?
+    let genres: [EpisodeGenre]?  // Fixed: Array of genre objects, not strings
 
     let collectionId: Int?
     let collectionName: String?
@@ -56,33 +62,107 @@ struct Episode: Decodable, Identifiable, Sendable {
     let episodeContentType: String?
     let episodeFileExtension: String?
 }
+// MARK: - Apple RSS Top Podcasts Response Models
+
+struct AppleRSSFeedResponse: Decodable {
+    let feed: AppleRSSFeed
+}
+
+struct AppleRSSFeed: Decodable {
+    let title: String
+    let country: String
+    let updated: String
+    let results: [AppleRSSPodcast]
+}
+
+struct AppleRSSPodcast: Decodable, Identifiable {
+    let id: String
+    let artistName: String
+    let name: String
+    let artworkUrl100: String
+    let url: String  // iTunes link
+    let genres: [AppleRSSGenre]?
+    let contentAdvisoryRating: String?
+}
+
+struct AppleRSSGenre: Decodable {
+    let genreId: String
+    let name: String
+    let url: String
+}
+
 class ApplePodcastService {
 
     private let baseURL = "https://itunes.apple.com"
-    func findAppleEpisodeUrl(
-        episodeTitle: String,
-        podcastCollectionId: Int,
-        country: String = "tw"  // For /tw/ links
-    ) -> AnyPublisher<String?, Error> {
-        let encodedTitle = episodeTitle.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlString = "https://itunes.apple.com/search?term=\(encodedTitle)&entity=podcastEpisode&limit=10&country=\(country)"
-        
+    private let rssBaseURL = Constants.appleRSSBaseURL
+
+    // MARK: - Top Podcasts from Apple RSS Marketing API
+
+    /// Fetches top podcasts for a given region
+    /// - Parameters:
+    ///   - region: Country code (e.g., "us", "tw", "jp")
+    ///   - limit: Number of podcasts to fetch (max 200)
+    /// - Returns: Publisher with array of top podcasts
+    func fetchTopPodcasts(region: String = "us", limit: Int = 10) -> AnyPublisher<[AppleRSSPodcast], Error> {
+        let urlString = "\(rssBaseURL)/\(region)/podcasts/top/\(limit)/podcasts.json"
+
         guard let url = URL(string: urlString) else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
         }
-        
+
+        return URLSession.shared.dataTaskPublisher(for: url)
+            .map { $0.data }
+            .decode(type: AppleRSSFeedResponse.self, decoder: JSONDecoder())
+            .map { $0.feed.results }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+
+    /// Looks up a podcast's RSS feed URL from its collection ID
+    func lookupPodcast(collectionId: String) -> AnyPublisher<Podcast?, Error> {
+        let urlString = "\(baseURL)/lookup?id=\(collectionId)&entity=podcast"
+
+        guard let url = URL(string: urlString) else {
+            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+        }
+
+        return URLSession.shared.dataTaskPublisher(for: url)
+            .map { $0.data }
+            .decode(type: SearchResponse.self, decoder: JSONDecoder())
+            .map { $0.results.first }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+
+    /// Finds the Apple Podcasts episode link by matching the episode GUID
+    /// - Parameters:
+    ///   - episodeTitle: Episode title for search query
+    ///   - episodeGuid: The RSS feed GUID to match against Apple's episodeGuid
+    ///   - country: Country code for the search (default: "tw")
+    /// - Returns: Publisher with the Apple episode URL or nil
+    func getAppleEpisodeLink(
+        episodeTitle: String,
+        episodeGuid: String?,
+        country: String = "tw"
+    ) -> AnyPublisher<String?, Error> {
+        let encoded = episodeTitle.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let urlString = "https://itunes.apple.com/search?term=\(encoded)&entity=podcastEpisode&limit=15&country=\(country)"
+
+        guard let url = URL(string: urlString) else {
+            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+        }
+
         return URLSession.shared.dataTaskPublisher(for: url)
             .map { $0.data }
             .decode(type: EpisodeSearchResponse.self, decoder: JSONDecoder())
             .map { response in
-                // If collectionId is 0, just return the first result
-                if podcastCollectionId == 0 {
-                    return response.results.first?.trackViewUrl
+                // Priority 1: Match by episodeGuid
+                if let guid = episodeGuid,
+                   let match = response.results.first(where: { $0.episodeGuid == guid }) {
+                    return match.trackViewUrl
                 }
-                // Otherwise, filter by podcast collectionId
-                return response.results
-                    .first { $0.collectionId == podcastCollectionId }?
-                    .trackViewUrl
+                // Fallback: return first result
+                return response.results.first?.trackViewUrl
             }
             .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()

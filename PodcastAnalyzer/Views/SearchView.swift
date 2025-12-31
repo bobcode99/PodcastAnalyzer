@@ -21,7 +21,8 @@ enum SearchTab: String, CaseIterable {
 struct PodcastSearchView: View {
     @StateObject private var viewModel = PodcastSearchViewModel()
     @Environment(\.modelContext) private var modelContext
-    @Query private var subscribedPodcasts: [PodcastInfoModel]
+    @Query(filter: #Predicate<PodcastInfoModel> { $0.isSubscribed == true })
+    private var subscribedPodcasts: [PodcastInfoModel]
 
     @State private var selectedTab: SearchTab = .applePodcasts
     @State private var searchText = ""
@@ -141,12 +142,20 @@ struct PodcastSearchView: View {
             } else {
                 List {
                     ForEach(viewModel.podcasts, id: \.collectionId) { podcast in
-                        ApplePodcastRow(
-                            podcast: podcast,
-                            isSubscribed: isSubscribed(podcast),
-                            onSubscribe: { subscribeToPodcast(podcast) },
-                            onTap: { }
-                        )
+                        NavigationLink(destination: EpisodeListView(
+                            podcastName: podcast.collectionName,
+                            podcastArtwork: podcast.artworkUrl100 ?? "",
+                            artistName: podcast.artistName,
+                            collectionId: String(podcast.collectionId),
+                            applePodcastUrl: nil
+                        )) {
+                            ApplePodcastRow(
+                                podcast: podcast,
+                                isSubscribed: isSubscribed(podcast),
+                                onSubscribe: { subscribeToPodcast(podcast) }
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .listStyle(.plain)
@@ -260,7 +269,6 @@ struct ApplePodcastRow: View {
     let podcast: Podcast
     let isSubscribed: Bool
     let onSubscribe: () -> Void
-    let onTap: () -> Void
 
     @State private var isSubscribing = false
 
@@ -308,7 +316,7 @@ struct ApplePodcastRow: View {
                 Image(systemName: "checkmark")
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                    .foregroundColor(.primary)
+                    .foregroundColor(.green)
             } else if isSubscribing {
                 ProgressView()
                     .scaleEffect(0.8)
@@ -323,14 +331,17 @@ struct ApplePodcastRow: View {
                 }) {
                     Image(systemName: "plus")
                         .font(.title3)
-                        .foregroundColor(.purple)
+                        .foregroundColor(.blue)
                 }
                 .buttonStyle(.plain)
             }
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(.secondary)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
     }
 
     private var artworkPlaceholder: some View {
@@ -492,7 +503,8 @@ struct LibraryEpisodeRow: View {
             imageURL: episode.imageURL ?? podcastImageURL,
             episodeDescription: episode.podcastEpisodeDescription,
             pubDate: episode.pubDate,
-            duration: episode.duration
+            duration: episode.duration,
+            guid: episode.guid
         )
 
         audioManager.play(
