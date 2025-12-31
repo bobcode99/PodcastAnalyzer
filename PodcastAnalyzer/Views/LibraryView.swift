@@ -10,6 +10,10 @@ import SwiftData
 import SwiftUI
 import ZMarkupParser
 
+#if os(iOS)
+import UIKit
+#endif
+
 // MARK: - Library View
 
 struct LibraryView: View {
@@ -58,7 +62,7 @@ struct LibraryView: View {
           .disabled(viewModel.isLoading)
         }
       }
-      .toolbarTitleDisplayMode(.inlineLarge)
+      .platformToolbarTitleDisplayMode()
       .refreshable {
         await viewModel.refreshAllPodcasts()
       }
@@ -67,7 +71,7 @@ struct LibraryView: View {
           ProgressView()
             .scaleEffect(1.5)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemBackground).opacity(0.5))
+            .background(Color.platformBackground.opacity(0.5))
         }
       }
     }
@@ -151,7 +155,7 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color(.systemGray6))
+        .background(Color.platformSystemGray6)
         .cornerRadius(12)
       }
       .buttonStyle(.plain)
@@ -202,7 +206,7 @@ struct LibraryView: View {
 
               // Copy RSS URL
               Button {
-                UIPasteboard.general.string = podcast.podcastInfo.rssUrl
+                PlatformClipboard.string = podcast.podcastInfo.rssUrl
               } label: {
                 Label("Copy RSS URL", systemImage: "doc.on.doc")
               }
@@ -303,7 +307,7 @@ struct QuickAccessCard: View {
     }
     .padding(12)
     .frame(maxWidth: .infinity, minHeight: 90)
-    .background(Color(.systemGray6))
+    .background(Color.platformSystemGray6)
     .cornerRadius(12)
   }
 }
@@ -379,7 +383,9 @@ struct SavedEpisodesView: View {
       }
     }
     .navigationTitle("Saved")
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
   }
 
   private var emptyStateView: some View {
@@ -425,7 +431,9 @@ struct DownloadedEpisodesView: View {
       }
     }
     .navigationTitle("Downloaded")
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
   }
 
   private var emptyStateView: some View {
@@ -471,7 +479,9 @@ struct LatestEpisodesView: View {
       }
     }
     .navigationTitle("Latest Episodes")
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
   }
 
   private var emptyStateView: some View {

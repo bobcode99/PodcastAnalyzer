@@ -108,9 +108,7 @@ struct MiniPlayerBar: View {
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 10)
-      .background(
-        Color(uiColor: .secondarySystemBackground)
-      )
+      .background(Color.platformSecondaryBackground)
       .contentShape(Rectangle())
       .onTapGesture {
         showExpandedPlayer = true

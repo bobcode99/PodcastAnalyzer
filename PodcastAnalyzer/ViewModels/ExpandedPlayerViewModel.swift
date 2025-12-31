@@ -9,6 +9,12 @@ import Combine
 import SwiftData
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
+
 @MainActor
 class ExpandedPlayerViewModel: ObservableObject {
   @Published var isPlaying: Bool = false
@@ -263,13 +269,7 @@ class ExpandedPlayerViewModel: ObservableObject {
 
   private func shareWithURL(_ urlString: String?) {
     guard let urlString = urlString, let url = URL(string: urlString) else { return }
-
-    let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-      let rootVC = windowScene.windows.first?.rootViewController
-    {
-      rootVC.present(activityVC, animated: true)
-    }
+    PlatformShareSheet.share(url: url)
   }
 
   func playNextCurrentEpisode() {
@@ -327,7 +327,11 @@ class ExpandedPlayerViewModel: ObservableObject {
     // Open a report URL or show an alert
     // For now, this can be a placeholder that opens Apple's podcast report page
     guard let url = URL(string: "https://www.apple.com/feedback/podcasts.html") else { return }
+    #if os(iOS)
     UIApplication.shared.open(url)
+    #else
+    NSWorkspace.shared.open(url)
+    #endif
   }
 
   // MARK: - Queue Actions

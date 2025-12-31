@@ -8,8 +8,13 @@
 
 import Combine
 import Foundation
-import UIKit
 import os.log
+
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
 
 private let logger = Logger(subsystem: "com.podcastanalyzer", category: "ShortcutsAIService")
 
@@ -97,7 +102,7 @@ class ShortcutsAIService: ObservableObject {
                 handleResult(output)
             } else {
                 // Try to get from clipboard as fallback
-                if let clipboardContent = UIPasteboard.general.string {
+                if let clipboardContent = PlatformClipboard.string {
                     handleResult(clipboardContent)
                 }
             }
@@ -108,7 +113,7 @@ class ShortcutsAIService: ObservableObject {
             handleError("Shortcut was cancelled")
         default:
             // Try clipboard fallback
-            if let clipboardContent = UIPasteboard.general.string {
+            if let clipboardContent = PlatformClipboard.string {
                 handleResult(clipboardContent)
             }
         }
@@ -147,7 +152,7 @@ class ShortcutsAIService: ObservableObject {
         let useClipboard = input.count > 2000
 
         if useClipboard {
-            UIPasteboard.general.string = input
+            PlatformClipboard.string = input
         }
 
         // Build URL with x-callback-url
@@ -192,6 +197,7 @@ class ShortcutsAIService: ObservableObject {
             }
 
             // Open the shortcut URL
+            #if os(iOS)
             UIApplication.shared.open(url) { success in
                 if !success {
                     self.isProcessing = false
@@ -200,6 +206,16 @@ class ShortcutsAIService: ObservableObject {
                     self.pendingContinuation = nil
                 }
             }
+            #else
+            // macOS: Use NSWorkspace to open URLs
+            let success = NSWorkspace.shared.open(url)
+            if !success {
+                self.isProcessing = false
+                self.timeoutTask?.cancel()
+                self.pendingContinuation?.resume(throwing: ShortcutsError.failedToOpen)
+                self.pendingContinuation = nil
+            }
+            #endif
         }
     }
 
@@ -333,7 +349,11 @@ class ShortcutsAIService: ObservableObject {
 
     func openShortcutsApp() {
         if let url = URL(string: "shortcuts://") {
+            #if os(iOS)
             UIApplication.shared.open(url)
+            #else
+            NSWorkspace.shared.open(url)
+            #endif
         }
     }
 
@@ -344,8 +364,16 @@ class ShortcutsAIService: ObservableObject {
 
     /// Check if Shortcuts app is available
     var isShortcutsAvailable: Bool {
+        #if os(iOS)
         guard let url = URL(string: "shortcuts://") else { return false }
         return UIApplication.shared.canOpenURL(url)
+        #else
+        // On macOS, Shortcuts is available on macOS 12+
+        if #available(macOS 12.0, *) {
+            return true
+        }
+        return false
+        #endif
     }
 }
 

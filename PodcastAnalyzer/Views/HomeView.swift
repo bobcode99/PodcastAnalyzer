@@ -9,6 +9,10 @@ import Combine
 import SwiftData
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#endif
+
 struct HomeView: View {
   @StateObject private var viewModel = HomeViewModel()
   @Environment(\.modelContext) private var modelContext
@@ -31,7 +35,7 @@ struct HomeView: View {
         .padding(.vertical)
       }
       .navigationTitle(Constants.homeString)
-      .toolbarTitleDisplayMode(.inlineLarge)
+      .platformToolbarTitleDisplayMode()
       .toolbar {
         ToolbarItem(placement: .primaryAction) {
           Button(action: { showRegionPicker = true }) {
@@ -324,15 +328,7 @@ struct UpNextContextMenu: View {
     // Share
     if let audioURL = episode.episodeInfo.audioURL, let url = URL(string: audioURL) {
       Button {
-        let activityVC = UIActivityViewController(
-          activityItems: [url],
-          applicationActivities: nil
-        )
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootVC = window.rootViewController {
-          rootVC.present(activityVC, animated: true)
-        }
+        PlatformShareSheet.share(url: url)
       } label: {
         Label("Share Episode", systemImage: "square.and.arrow.up")
       }
@@ -429,22 +425,14 @@ struct TopPodcastRow: View {
 
       // Copy name
       Button {
-        UIPasteboard.general.string = podcast.name
+        PlatformClipboard.string = podcast.name
       } label: {
         Label("Copy Name", systemImage: "doc.on.doc")
       }
 
       // Share
       Button {
-        let activityVC = UIActivityViewController(
-          activityItems: [URL(string: podcast.url)!],
-          applicationActivities: nil
-        )
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootVC = window.rootViewController {
-          rootVC.present(activityVC, animated: true)
-        }
+        PlatformShareSheet.share(url: URL(string: podcast.url)!)
       } label: {
         Label("Share", systemImage: "square.and.arrow.up")
       }
@@ -483,7 +471,9 @@ struct RegionPickerSheet: View {
         }
       }
       .navigationTitle("Select Region")
+      #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)
+      #endif
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancel") {
@@ -594,7 +584,9 @@ struct PodcastPreviewSheet: View {
         .padding()
       }
       .navigationTitle("Podcast")
+      #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)
+      #endif
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Close") {
@@ -631,7 +623,9 @@ struct UpNextListView: View {
     }
     .listStyle(.plain)
     .navigationTitle("Up Next")
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
   }
 }
 

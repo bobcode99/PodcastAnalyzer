@@ -7,12 +7,26 @@
 
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
+
+// MARK: - Platform Image Type Alias
+
+#if os(iOS)
+typealias CachedPlatformImage = UIImage
+#else
+typealias CachedPlatformImage = NSImage
+#endif
+
 // MARK: - Image Cache Manager
 
 actor ImageCacheManager {
   static let shared = ImageCacheManager()
 
-  private let memoryCache = NSCache<NSString, UIImage>()
+  private let memoryCache = NSCache<NSString, CachedPlatformImage>()
   private let fileManager = FileManager.default
   private let cacheDirectory: URL
 
@@ -39,12 +53,12 @@ actor ImageCacheManager {
 
   // MARK: - Memory Cache
 
-  func getCached(for url: URL) -> UIImage? {
+  func getCached(for url: URL) -> CachedPlatformImage? {
     let key = cacheKey(for: url) as NSString
     return memoryCache.object(forKey: key)
   }
 
-  func cacheInMemory(_ image: UIImage, for url: URL) {
+  func cacheInMemory(_ image: CachedPlatformImage, for url: URL) {
     let key = cacheKey(for: url) as NSString
     let cost = Int(image.size.width * image.size.height * 4)  // Approximate byte size
     memoryCache.setObject(image, forKey: key, cost: cost)
@@ -57,10 +71,10 @@ actor ImageCacheManager {
     return cacheDirectory.appendingPathComponent(key)
   }
 
-  func getDiskCached(for url: URL) -> UIImage? {
+  func getDiskCached(for url: URL) -> CachedPlatformImage? {
     let path = diskCachePath(for: url)
     guard let data = try? Data(contentsOf: path),
-          let image = UIImage(data: data) else {
+          let image = CachedPlatformImage(data: data) else {
       return nil
     }
     // Also cache in memory for faster access next time
@@ -68,16 +82,24 @@ actor ImageCacheManager {
     return image
   }
 
-  func cacheToDisk(_ image: UIImage, for url: URL) {
+  func cacheToDisk(_ image: CachedPlatformImage, for url: URL) {
     let path = diskCachePath(for: url)
+    #if os(iOS)
     if let data = image.jpegData(compressionQuality: 0.8) {
       try? data.write(to: path)
     }
+    #else
+    if let tiffData = image.tiffRepresentation,
+       let bitmap = NSBitmapImageRep(data: tiffData),
+       let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.8]) {
+      try? data.write(to: path)
+    }
+    #endif
   }
 
   // MARK: - Download and Cache
 
-  func downloadAndCache(from url: URL) async -> UIImage? {
+  func downloadAndCache(from url: URL) async -> CachedPlatformImage? {
     // Check memory cache first
     if let cached = getCached(for: url) {
       return cached
@@ -91,7 +113,7 @@ actor ImageCacheManager {
     // Download
     do {
       let (data, _) = try await URLSession.shared.data(from: url)
-      guard let image = UIImage(data: data) else { return nil }
+      guard let image = CachedPlatformImage(data: data) else { return nil }
 
       // Cache in memory and disk
       cacheInMemory(image, for: url)
@@ -128,7 +150,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
   @ViewBuilder let content: (Image) -> Content
   @ViewBuilder let placeholder: () -> Placeholder
 
-  @State private var image: UIImage?
+  @State private var image: CachedPlatformImage?
   @State private var isLoading = false
 
   init(
@@ -146,7 +168,11 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
   var body: some View {
     Group {
       if let image = image {
+        #if os(iOS)
         content(Image(uiImage: image))
+        #else
+        content(Image(nsImage: image))
+        #endif
       } else {
         placeholder()
           .task(id: url) {

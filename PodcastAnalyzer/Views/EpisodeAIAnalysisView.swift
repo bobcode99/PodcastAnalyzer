@@ -8,8 +8,21 @@
 
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
+
 /// View for cloud-based AI transcript analysis
 struct EpisodeAIAnalysisView: View {
+  private var toolbarPlacement: ToolbarItemPlacement {
+    #if os(iOS)
+    return .topBarTrailing
+    #else
+    return .primaryAction
+    #endif
+  }
   @Bindable var viewModel: EpisodeDetailViewModel
 
   @State private var selectedTab: CloudAnalysisTab = .summary
@@ -51,9 +64,11 @@ struct EpisodeAIAnalysisView: View {
       }
     }
     .navigationTitle("AI Analysis")
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
     .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
+      ToolbarItem(placement: toolbarPlacement) {
         Button(action: { showSettingsSheet = true }) {
           Image(systemName: "gear")
         }
@@ -62,9 +77,11 @@ struct EpisodeAIAnalysisView: View {
     .sheet(isPresented: $showSettingsSheet) {
       NavigationStack {
         AISettingsView()
+          #if os(iOS)
           .navigationBarTitleDisplayMode(.inline)
+          #endif
           .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: toolbarPlacement) {
               Button("Done") { showSettingsSheet = false }
             }
           }
@@ -394,7 +411,7 @@ struct EpisodeAIAnalysisView: View {
       .buttonStyle(.bordered)
     }
     .padding()
-    .background(Color(.systemGray6))
+    .background(Color.platformSystemGray6)
     .cornerRadius(12)
   }
 
@@ -813,7 +830,7 @@ struct EpisodeAIAnalysisView: View {
       .textSelection(.enabled)
       .contextMenu {
         Button {
-          UIPasteboard.general.string = content
+          PlatformClipboard.string = content
         } label: {
           Label("Copy", systemImage: "doc.on.doc")
         }
@@ -824,7 +841,11 @@ struct EpisodeAIAnalysisView: View {
             withAllowedCharacters: .urlQueryAllowed),
             let url = URL(string: "https://www.google.com/search?q=\(query)")
           {
+            #if os(iOS)
             UIApplication.shared.open(url)
+            #else
+            NSWorkspace.shared.open(url)
+            #endif
           }
         } label: {
           Label("Search Web", systemImage: "magnifyingglass")
@@ -950,7 +971,7 @@ struct EpisodeAIAnalysisView: View {
             .textSelection(.enabled)
             .contextMenu {
               Button {
-                UIPasteboard.general.string = result.answer
+                PlatformClipboard.string = result.answer
               } label: {
                 Label("Copy Answer", systemImage: "doc.on.doc")
               }
@@ -960,7 +981,11 @@ struct EpisodeAIAnalysisView: View {
                   withAllowedCharacters: .urlQueryAllowed),
                   let url = URL(string: "https://www.google.com/search?q=\(query)")
                 {
+                  #if os(iOS)
                   UIApplication.shared.open(url)
+                  #else
+                  NSWorkspace.shared.open(url)
+                  #endif
                 }
               } label: {
                 Label("Search Web", systemImage: "safari")
@@ -1024,7 +1049,7 @@ struct EpisodeAIAnalysisView: View {
               .foregroundColor(.secondary)
               .padding(8)
               .frame(maxWidth: .infinity, alignment: .leading)
-              .background(Color(.systemGray5))
+              .background(Color.platformSystemGray5)
               .cornerRadius(6)
           }
         }
@@ -1047,7 +1072,7 @@ struct EpisodeAIAnalysisView: View {
       }
     }
     .padding()
-    .background(Color(.systemGray6))
+    .background(Color.platformSystemGray6)
     .cornerRadius(12)
   }
 

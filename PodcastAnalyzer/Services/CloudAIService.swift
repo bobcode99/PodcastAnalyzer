@@ -8,7 +8,10 @@
 
 import Foundation
 import os.log
+
+#if os(iOS)
 import UIKit
+#endif
 
 // MARK: - Cloud AI Service
 

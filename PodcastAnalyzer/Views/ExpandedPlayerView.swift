@@ -8,6 +8,10 @@
 import SwiftData
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#endif
+
 struct ExpandedPlayerView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.modelContext) private var modelContext
@@ -28,7 +32,7 @@ struct ExpandedPlayerView: View {
       ZStack {
         // Background gradient based on artwork (simulated)
         LinearGradient(
-          colors: [Color.gray.opacity(0.3), Color(.systemBackground)],
+          colors: [Color.gray.opacity(0.3), Color.platformBackground],
           startPoint: .top,
           endPoint: .center
         )
@@ -209,7 +213,7 @@ struct ExpandedPlayerView: View {
           .buttonStyle(.plain)
         }
       }
-      .background(Color(.systemGray6))
+      .background(Color.platformSystemGray6)
       .cornerRadius(12)
       .padding(.horizontal, 16)
     }
@@ -624,13 +628,15 @@ struct QueueOverlay: View {
             .onMove(perform: onMoveItems)
           }
           .listStyle(.plain)
+          #if os(iOS)
           .environment(\.editMode, .constant(.active))
+          #endif
         }
       }
       .frame(maxHeight: 400)
       .background(
         RoundedRectangle(cornerRadius: 16)
-          .fill(Color(.systemBackground))
+          .fill(Color.platformBackground)
           .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
       )
       .padding(.horizontal, 16)
@@ -811,7 +817,7 @@ struct SpeedPickerOverlay: View {
       }
       .background(
         RoundedRectangle(cornerRadius: 16)
-          .fill(Color(.systemBackground))
+          .fill(Color.platformBackground)
           .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
       )
       .padding(.horizontal, 24)
@@ -829,8 +835,11 @@ struct SpeedPickerOverlay: View {
   }
 
   private func triggerHaptic() {
+    #if os(iOS)
     let generator = UIImpactFeedbackGenerator(style: .light)
     generator.impactOccurred()
+    #endif
+    // macOS doesn't have haptic feedback on most devices
   }
 }
 
@@ -851,7 +860,7 @@ struct SpeedButton: View {
         .padding(.horizontal, 12)
         .background(
           Capsule()
-            .fill(isSelected ? Color.blue : Color(.systemGray5))
+            .fill(isSelected ? Color.blue : Color.platformSystemGray5)
         )
     }
     .buttonStyle(.plain)
@@ -873,6 +882,14 @@ struct SpeedButton: View {
 struct TranscriptFullScreenView: View {
   @Environment(\.dismiss) private var dismiss
   @ObservedObject var viewModel: ExpandedPlayerViewModel
+
+  private var toolbarPlacement: ToolbarItemPlacement {
+    #if os(iOS)
+    return .topBarTrailing
+    #else
+    return .confirmationAction
+    #endif
+  }
 
   var body: some View {
     NavigationStack {
@@ -898,7 +915,7 @@ struct TranscriptFullScreenView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color(.systemGray6))
+        .background(Color.platformSystemGray6)
         .cornerRadius(10)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -937,9 +954,11 @@ struct TranscriptFullScreenView: View {
         }
       }
       .navigationTitle("Transcript")
+      #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)
+      #endif
       .toolbar {
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItem(placement: toolbarPlacement) {
           Button("Done") {
             dismiss()
           }
@@ -999,7 +1018,7 @@ struct TranscriptFullScreenView: View {
       }
     }
     .padding(12)
-    .background(Color(.systemGray6))
+    .background(Color.platformSystemGray6)
     .cornerRadius(12)
   }
 }

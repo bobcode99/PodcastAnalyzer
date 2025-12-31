@@ -18,6 +18,12 @@ import Foundation
 import MediaPlayer
 import os.log
 
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
+
 // MARK: - Playback State Notification
 extension Notification.Name {
   static let playbackPositionDidUpdate = Notification.Name("playbackPositionDidUpdate")
@@ -70,12 +76,15 @@ class EnhancedAudioManager: NSObject {
     super.init()
     setupAudioSession()
     setupRemoteControls()
-    // Critical for remote commands!
+    #if os(iOS)
+    // Critical for remote commands on iOS!
     UIApplication.shared.beginReceivingRemoteControlEvents()
+    #endif
     loadPlaybackRate()
   }
 
   private func setupAudioSession() {
+    #if os(iOS)
     do {
       let session = AVAudioSession.sharedInstance()
       try session.setCategory(.playback, mode: .spokenAudio, options: [])
@@ -84,6 +93,10 @@ class EnhancedAudioManager: NSObject {
     } catch {
       logger.error("Audio session failed: \(error.localizedDescription)")
     }
+    #else
+    // macOS doesn't require AVAudioSession configuration
+    logger.info("Audio manager initialized for macOS")
+    #endif
   }
 
   private func setupRemoteControls() {
@@ -511,6 +524,7 @@ class EnhancedAudioManager: NSObject {
       Task.detached { [weak self] in
         do {
           let (data, _) = try await URLSession.shared.data(from: url)
+          #if os(iOS)
           if let image = UIImage(data: data) {
             let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
             await MainActor.run {
@@ -519,6 +533,22 @@ class EnhancedAudioManager: NSObject {
               MPNowPlayingInfoCenter.default().nowPlayingInfo = info
             }
           }
+          #else
+          if let image = NSImage(data: data) {
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
+              let newImage = NSImage(size: size)
+              newImage.lockFocus()
+              image.draw(in: NSRect(origin: .zero, size: size))
+              newImage.unlockFocus()
+              return newImage
+            }
+            await MainActor.run {
+              var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+              info[MPMediaItemPropertyArtwork] = artwork
+              MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            }
+          }
+          #endif
         } catch {
           self?.logger.error("Failed to load artwork: \(error.localizedDescription)")
         }

@@ -11,6 +11,12 @@ import SwiftUI
 import ZMarkupParser
 import os.log
 
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
+
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "EpisodeDetailViewModel")
 
 /// Represents a single transcript segment with timing information
@@ -415,9 +421,15 @@ final class EpisodeDetailViewModel {
       return
     }
 
+    #if os(iOS)
+    let labelColor = UIColor.label
+    #else
+    let labelColor = NSColor.labelColor
+    #endif
+
     let rootStyle = MarkupStyle(
       font: MarkupStyleFont(size: 16),
-      foregroundColor: MarkupStyleColor(color: UIColor.label)
+      foregroundColor: MarkupStyleColor(color: labelColor)
     )
 
     let parser = ZHTMLParserBuilder.initWithDefault()
@@ -471,12 +483,7 @@ final class EpisodeDetailViewModel {
       return
     }
 
-    let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-       let rootVC = windowScene.windows.first?.rootViewController
-    {
-      rootVC.present(activityVC, animated: true)
-    }
+    PlatformShareSheet.share(url: url)
   }
 
   func translateDescription() {
@@ -655,7 +662,7 @@ final class EpisodeDetailViewModel {
   }
 
   func copyTranscriptToClipboard() {
-    UIPasteboard.general.string = transcriptText
+    PlatformClipboard.string = transcriptText
   }
 
   private func loadExistingTranscript() async {

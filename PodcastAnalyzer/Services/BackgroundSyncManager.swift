@@ -5,7 +5,9 @@
 //  Manages background sync for podcast episodes with notifications
 //
 
+#if os(iOS)
 import BackgroundTasks
+#endif
 import Combine
 import Foundation
 import SwiftData
@@ -74,7 +76,8 @@ class BackgroundSyncManager: ObservableObject {
 
   // MARK: - Background Task Registration
 
-  /// Call this in app's init to register background task
+  #if os(iOS)
+  /// Call this in app's init to register background task (iOS only)
   static func registerBackgroundTask() {
     BGTaskScheduler.shared.register(
       forTaskWithIdentifier: backgroundTaskIdentifier,
@@ -118,6 +121,25 @@ class BackgroundSyncManager: ObservableObject {
     let success = await performSync()
     task.setTaskCompleted(success: success)
   }
+
+  #else
+  /// macOS: No-op for background task registration (use foreground timer instead)
+  static func registerBackgroundTask() {
+    // macOS doesn't support BGTaskScheduler
+    // Use startForegroundSync() instead when app is running
+  }
+
+  func scheduleBackgroundRefresh() {
+    // On macOS, use the foreground timer since apps typically stay running
+    startForegroundSync()
+    logger.info("macOS: Using foreground sync timer instead of background task")
+  }
+
+  func cancelBackgroundRefresh() {
+    stopForegroundSync()
+    logger.info("macOS: Foreground sync stopped")
+  }
+  #endif
 
   // MARK: - Manual Sync (for foreground use)
 

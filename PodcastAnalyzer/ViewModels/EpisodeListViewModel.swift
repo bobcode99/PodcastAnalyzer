@@ -10,6 +10,12 @@ import SwiftData
 import SwiftUI
 import ZMarkupParser
 
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
+
 @MainActor
 @Observable
 final class EpisodeListViewModel {
@@ -126,9 +132,15 @@ final class EpisodeListViewModel {
       return
     }
 
+    #if os(iOS)
+    let labelColor = UIColor.secondaryLabel
+    #else
+    let labelColor = NSColor.secondaryLabelColor
+    #endif
+
     let rootStyle = MarkupStyle(
       font: MarkupStyleFont(size: 13),  // Smaller font for list view
-      foregroundColor: MarkupStyleColor(color: UIColor.secondaryLabel)
+      foregroundColor: MarkupStyleColor(color: labelColor)
     )
 
     let parser = ZHTMLParserBuilder.initWithDefault()

@@ -9,6 +9,10 @@ import Combine
 import SwiftData
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#endif
+
 // MARK: - Episode Filter Enum
 
 enum EpisodeFilter: String, CaseIterable {
@@ -103,6 +107,14 @@ struct EpisodeListView: View {
     podcastModel?.isSubscribed ?? false
   }
 
+  private var toolbarPlacement: ToolbarItemPlacement {
+    #if os(iOS)
+    return .topBarTrailing
+    #else
+    return .primaryAction
+    #endif
+  }
+
   var body: some View {
     Group {
       switch source {
@@ -113,7 +125,9 @@ struct EpisodeListView: View {
       }
     }
     .navigationTitle(navigationTitle)
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
   }
 
   // MARK: - Model Content (for existing PodcastInfoModel)
@@ -375,7 +389,7 @@ struct EpisodeListView: View {
     }
     .listStyle(.plain)
     .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
+      ToolbarItem(placement: toolbarPlacement) {
         Menu {
           if let url = applePodcastURL {
             Link(destination: url) {
@@ -1167,17 +1181,7 @@ struct EpisodeRowView: View {
     guard let urlString = urlString, let url = URL(string: urlString) else {
       return
     }
-
-    let activityVC = UIActivityViewController(
-      activityItems: [url],
-      applicationActivities: nil
-    )
-    if let windowScene = UIApplication.shared.connectedScenes.first
-      as? UIWindowScene,
-      let rootVC = windowScene.windows.first?.rootViewController
-    {
-      rootVC.present(activityVC, animated: true)
-    }
+    PlatformShareSheet.share(url: url)
   }
 }
 

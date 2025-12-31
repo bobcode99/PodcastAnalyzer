@@ -91,7 +91,12 @@ extension NotificationNavigationManager: UNUserNotificationCenterDelegate {
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
   ) {
     // Show notification even when app is in foreground
+    #if os(iOS)
     completionHandler([.banner, .sound, .badge])
+    #else
+    // macOS uses .list and .banner (or .alert for older macOS)
+    completionHandler([.banner, .sound])
+    #endif
   }
 
   @MainActor

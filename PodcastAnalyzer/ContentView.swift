@@ -9,6 +9,19 @@ import SwiftData
 import SwiftUI
 
 struct ContentView: View {
+  var body: some View {
+    #if os(iOS)
+    iOSContentView()
+    #else
+    MacContentView()
+    #endif
+  }
+}
+
+// MARK: - iOS Content View
+
+#if os(iOS)
+struct iOSContentView: View {
   @State private var audioManager = EnhancedAudioManager.shared
   @ObservedObject private var importManager = PodcastImportManager.shared
   @ObservedObject private var notificationManager = NotificationNavigationManager.shared
@@ -107,6 +120,7 @@ struct ContentView: View {
     notificationManager.clearNavigation()
   }
 }
+#endif
 
 // MARK: - Podcast Import Sheet
 
@@ -215,7 +229,9 @@ struct PodcastImportSheet: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .navigationTitle("Import Podcasts")
+      #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)
+      #endif
       .toolbar {
         if !importManager.isImporting {
           ToolbarItem(placement: .cancellationAction) {

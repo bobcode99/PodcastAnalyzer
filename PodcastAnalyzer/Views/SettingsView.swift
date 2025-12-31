@@ -1,5 +1,10 @@
 import SwiftData
 import SwiftUI
+import UserNotifications
+
+#if os(iOS)
+import UIKit
+#endif
 
 struct SettingsView: View {
   @StateObject private var viewModel = SettingsViewModel()
@@ -329,9 +334,13 @@ struct SettingsView: View {
           Text("About")
         }
       }
+      #if os(iOS)
       .listStyle(.insetGrouped)
+      #else
+      .listStyle(.sidebar)
+      #endif
       .navigationTitle("Settings")
-      .toolbarTitleDisplayMode(.inlineLarge)
+      .platformToolbarTitleDisplayMode()
       .sheet(isPresented: $showAddFeedSheet) {
         AddFeedView(viewModel: viewModel, modelContext: modelContext) {
           showAddFeedSheet = false
@@ -775,11 +784,13 @@ struct AddFeedView: View {
           TextField("https://example.com/feed.xml", text: $viewModel.rssUrlInput)
             .textFieldStyle(.plain)
             .padding(16)
-            .background(Color(.systemGray6))
+            .background(Color.platformSystemGray6)
             .cornerRadius(12)
             .autocorrectionDisabled()
+            #if os(iOS)
             .textInputAutocapitalization(.never)
             .keyboardType(.URL)
+            #endif
             .disabled(viewModel.isValidating)
             .focused($isTextFieldFocused)
 
@@ -850,9 +861,11 @@ struct AddFeedView: View {
         .padding(.horizontal, 24)
         .padding(.bottom, 24)
       }
+      #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)
+      #endif
       .toolbar {
-        ToolbarItem(placement: .navigationBarLeading) {
+        ToolbarItem(placement: .cancellationAction) {
           Button("Cancel") {
             viewModel.clearMessages()
             onDismiss()

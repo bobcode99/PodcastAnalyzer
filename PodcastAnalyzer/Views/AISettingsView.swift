@@ -7,6 +7,10 @@
 
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#endif
+
 struct AISettingsView: View {
     @State private var settings = AISettingsManager.shared
     @State private var showingTestResult = false
@@ -241,7 +245,11 @@ struct AISettingsView: View {
                         .tag(language)
                     }
                 }
+                #if os(iOS)
                 .pickerStyle(.navigationLink)
+                #else
+                .pickerStyle(.menu)
+                #endif
 
                 // Show current language preview with resolved language
                 HStack {
@@ -392,7 +400,9 @@ struct AISettingsView: View {
         SecureField("\(provider.displayName) API Key", text: binding)
             .textContentType(.password)
             .autocorrectionDisabled()
+            #if os(iOS)
             .textInputAutocapitalization(.never)
+            #endif
     }
 
     @ViewBuilder

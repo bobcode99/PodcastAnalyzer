@@ -10,7 +10,20 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
+
 struct EpisodeDetailView: View {
+    private var toolbarPlacement: ToolbarItemPlacement {
+        #if os(iOS)
+        return .topBarTrailing
+        #else
+        return .primaryAction
+        #endif
+    }
     @State private var viewModel: EpisodeDetailViewModel
     @Environment(\.modelContext) private var modelContext
 
@@ -51,11 +64,15 @@ struct EpisodeDetailView: View {
                 transcriptTab.tag(1)
                 keywordsTab.tag(2)
             }
+            #if os(iOS)
             .tabViewStyle(.page(indexDisplayMode: .never))
+            #endif
         }
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: toolbarPlacement) {
                 HStack(spacing: 16) {
                     Button(action: { viewModel.translateDescription() }) {
                         Image(systemName: "character.bubble")
@@ -364,7 +381,7 @@ struct EpisodeDetailView: View {
                 withAnimation { selectedTab = 2 }
             }
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(Color.platformBackground)
     }
 
     // MARK: - Summary Tab
@@ -427,7 +444,7 @@ struct EpisodeDetailView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Color(.systemGray6))
+                .background(Color.platformSystemGray6)
                 .cornerRadius(10)
 
                 // Options menu
@@ -738,7 +755,7 @@ struct EpisodeDetailView: View {
                 .buttonStyle(.bordered)
             }
             .padding()
-            .background(Color(.systemGray6))
+            .background(Color.platformSystemGray6)
             .cornerRadius(12)
         } else {
             // Generate button
