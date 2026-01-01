@@ -59,13 +59,23 @@ struct EpisodeDetailView: View {
             tabSelector
             Divider()
 
+            #if os(iOS)
             TabView(selection: $selectedTab) {
                 summaryTab.tag(0)
                 transcriptTab.tag(1)
                 keywordsTab.tag(2)
             }
-            #if os(iOS)
             .tabViewStyle(.page(indexDisplayMode: .never))
+            #else
+            // macOS: Use simple view switching to avoid default tab bar
+            Group {
+                switch selectedTab {
+                case 0: summaryTab
+                case 1: transcriptTab
+                case 2: keywordsTab
+                default: summaryTab
+                }
+            }
             #endif
         }
         #if os(iOS)

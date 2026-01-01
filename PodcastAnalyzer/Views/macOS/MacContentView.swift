@@ -80,11 +80,12 @@ enum LibrarySubItem: String, CaseIterable, Identifiable {
 // MARK: - macOS Content View
 
 struct MacContentView: View {
-  // Use the shared instance directly - @Observable will be observed automatically
-  private let audioManager = EnhancedAudioManager.shared
+  // Use @State for @Observable to ensure SwiftUI properly tracks changes
+  @State private var audioManager = EnhancedAudioManager.shared
   @ObservedObject private var importManager = PodcastImportManager.shared
   @ObservedObject private var notificationManager = NotificationNavigationManager.shared
   @Environment(\.modelContext) private var modelContext
+  @Environment(\.openSettings) private var openSettings
 
   @State private var selectedSidebarItem: MacSidebarItem? = .home
   @State private var selectedLibrarySubItem: LibrarySubItem? = .podcasts
@@ -98,19 +99,25 @@ struct MacContentView: View {
   @State private var notificationLanguage: String = "en"
   @State private var showNotificationEpisode: Bool = false
 
+  // Track if there's a current episode for mini player
+  private var hasCurrentEpisode: Bool {
+    audioManager.currentEpisode != nil
+  }
+
   var body: some View {
     NavigationSplitView(columnVisibility: $columnVisibility) {
       // Sidebar
       sidebarContent
         .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     } detail: {
-      // Main content area
-      VStack(spacing: 0) {
+      // Main content area with mini player always at bottom
+      ZStack(alignment: .bottom) {
+        // Content area
         mainContent
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .padding(.bottom, hasCurrentEpisode ? 60 : 0)
 
-        // Mini player at bottom - access currentEpisode directly so SwiftUI observes changes
-        if audioManager.currentEpisode != nil {
+        // Mini player at bottom
+        if hasCurrentEpisode {
           MacMiniPlayerBar()
         }
       }
@@ -190,7 +197,9 @@ struct MacContentView: View {
     }
     .toolbar {
       ToolbarItem(placement: .primaryAction) {
-        Button(action: {}) {
+        Button(action: {
+          openSettings()
+        }) {
           Image(systemName: "gearshape")
         }
         .help("Settings")
@@ -482,35 +491,122 @@ struct MacPodcastGridCell: View {
 }
 
 struct MacLibrarySavedView: View {
+  @StateObject private var viewModel = LibraryViewModel(modelContext: nil)
+  @Environment(\.modelContext) private var modelContext
+
   var body: some View {
-    ContentUnavailableView(
-      "No Saved Episodes",
-      systemImage: "star",
-      description: Text("Star episodes to save them here for later")
-    )
+    Group {
+      if viewModel.savedEpisodes.isEmpty {
+        ContentUnavailableView(
+          "No Saved Episodes",
+          systemImage: "star",
+          description: Text("Star episodes to save them here for later")
+        )
+      } else {
+        List(viewModel.savedEpisodes) { episode in
+          NavigationLink(
+            destination: EpisodeDetailView(
+              episode: episode.episodeInfo,
+              podcastTitle: episode.podcastTitle,
+              fallbackImageURL: episode.imageURL,
+              podcastLanguage: episode.language
+            )
+          ) {
+            MacLibraryEpisodeRow(
+              episode: episode.episodeInfo,
+              podcastTitle: episode.podcastTitle,
+              podcastImageURL: episode.imageURL ?? "",
+              podcastLanguage: episode.language
+            )
+          }
+        }
+        .listStyle(.plain)
+      }
+    }
     .navigationTitle("Saved")
+    .onAppear {
+      viewModel.setModelContext(modelContext)
+    }
   }
 }
 
 struct MacLibraryDownloadedView: View {
+  @StateObject private var viewModel = LibraryViewModel(modelContext: nil)
+  @Environment(\.modelContext) private var modelContext
+
   var body: some View {
-    ContentUnavailableView(
-      "No Downloads",
-      systemImage: "arrow.down.circle",
-      description: Text("Downloaded episodes will appear here for offline listening")
-    )
+    Group {
+      if viewModel.downloadedEpisodes.isEmpty {
+        ContentUnavailableView(
+          "No Downloads",
+          systemImage: "arrow.down.circle",
+          description: Text("Downloaded episodes will appear here for offline listening")
+        )
+      } else {
+        List(viewModel.downloadedEpisodes) { episode in
+          NavigationLink(
+            destination: EpisodeDetailView(
+              episode: episode.episodeInfo,
+              podcastTitle: episode.podcastTitle,
+              fallbackImageURL: episode.imageURL,
+              podcastLanguage: episode.language
+            )
+          ) {
+            MacLibraryEpisodeRow(
+              episode: episode.episodeInfo,
+              podcastTitle: episode.podcastTitle,
+              podcastImageURL: episode.imageURL ?? "",
+              podcastLanguage: episode.language
+            )
+          }
+        }
+        .listStyle(.plain)
+      }
+    }
     .navigationTitle("Downloaded")
+    .onAppear {
+      viewModel.setModelContext(modelContext)
+    }
   }
 }
 
 struct MacLibraryLatestView: View {
+  @StateObject private var viewModel = LibraryViewModel(modelContext: nil)
+  @Environment(\.modelContext) private var modelContext
+
   var body: some View {
-    ContentUnavailableView(
-      "No Episodes",
-      systemImage: "clock",
-      description: Text("Subscribe to podcasts to see latest episodes")
-    )
+    Group {
+      if viewModel.latestEpisodes.isEmpty {
+        ContentUnavailableView(
+          "No Episodes",
+          systemImage: "clock",
+          description: Text("Subscribe to podcasts to see latest episodes")
+        )
+      } else {
+        List(viewModel.latestEpisodes) { episode in
+          NavigationLink(
+            destination: EpisodeDetailView(
+              episode: episode.episodeInfo,
+              podcastTitle: episode.podcastTitle,
+              fallbackImageURL: episode.imageURL,
+              podcastLanguage: episode.language
+            )
+          ) {
+            MacLibraryEpisodeRow(
+              episode: episode.episodeInfo,
+              podcastTitle: episode.podcastTitle,
+              podcastImageURL: episode.imageURL ?? "",
+              podcastLanguage: episode.language
+            )
+          }
+        }
+        .listStyle(.plain)
+      }
+    }
     .navigationTitle("Latest Episodes")
+    .onAppear {
+      viewModel.setModelContext(modelContext)
+    }
   }
 }
 
