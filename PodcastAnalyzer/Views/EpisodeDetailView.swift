@@ -281,27 +281,19 @@ struct EpisodeDetailView: View {
 
             // Play + Download + AI Analysis buttons
             HStack(spacing: 8) {
-                Button(action: { viewModel.playAction() }) {
-                    HStack(spacing: 4) {
-                        Image(
-                            systemName: viewModel.isPlayingThisEpisode
-                                && viewModel.audioManager.isPlaying
-                                ? "pause.fill" : "play.fill"
-                        )
-                        .font(.system(size: 12))
-                        Text(
-                            viewModel.isPlayingThisEpisode
-                                && viewModel.audioManager.isPlaying
-                                ? "Pause" : "Play"
-                        )
-                        .font(.caption)
-                        .fontWeight(.medium)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isPlayDisabled)
+                // Play button with progress (using reusable component)
+                EpisodePlayButton(
+                    isPlaying: viewModel.audioManager.isPlaying,
+                    isPlayingThisEpisode: viewModel.isPlayingThisEpisode,
+                    isCompleted: viewModel.isCompleted,
+                    playbackProgress: viewModel.playbackProgress,
+                    duration: viewModel.savedDuration,
+                    lastPlaybackPosition: viewModel.lastPlaybackPosition,
+                    formattedDuration: viewModel.formattedDuration,
+                    isDisabled: viewModel.isPlayDisabled,
+                    style: .standard,
+                    action: { viewModel.playAction() }
+                )
 
                 downloadButton
 

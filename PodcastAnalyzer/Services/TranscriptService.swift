@@ -129,11 +129,12 @@ public actor TranscriptService {
       attributeOptions: needsAudioTimeRange ? [.audioTimeRange] : []
     )
     self.transcriber = newTranscriber
+      let detector = SpeechDetector()
 
     // Release and reserve locales
     await releaseAndReserveLocales()
 
-    let modules: [any SpeechModule] = [newTranscriber]
+      let modules: [any SpeechModule] = [newTranscriber, detector]
     let installed = await Set(SpeechTranscriber.installedLocales)
     logger.info("Installed locales: \(installed.map { $0.identifier }.joined(separator: ", "))")
 

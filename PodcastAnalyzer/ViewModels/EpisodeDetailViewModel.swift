@@ -194,6 +194,14 @@ final class EpisodeDetailViewModel {
     episodeModel?.duration ?? 0
   }
 
+  var lastPlaybackPosition: TimeInterval {
+    episodeModel?.lastPlaybackPosition ?? 0
+  }
+
+  var formattedDuration: String? {
+    episode.formattedDuration
+  }
+
   var playbackProgress: Double {
     episodeModel?.progress ?? 0
   }

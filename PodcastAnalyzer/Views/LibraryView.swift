@@ -553,6 +553,8 @@ struct LibraryEpisodeRowView: View {
   @State private var hasAIAnalysis: Bool = false
   @State private var hasTranscript: Bool = false
 
+  private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
+
   private var statusChecker: EpisodeStatusChecker {
     EpisodeStatusChecker(episode: episode)
   }
@@ -569,6 +571,30 @@ struct LibraryEpisodeRowView: View {
   private func checkStatus() {
     hasTranscript = statusChecker.hasTranscript
     hasAIAnalysis = statusChecker.hasAIAnalysis(in: modelContext)
+  }
+
+  private func playEpisode() {
+    guard episode.episodeInfo.audioURL != nil else { return }
+
+    let playbackEpisode = PlaybackEpisode(
+      id: statusChecker.episodeKey,
+      title: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle,
+      audioURL: statusChecker.playbackURL,
+      imageURL: episode.imageURL,
+      episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+      pubDate: episode.episodeInfo.pubDate,
+      duration: episode.episodeInfo.duration,
+      guid: episode.episodeInfo.guid
+    )
+
+    audioManager.play(
+      episode: playbackEpisode,
+      audioURL: statusChecker.playbackURL,
+      startTime: episode.lastPlaybackPosition,
+      imageURL: episode.imageURL ?? "",
+      useDefaultSpeed: episode.lastPlaybackPosition == 0
+    )
   }
 
   var body: some View {
@@ -588,26 +614,14 @@ struct LibraryEpisodeRowView: View {
           .fontWeight(.medium)
           .lineLimit(2)
 
-        // Date, duration, and status indicators
+        // Play button and status indicators
         HStack(spacing: 6) {
-          if let date = episode.episodeInfo.pubDate {
-            Text(date.formatted(date: .abbreviated, time: .omitted))
-              .font(.caption2)
-              .foregroundColor(.secondary)
-          }
-
-          if let duration = episode.episodeInfo.formattedDuration {
-            Text(duration)
-              .font(.caption2)
-              .foregroundColor(.secondary)
-          }
-
-          // Progress indicator
-          if episode.hasProgress {
-            Text("\(Int(episode.progress * 100))%")
-              .font(.caption2)
-              .foregroundColor(.blue)
-          }
+          // Play button with progress
+          EpisodePlayButtonWithProgress(
+            audioManager: audioManager,
+            episode: episode,
+            action: playEpisode
+          )
 
           // Status indicators using utility
           EpisodeStatusIcons(
@@ -615,8 +629,18 @@ struct LibraryEpisodeRowView: View {
             isDownloaded: episode.isDownloaded || statusChecker.isDownloaded,
             hasTranscript: hasTranscript,
             hasAIAnalysis: hasAIAnalysis,
-            isCompleted: episode.isCompleted
+            isCompleted: episode.isCompleted,
+            showCompleted: false  // Already shown in play button as replay icon
           )
+
+          Spacer()
+
+          // Date
+          if let date = episode.episodeInfo.pubDate {
+            Text(date.formatted(date: .abbreviated, time: .omitted))
+              .font(.caption2)
+              .foregroundColor(.secondary)
+          }
         }
       }
     }

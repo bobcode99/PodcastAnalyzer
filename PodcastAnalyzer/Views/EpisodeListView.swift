@@ -751,16 +751,6 @@ struct EpisodeRowView: View {
       && currentEpisode.podcastTitle == podcastTitle
   }
 
-  private var durationText: String? {
-    if let model = episodeModel,
-      model.duration > 0 && model.progress > 0 && model.progress < 1
-    {
-      let remaining = model.duration - model.lastPlaybackPosition
-      return formatDuration(Int(remaining)) + " left"
-    }
-    return episode.formattedDuration
-  }
-
   private var episodeImageURL: String {
     episode.imageURL ?? fallbackImageURL ?? ""
   }
@@ -780,12 +770,6 @@ struct EpisodeRowView: View {
     .replacingOccurrences(of: "&quot;", with: "\"")
     .trimmingCharacters(in: .whitespacesAndNewlines)
     return stripped.isEmpty ? nil : stripped
-  }
-
-  private func formatDuration(_ seconds: Int) -> String {
-    let hours = seconds / 3600
-    let minutes = (seconds % 3600) / 60
-    return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
   }
 
   private func checkAIAnalysis() {
@@ -874,49 +858,19 @@ struct EpisodeRowView: View {
   @ViewBuilder
   private var bottomStatusBar: some View {
     HStack(spacing: 6) {
-      // Play button with progress
-      Button(action: playAction) {
-        HStack(spacing: 4) {
-          if isPlayingThisEpisode && audioManager.isPlaying {
-            Image(systemName: "pause.fill").font(.system(size: 9))
-          } else if isCompleted {
-            Image(systemName: "arrow.counterclockwise").font(
-              .system(size: 9, weight: .bold)
-            )
-          } else {
-            Image(systemName: "play.fill").font(.system(size: 9))
-          }
-
-          // Progress bar
-          if playbackProgress > 0 && playbackProgress < 1 {
-            GeometryReader { geo in
-              ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.4)).frame(
-                  height: 2
-                )
-                Capsule().fill(Color.white).frame(
-                  width: geo.size.width * playbackProgress,
-                  height: 2
-                )
-              }
-            }
-            .frame(width: 24, height: 2)
-          }
-
-          if let duration = durationText {
-            Text(duration).font(.system(size: 10)).fontWeight(
-              .medium
-            )
-          }
-        }
-        .foregroundColor(.white)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(Color.blue)
-        .clipShape(Capsule())
-      }
-      .buttonStyle(.borderless)
-      .disabled(episode.audioURL == nil)
+      // Play button with progress (using reusable component)
+      EpisodePlayButton(
+        isPlaying: audioManager.isPlaying,
+        isPlayingThisEpisode: isPlayingThisEpisode,
+        isCompleted: isCompleted,
+        playbackProgress: playbackProgress,
+        duration: episodeModel?.duration,
+        lastPlaybackPosition: episodeModel?.lastPlaybackPosition ?? 0,
+        formattedDuration: episode.formattedDuration,
+        isDisabled: episode.audioURL == nil,
+        style: .compact,
+        action: playAction
+      )
 
       // Download progress
       if case .downloading(let progress) = downloadState {

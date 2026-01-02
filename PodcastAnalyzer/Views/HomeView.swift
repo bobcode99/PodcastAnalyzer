@@ -185,8 +185,34 @@ struct UpNextCard: View {
   @State private var hasAIAnalysis = false
   @State private var hasTranscript = false
 
+  private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
+
   private var statusChecker: EpisodeStatusChecker {
     EpisodeStatusChecker(episode: episode)
+  }
+
+  private func playEpisode() {
+    guard episode.episodeInfo.audioURL != nil else { return }
+
+    let playbackEpisode = PlaybackEpisode(
+      id: statusChecker.episodeKey,
+      title: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle,
+      audioURL: statusChecker.playbackURL,
+      imageURL: episode.imageURL,
+      episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+      pubDate: episode.episodeInfo.pubDate,
+      duration: episode.episodeInfo.duration,
+      guid: episode.episodeInfo.guid
+    )
+
+    audioManager.play(
+      episode: playbackEpisode,
+      audioURL: statusChecker.playbackURL,
+      startTime: episode.lastPlaybackPosition,
+      imageURL: episode.imageURL ?? "",
+      useDefaultSpeed: episode.lastPlaybackPosition == 0
+    )
   }
 
   var body: some View {
@@ -217,22 +243,12 @@ struct UpNextCard: View {
         .lineLimit(2)
         .multilineTextAlignment(.leading)
 
-      // Duration and progress
-      HStack(spacing: 4) {
-        if let duration = episode.episodeInfo.formattedDuration {
-          Text(duration)
-            .font(.caption2)
-            .foregroundColor(.secondary)
-        }
-        if episode.hasProgress {
-          Text("•")
-            .font(.caption2)
-            .foregroundColor(.secondary)
-          Text("\(Int(episode.progress * 100))%")
-            .font(.caption2)
-            .foregroundColor(.blue)
-        }
-      }
+      // Play button with progress
+      EpisodePlayButtonWithProgress(
+        audioManager: audioManager,
+        episode: episode,
+        action: playEpisode
+      )
     }
     .frame(width: 140)
     .onAppear {
