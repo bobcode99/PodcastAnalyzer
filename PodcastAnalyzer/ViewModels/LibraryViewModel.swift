@@ -27,6 +27,12 @@ struct LibraryEpisode: Identifiable {
   var hasProgress: Bool {
     lastPlaybackPosition > 0 && !isCompleted
   }
+
+  /// Progress percentage (0.0 to 1.0)
+  var progress: Double {
+    guard let duration = episodeInfo.duration, duration > 0 else { return 0 }
+    return min(lastPlaybackPosition / Double(duration), 1.0)
+  }
 }
 
 // MARK: - Library ViewModel
@@ -319,32 +325,76 @@ class LibraryViewModel: ObservableObject {
 
   // MARK: - Helper Methods
 
+  /// Parse episode key, supporting both new format (Unit Separator) and old format (|) for backward compatibility
+  private func parseEpisodeKey(_ episodeKey: String) -> (podcastTitle: String, episodeTitle: String)? {
+    // Try new format first (Unit Separator)
+    if let delimiterIndex = episodeKey.range(of: Self.episodeKeyDelimiter) {
+      let podcastTitle = String(episodeKey[..<delimiterIndex.lowerBound])
+      let episodeTitle = String(episodeKey[delimiterIndex.upperBound...])
+      return (podcastTitle, episodeTitle)
+    }
+
+    // Fall back to old format (|) for backward compatibility
+    if let lastPipeIndex = episodeKey.lastIndex(of: "|") {
+      let podcastTitle = String(episodeKey[..<lastPipeIndex])
+      let episodeTitle = String(episodeKey[episodeKey.index(after: lastPipeIndex)...])
+      return (podcastTitle, episodeTitle)
+    }
+
+    return nil
+  }
+
   private func findEpisodeInfo(for model: EpisodeDownloadModel) -> LibraryEpisode? {
     // Parse the episode key to get podcast title and episode title
-    let parts = model.id.components(separatedBy: Self.episodeKeyDelimiter)
-    guard parts.count == 2 else { return nil }
-
-    let podcastTitle = parts[0]
-    let episodeTitle = parts[1]
+    guard let (podcastTitle, episodeTitle) = parseEpisodeKey(model.id) else {
+      logger.warning("Failed to parse episode key: \(model.id)")
+      // Fallback: use the stored data from EpisodeDownloadModel
+      return createFallbackLibraryEpisode(from: model)
+    }
 
     // Find the podcast from ALL podcasts (subscribed + browsed)
-    // Access allPodcasts on MainActor since it's a @MainActor class
     let podcasts = allPodcasts
-    guard let podcast = podcasts.first(where: { $0.podcastInfo.title == podcastTitle }) else {
-      return nil
+    if let podcast = podcasts.first(where: { $0.podcastInfo.title == podcastTitle }),
+       let episode = podcast.podcastInfo.episodes.first(where: { $0.title == episodeTitle }) {
+      // Found the full episode info
+      return LibraryEpisode(
+        id: model.id,
+        podcastTitle: podcastTitle,
+        imageURL: episode.imageURL ?? podcast.podcastInfo.imageURL,
+        language: podcast.podcastInfo.language,
+        episodeInfo: episode,
+        isStarred: model.isStarred,
+        isDownloaded: model.localAudioPath != nil,
+        isCompleted: model.isCompleted,
+        lastPlaybackPosition: model.lastPlaybackPosition
+      )
     }
 
-    // Find the episode
-    guard let episode = podcast.podcastInfo.episodes.first(where: { $0.title == episodeTitle }) else {
-      return nil
-    }
+    // Fallback: use the stored data from EpisodeDownloadModel
+    // This handles cases where the podcast was unsubscribed or episode removed from RSS
+    return createFallbackLibraryEpisode(from: model)
+  }
+
+  /// Create a LibraryEpisode from EpisodeDownloadModel's stored data when the podcast isn't in the database
+  private func createFallbackLibraryEpisode(from model: EpisodeDownloadModel) -> LibraryEpisode {
+    // Create a minimal PodcastEpisodeInfo from the stored data
+    let durationSeconds: Int? = model.duration > 0 ? Int(model.duration) : nil
+    let episodeInfo = PodcastEpisodeInfo(
+      title: model.episodeTitle,
+      podcastEpisodeDescription: nil,
+      pubDate: model.pubDate,
+      audioURL: model.audioURL,
+      imageURL: model.imageURL,
+      duration: durationSeconds,
+      guid: nil
+    )
 
     return LibraryEpisode(
       id: model.id,
-      podcastTitle: podcastTitle,
-      imageURL: episode.imageURL ?? podcast.podcastInfo.imageURL,
-      language: podcast.podcastInfo.language,
-      episodeInfo: episode,
+      podcastTitle: model.podcastTitle,
+      imageURL: model.imageURL,
+      language: "en",  // Default language when unknown
+      episodeInfo: episodeInfo,
       isStarred: model.isStarred,
       isDownloaded: model.localAudioPath != nil,
       isCompleted: model.isCompleted,
