@@ -698,6 +698,8 @@ struct PodcastPreviewSheet: View {
 
 struct UpNextListView: View {
   let episodes: [LibraryEpisode]
+  @Environment(\.modelContext) private var modelContext
+  @StateObject private var viewModel = HomeViewModel()
 
   var body: some View {
     List(episodes) { episode in
@@ -711,12 +713,22 @@ struct UpNextListView: View {
       ) {
         LibraryEpisodeRowView(episode: episode)
       }
+      .contextMenu {
+        LibraryEpisodeContextMenu(
+          episode: episode,
+          modelContext: modelContext,
+          onRefresh: { }
+        )
+      }
     }
     .listStyle(.plain)
     .navigationTitle("Up Next")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif
+    .onAppear {
+      viewModel.setModelContext(modelContext)
+    }
   }
 }
 
