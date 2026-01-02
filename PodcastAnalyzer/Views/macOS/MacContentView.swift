@@ -110,18 +110,28 @@ struct MacContentView: View {
       sidebarContent
         .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     } detail: {
-      // Main content area with mini player always at bottom
+      // Main content area with mini player pinned to bottom using ZStack
       ZStack(alignment: .bottom) {
-        // Content area
         mainContent
-          .padding(.bottom, hasCurrentEpisode ? 60 : 0)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          // Add bottom padding when mini player is visible to prevent overlap
+          .padding(.bottom, hasCurrentEpisode ? 70 : 0)
 
-        // Mini player at bottom
+        // Mini player always pinned to bottom of detail column
         if hasCurrentEpisode {
           MacMiniPlayerBar()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(color: .black.opacity(0.1), radius: 8, y: -2)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
+            .zIndex(1)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
       }
+      .animation(.easeInOut(duration: 0.25), value: hasCurrentEpisode)
     }
+    
     .navigationSplitViewStyle(.balanced)
     .frame(minWidth: 900, minHeight: 600)
     .onAppear {

@@ -36,6 +36,7 @@ final class EpisodeListViewModel {
   private let rssService = PodcastRssService()
   private var modelContext: ModelContext?
   private var refreshTimer: Timer?
+  private var downloadCompletionObserver: NSObjectProtocol?
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
   private static let episodeKeyDelimiter = "\u{1F}"
@@ -116,6 +117,83 @@ final class EpisodeListViewModel {
   func setModelContext(_ context: ModelContext) {
     self.modelContext = context
     loadEpisodeModels()
+    setupDownloadCompletionObserver()
+  }
+
+  private func setupDownloadCompletionObserver() {
+    // Remove existing observer if any
+    if let observer = downloadCompletionObserver {
+      NotificationCenter.default.removeObserver(observer)
+    }
+
+    // Capture podcast title before closure to avoid main actor isolation issues
+    let myPodcastTitle = podcastModel.podcastInfo.title
+
+    // Listen for download completion to update SwiftData
+    downloadCompletionObserver = NotificationCenter.default.addObserver(
+      forName: .episodeDownloadCompleted,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let self = self,
+            let userInfo = notification.userInfo,
+            let episodeTitle = userInfo["episodeTitle"] as? String,
+            let podcastTitle = userInfo["podcastTitle"] as? String,
+            let localPath = userInfo["localPath"] as? String else { return }
+
+      // Only handle if this is for our podcast
+      guard podcastTitle == myPodcastTitle else { return }
+
+      // Dispatch to MainActor for the update
+      Task { @MainActor in
+        self.updateEpisodeDownloadModel(
+          episodeTitle: episodeTitle,
+          podcastTitle: podcastTitle,
+          localPath: localPath
+        )
+      }
+    }
+  }
+
+  private func updateEpisodeDownloadModel(episodeTitle: String, podcastTitle: String, localPath: String) {
+    guard let context = modelContext else { return }
+
+    let episodeKey = "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episodeTitle)"
+
+    // Check if model already exists
+    if let existingModel = episodeModels[episodeKey] {
+      existingModel.localAudioPath = localPath
+      existingModel.downloadedDate = Date()
+      // Get file size
+      if let attrs = try? FileManager.default.attributesOfItem(atPath: localPath),
+         let size = attrs[.size] as? Int64 {
+        existingModel.fileSize = size
+      }
+      try? context.save()
+    } else {
+      // Find the episode to get its audio URL
+      guard let episode = podcastModel.podcastInfo.episodes.first(where: { $0.title == episodeTitle }),
+            let audioURL = episode.audioURL else { return }
+
+      // Create new model
+      let model = EpisodeDownloadModel(
+        episodeTitle: episodeTitle,
+        podcastTitle: podcastTitle,
+        audioURL: audioURL,
+        localAudioPath: localPath,
+        downloadedDate: Date(),
+        imageURL: episode.imageURL ?? podcastModel.podcastInfo.imageURL,
+        pubDate: episode.pubDate
+      )
+      // Get file size
+      if let attrs = try? FileManager.default.attributesOfItem(atPath: localPath),
+         let size = attrs[.size] as? Int64 {
+        model.fileSize = size
+      }
+      context.insert(model)
+      try? context.save()
+      episodeModels[episodeKey] = model
+    }
   }
 
   // MARK: - HTML Description Parsing

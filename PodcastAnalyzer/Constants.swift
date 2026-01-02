@@ -1,5 +1,12 @@
 import Foundation
 
+// MARK: - Notification Names
+
+extension Notification.Name {
+  static let podcastRegionChanged = Notification.Name("podcastRegionChanged")
+  static let episodeDownloadCompleted = Notification.Name("episodeDownloadCompleted")
+}
+
 struct Constants {
   static let apiBaseURL = "https://api.podcastanalyzer.com"
   static let defaultTimeoutInterval: TimeInterval = 30.0

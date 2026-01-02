@@ -343,6 +343,17 @@ extension DownloadManager: URLSessionDownloadDelegate {
             self.originalURLs.removeValue(forKey: episodeKey)
             self.logger.info("Download completed successfully: \(episodeTitle)")
 
+            // Post notification so SwiftData models can be updated
+            NotificationCenter.default.post(
+              name: .episodeDownloadCompleted,
+              object: nil,
+              userInfo: [
+                "episodeTitle": episodeTitle,
+                "podcastTitle": podcastTitle,
+                "localPath": destinationURL.path
+              ]
+            )
+
             // Trigger auto-transcript if enabled
             if self.autoTranscriptEnabled {
               let language = self.episodeLanguages[episodeKey] ?? "en"

@@ -20,10 +20,11 @@ class HomeViewModel: ObservableObject {
   @Published var topPodcasts: [AppleRSSPodcast] = []
   @Published var isLoadingTopPodcasts = false
 
-  // Region selection
+  // Region selection - synced with Settings
   @Published var selectedRegion: String = "us" {
     didSet {
       if oldValue != selectedRegion {
+        // Save to UserDefaults for consistency
         UserDefaults.standard.set(selectedRegion, forKey: "selectedPodcastRegion")
         loadTopPodcasts()
       }
@@ -58,6 +59,15 @@ class HomeViewModel: ObservableObject {
     if let saved = UserDefaults.standard.string(forKey: "selectedPodcastRegion") {
       selectedRegion = saved
     }
+
+    // Listen for region changes from Settings
+    NotificationCenter.default.publisher(for: .podcastRegionChanged)
+      .receive(on: DispatchQueue.main)
+      .compactMap { $0.object as? String }
+      .sink { [weak self] newRegion in
+        self?.selectedRegion = newRegion
+      }
+      .store(in: &cancellables)
   }
 
   func setModelContext(_ context: ModelContext) {

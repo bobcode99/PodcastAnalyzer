@@ -568,6 +568,7 @@ struct EpisodeListView: View {
             .background(isSubscribed ? Color.green : Color.blue)
             .cornerRadius(16)
           }
+          .buttonStyle(.plain)
           .disabled(isSubscribed)
           .padding(.top, 4)
 
@@ -591,6 +592,7 @@ struct EpisodeListView: View {
                 .fontWeight(.medium)
                 .foregroundColor(.blue)
               }
+              .buttonStyle(.plain)
             }
           }
         }
@@ -651,6 +653,7 @@ struct EpisodeListView: View {
             .foregroundColor(.primary)
             .cornerRadius(16)
           }
+          .buttonStyle(.plain)
         }
         .padding(.horizontal, 4)
       }
@@ -1208,5 +1211,6 @@ struct FilterChip: View {
       .foregroundColor(isSelected ? .white : .primary)
       .cornerRadius(16)
     }
+    .buttonStyle(.plain)
   }
 }

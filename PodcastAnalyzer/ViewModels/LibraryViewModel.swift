@@ -53,6 +53,7 @@ class LibraryViewModel: ObservableObject {
   private let downloadManager = DownloadManager.shared
   private var modelContext: ModelContext?
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "LibraryViewModel")
+  private var downloadCompletionObserver: NSObjectProtocol?
 
   // All podcasts (subscribed + browsed) for episode lookups
   private var allPodcasts: [PodcastInfoModel] = []
@@ -69,6 +70,87 @@ class LibraryViewModel: ObservableObject {
       Task {
         await loadAll()
       }
+    }
+    setupDownloadCompletionObserver()
+  }
+
+  deinit {
+    if let observer = downloadCompletionObserver {
+      NotificationCenter.default.removeObserver(observer)
+    }
+  }
+
+  private func setupDownloadCompletionObserver() {
+    // Listen for download completion to update SwiftData and reload
+    downloadCompletionObserver = NotificationCenter.default.addObserver(
+      forName: .episodeDownloadCompleted,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let self = self,
+            let userInfo = notification.userInfo,
+            let episodeTitle = userInfo["episodeTitle"] as? String,
+            let podcastTitle = userInfo["podcastTitle"] as? String,
+            let localPath = userInfo["localPath"] as? String else { return }
+
+      Task { @MainActor in
+        self.handleDownloadCompletion(
+          episodeTitle: episodeTitle,
+          podcastTitle: podcastTitle,
+          localPath: localPath
+        )
+      }
+    }
+  }
+
+  private func handleDownloadCompletion(episodeTitle: String, podcastTitle: String, localPath: String) {
+    guard let context = modelContext else { return }
+
+    let episodeKey = "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episodeTitle)"
+
+    // Check if model already exists
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.id == episodeKey }
+    )
+
+    do {
+      if let existingModel = try context.fetch(descriptor).first {
+        existingModel.localAudioPath = localPath
+        existingModel.downloadedDate = Date()
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: localPath),
+           let size = attrs[.size] as? Int64 {
+          existingModel.fileSize = size
+        }
+        try context.save()
+      } else {
+        // Find the episode from allPodcasts
+        guard let podcast = allPodcasts.first(where: { $0.podcastInfo.title == podcastTitle }),
+              let episode = podcast.podcastInfo.episodes.first(where: { $0.title == episodeTitle }),
+              let audioURL = episode.audioURL else { return }
+
+        let model = EpisodeDownloadModel(
+          episodeTitle: episodeTitle,
+          podcastTitle: podcastTitle,
+          audioURL: audioURL,
+          localAudioPath: localPath,
+          downloadedDate: Date(),
+          imageURL: episode.imageURL ?? podcast.podcastInfo.imageURL,
+          pubDate: episode.pubDate
+        )
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: localPath),
+           let size = attrs[.size] as? Int64 {
+          model.fileSize = size
+        }
+        context.insert(model)
+        try context.save()
+      }
+
+      // Reload downloaded episodes to update the UI
+      Task {
+        await loadDownloadedEpisodes()
+      }
+    } catch {
+      logger.error("Failed to update download model: \(error.localizedDescription)")
     }
   }
 

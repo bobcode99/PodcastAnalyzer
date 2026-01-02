@@ -134,6 +134,29 @@ struct SettingsView: View {
           Text("New episodes will start at this speed")
         }
 
+        // MARK: - Region Section
+        Section {
+          Picker(selection: $viewModel.selectedRegion) {
+            ForEach(Constants.podcastRegions, id: \.code) { region in
+              Text(region.name).tag(region.code)
+            }
+          } label: {
+            HStack {
+              Image(systemName: "globe")
+                .foregroundColor(.blue)
+                .frame(width: 24)
+              Text("Default Region")
+            }
+          }
+          .onChange(of: viewModel.selectedRegion) { _, newValue in
+            viewModel.setSelectedRegion(newValue)
+          }
+        } header: {
+          Text("Discovery")
+        } footer: {
+          Text("Region for browsing top podcasts on Home")
+        }
+
         // MARK: - Transcript Section
         Section {
           // Language picker

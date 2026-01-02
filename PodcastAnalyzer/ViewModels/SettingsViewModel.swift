@@ -50,14 +50,37 @@ class SettingsViewModel: ObservableObject {
   private let service = PodcastRssService()
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "SettingsViewModel")
 
+  // Default region for top podcasts
+  @Published var selectedRegion: String = "us"
+
   private enum Keys {
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
     static let selectedTranscriptLocale = "selectedTranscriptLocale"
+    static let selectedPodcastRegion = "selectedPodcastRegion"
   }
 
   init() {
     loadDefaultPlaybackSpeed()
     loadSelectedTranscriptLocale()
+    loadSelectedRegion()
+  }
+
+  // MARK: - Region Settings
+
+  func setSelectedRegion(_ region: String) {
+    selectedRegion = region
+    UserDefaults.standard.set(region, forKey: Keys.selectedPodcastRegion)
+    logger.info("Selected region set to \(region)")
+    // Post notification so HomeViewModel can update
+    NotificationCenter.default.post(name: .podcastRegionChanged, object: region)
+  }
+
+  private func loadSelectedRegion() {
+    if let saved = UserDefaults.standard.string(forKey: Keys.selectedPodcastRegion) {
+      selectedRegion = saved
+    } else {
+      selectedRegion = "us"
+    }
   }
 
   // MARK: - Transcript Locale Settings
