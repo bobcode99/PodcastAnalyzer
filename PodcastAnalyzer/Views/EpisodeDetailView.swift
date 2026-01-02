@@ -52,6 +52,26 @@ struct EpisodeDetailView: View {
         )
     }
 
+    /// Destination view for navigating to the podcast's episode list
+    @ViewBuilder
+    private var podcastDestination: some View {
+        // Try to find the podcast model in SwiftData
+        let title = viewModel.podcastTitle
+        let descriptor = FetchDescriptor<PodcastInfoModel>(
+            predicate: #Predicate { $0.podcastInfo.title == title }
+        )
+        if let podcastModel = try? modelContext.fetch(descriptor).first {
+            EpisodeListView(podcastModel: podcastModel)
+        } else {
+            // Fallback: show an error or navigate with browse mode
+            ContentUnavailableView(
+                "Podcast Not Found",
+                systemImage: "exclamationmark.triangle",
+                description: Text("This podcast is not in your library")
+            )
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             headerSection
@@ -85,7 +105,7 @@ struct EpisodeDetailView: View {
             ToolbarItem(placement: toolbarPlacement) {
                 HStack(spacing: 16) {
                     Button(action: { viewModel.translateDescription() }) {
-                        Image(systemName: "character.bubble")
+                        Image(systemName: "translate")
                     }
                     Menu {
                         EpisodeMenuActions(
@@ -173,12 +193,18 @@ struct EpisodeDetailView: View {
                         .textSelection(.enabled)  // Can select and copy
                         .fixedSize(horizontal: false, vertical: true)  // Allows wrapping
 
-                    HStack(spacing: 4) {
-                        Text(viewModel.podcastTitle)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    // Tappable podcast title - navigates to show
+                    NavigationLink(destination: podcastDestination) {
+                        HStack(spacing: 4) {
+                            Text(viewModel.podcastTitle)
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 8))
+                                .foregroundColor(.blue)
+                        }
                     }
-                    .textSelection(.enabled)
+                    .buttonStyle(.plain)
 
                     // Date and status icons row
                     HStack(spacing: 8) {

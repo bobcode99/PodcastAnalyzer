@@ -207,6 +207,13 @@ class HomeViewModel: ObservableObject {
     return try? context.fetch(descriptor).first
   }
 
+  // MARK: - Find Podcast Model
+
+  /// Find the PodcastInfoModel for a given podcast title
+  func findPodcastModel(for podcastTitle: String) -> PodcastInfoModel? {
+    return podcastInfoModelList.first { $0.podcastInfo.title == podcastTitle }
+  }
+
   // MARK: - Episode Actions
 
   func toggleStar(for episode: LibraryEpisode) {

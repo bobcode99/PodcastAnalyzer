@@ -181,11 +181,46 @@ struct HomeView: View {
 
 struct UpNextCard: View {
   let episode: LibraryEpisode
+  @Environment(\.modelContext) private var modelContext
+  @ObservedObject private var downloadManager = DownloadManager.shared
+  @State private var hasAIAnalysis = false
+  @State private var hasTranscript = false
+
+  private var isDownloaded: Bool {
+    let state = downloadManager.getDownloadState(
+      episodeTitle: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle
+    )
+    if case .downloaded = state { return true }
+    return false
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       // Episode artwork - using CachedAsyncImage for better performance
-      CachedArtworkImage(urlString: episode.imageURL, size: 140, cornerRadius: 12)
+      ZStack(alignment: .bottomTrailing) {
+        CachedArtworkImage(urlString: episode.imageURL, size: 140, cornerRadius: 12)
+
+        // Status icons overlay
+        HStack(spacing: 3) {
+          if episode.isStarred {
+            statusIcon("star.fill", color: .yellow)
+          }
+          if isDownloaded {
+            statusIcon("arrow.down.circle.fill", color: .green)
+          }
+          if hasTranscript {
+            statusIcon("captions.bubble.fill", color: .purple)
+          }
+          if hasAIAnalysis {
+            statusIcon("sparkles", color: .orange)
+          }
+        }
+        .padding(4)
+        .background(.ultraThinMaterial)
+        .cornerRadius(6)
+        .padding(4)
+      }
 
       // Podcast title
       Text(episode.podcastTitle)
@@ -200,14 +235,60 @@ struct UpNextCard: View {
         .lineLimit(2)
         .multilineTextAlignment(.leading)
 
-      // Duration
-      if let duration = episode.episodeInfo.formattedDuration {
-        Text(duration)
-          .font(.caption2)
-          .foregroundColor(.secondary)
+      // Duration and progress
+      HStack(spacing: 4) {
+        if let duration = episode.episodeInfo.formattedDuration {
+          Text(duration)
+            .font(.caption2)
+            .foregroundColor(.secondary)
+        }
+        if episode.lastPlaybackPosition > 0 && episode.lastPlaybackPosition < 1 {
+          Text("•")
+            .font(.caption2)
+            .foregroundColor(.secondary)
+          Text("\(Int(episode.lastPlaybackPosition * 100))%")
+            .font(.caption2)
+            .foregroundColor(.blue)
+        }
       }
     }
     .frame(width: 140)
+    .onAppear {
+      checkTranscript()
+      checkAIAnalysis()
+    }
+  }
+
+  private func statusIcon(_ name: String, color: Color) -> some View {
+    Image(systemName: name)
+      .font(.system(size: 9, weight: .bold))
+      .foregroundColor(color)
+  }
+
+  private func checkTranscript() {
+    let fm = FileManager.default
+    let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    let captionsDir = docsDir.appendingPathComponent("Captions", isDirectory: true)
+    let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
+    let baseFileName = "\(episode.podcastTitle)_\(episode.episodeInfo.title)"
+      .components(separatedBy: invalidCharacters)
+      .joined(separator: "_")
+      .trimmingCharacters(in: .whitespaces)
+    let srtPath = captionsDir.appendingPathComponent("\(baseFileName).srt")
+    hasTranscript = fm.fileExists(atPath: srtPath.path)
+  }
+
+  private func checkAIAnalysis() {
+    guard let audioURL = episode.episodeInfo.audioURL else { return }
+    let descriptor = FetchDescriptor<EpisodeAIAnalysis>(
+      predicate: #Predicate { $0.episodeAudioURL == audioURL }
+    )
+    if let model = try? modelContext.fetch(descriptor).first {
+      hasAIAnalysis =
+        model.hasFullAnalysis || model.hasSummary || model.hasEntities
+        || model.hasHighlights
+        || (model.qaHistoryJSON != nil && !model.qaHistoryJSON!.isEmpty)
+    }
   }
 }
 
@@ -232,6 +313,15 @@ struct UpNextContextMenu: View {
   }
 
   var body: some View {
+    // Go to Show
+    if let podcastModel = viewModel.findPodcastModel(for: episode.podcastTitle) {
+      NavigationLink(destination: EpisodeListView(podcastModel: podcastModel)) {
+        Label("Go to Show", systemImage: "square.stack")
+      }
+
+      Divider()
+    }
+
     // Star/Unstar
     Button {
       viewModel.toggleStar(for: episode)

@@ -5,18 +5,34 @@
 //  Created by Bob on 2026/1/2.
 //
 
-
 import AVKit
 import SwiftUI
 
-struct AirPlayButton: UIViewRepresentable {
-    func makeUIView(context: Context) -> AVRoutePickerView {
-        let picker = AVRoutePickerView()
-        picker.backgroundColor = .clear
-        picker.activeTintColor = .systemBlue // Color when active
-        picker.tintColor = .secondaryLabel  // Standard color
-        return picker
-    }
+#if os(iOS)
+import UIKit
 
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+struct AirPlayButton: UIViewRepresentable {
+  func makeUIView(context: Context) -> AVRoutePickerView {
+    let picker = AVRoutePickerView()
+    picker.backgroundColor = .clear
+    picker.activeTintColor = .systemBlue
+    picker.tintColor = .secondaryLabel
+    return picker
+  }
+
+  func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }
+
+#elseif os(macOS)
+import AppKit
+
+struct AirPlayButton: NSViewRepresentable {
+  func makeNSView(context: Context) -> AVRoutePickerView {
+    let picker = AVRoutePickerView()
+    picker.isRoutePickerButtonBordered = false
+    return picker
+  }
+
+  func updateNSView(_ nsView: AVRoutePickerView, context: Context) {}
+}
+#endif

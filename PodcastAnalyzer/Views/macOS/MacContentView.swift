@@ -110,26 +110,22 @@ struct MacContentView: View {
       sidebarContent
         .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     } detail: {
-      // Main content area with mini player pinned to bottom using ZStack
-      ZStack(alignment: .bottom) {
-        mainContent
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          // Add bottom padding when mini player is visible to prevent overlap
-          .padding(.bottom, hasCurrentEpisode ? 70 : 0)
-
-        // Mini player always pinned to bottom of detail column
-        if hasCurrentEpisode {
-          MacMiniPlayerBar()
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .shadow(color: .black.opacity(0.1), radius: 8, y: -2)
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
-            .zIndex(1)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+      // Main content area with mini player using overlay to ensure it's always on top
+      mainContent
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Add bottom padding when mini player is visible to prevent overlap
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+          if hasCurrentEpisode {
+            MacMiniPlayerBar()
+              .background(.ultraThinMaterial)
+              .clipShape(RoundedRectangle(cornerRadius: 12))
+              .shadow(color: .black.opacity(0.1), radius: 8, y: -2)
+              .padding(.horizontal, 12)
+              .padding(.bottom, 8)
+              .transition(.move(edge: .bottom).combined(with: .opacity))
+          }
         }
-      }
-      .animation(.easeInOut(duration: 0.25), value: hasCurrentEpisode)
+        .animation(.easeInOut(duration: 0.25), value: hasCurrentEpisode)
     }
     
     .navigationSplitViewStyle(.balanced)
@@ -529,6 +525,13 @@ struct MacLibrarySavedView: View {
               podcastLanguage: episode.language
             )
           }
+          .contextMenu {
+            LibraryEpisodeContextMenu(
+              episode: episode,
+              modelContext: modelContext,
+              onRefresh: { viewModel.setModelContext(modelContext) }
+            )
+          }
         }
         .listStyle(.plain)
       }
@@ -569,6 +572,13 @@ struct MacLibraryDownloadedView: View {
               podcastLanguage: episode.language
             )
           }
+          .contextMenu {
+            LibraryEpisodeContextMenu(
+              episode: episode,
+              modelContext: modelContext,
+              onRefresh: { viewModel.setModelContext(modelContext) }
+            )
+          }
         }
         .listStyle(.plain)
       }
@@ -607,6 +617,13 @@ struct MacLibraryLatestView: View {
               podcastTitle: episode.podcastTitle,
               podcastImageURL: episode.imageURL ?? "",
               podcastLanguage: episode.language
+            )
+          }
+          .contextMenu {
+            LibraryEpisodeContextMenu(
+              episode: episode,
+              modelContext: modelContext,
+              onRefresh: { viewModel.setModelContext(modelContext) }
             )
           }
         }
@@ -794,7 +811,7 @@ struct MacSearchView: View {
           // Episodes section
           if !filteredEpisodes.isEmpty {
             Section {
-              ForEach(filteredEpisodes, id: \.episode.id) { item in
+              ForEach(filteredEpisodes, id: \.uniqueId) { item in
                 NavigationLink {
                   EpisodeDetailView(
                     episode: item.episode,
@@ -851,9 +868,9 @@ struct MacSearchView: View {
     }
   }
 
-  private func filterLibraryEpisodes() -> [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] {
+  private func filterLibraryEpisodes() -> [(uniqueId: String, episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] {
     let query = searchText.lowercased()
-    var results: [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
+    var results: [(uniqueId: String, episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
 
     for podcast in subscribedPodcasts {
       let matchingEpisodes = podcast.podcastInfo.episodes.filter { episode in
@@ -862,7 +879,10 @@ struct MacSearchView: View {
       }
 
       for episode in matchingEpisodes {
+        // Create unique ID using podcast title + episode title
+        let uniqueId = "\(podcast.podcastInfo.title)\u{1F}\(episode.title)"
         results.append((
+          uniqueId: uniqueId,
           episode: episode,
           podcastTitle: podcast.podcastInfo.title,
           podcastImageURL: podcast.podcastInfo.imageURL,

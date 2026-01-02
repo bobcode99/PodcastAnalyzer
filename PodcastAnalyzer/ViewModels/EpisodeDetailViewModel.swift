@@ -532,11 +532,6 @@ final class EpisodeDetailViewModel {
     }
   }
 
-  func addToList() {
-    // TODO: Implement add to list functionality
-    logger.debug("Add to list: \(self.episode.title)")
-  }
-
   func addToPlayNext() {
     guard let audioURLString = episode.audioURL else {
       logger.warning("Cannot add to play next: no audio URL")
@@ -557,10 +552,6 @@ final class EpisodeDetailViewModel {
 
     audioManager.playNext(playbackEpisode)
     logger.info("Added to play next: \(self.episode.title)")
-  }
-
-  func downloadAudio() {
-    startDownload()
   }
 
   func reportIssue() {

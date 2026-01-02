@@ -316,8 +316,9 @@ extension DownloadManager: URLSessionDownloadDelegate {
       try FileManager.default.copyItem(at: location, to: ourTempFile)
       logger.info("Copied download to temp location: \(ourTempFile.lastPathComponent)")
 
-      // Set finishing state SYNCHRONOUSLY on main thread to avoid race conditions
-      DispatchQueue.main.sync {
+      // Set finishing state on main thread
+      // Use async to avoid potential deadlocks
+      DispatchQueue.main.async {
         self.downloadStates[episodeKey] = .finishing
       }
 
