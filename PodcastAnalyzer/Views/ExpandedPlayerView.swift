@@ -30,45 +30,54 @@ struct ExpandedPlayerView: View {
   var body: some View {
     NavigationStack {
       ZStack {
-        // Background gradient based on artwork (simulated)
+        // Background gradient
         LinearGradient(
-          colors: [Color.gray.opacity(0.3), Color.platformBackground],
-          startPoint: .top,
-          endPoint: .center
+            colors: [Color.gray.opacity(0.3), Color.platformBackground],
+            startPoint: .top,
+            endPoint: .center
         )
         .ignoresSafeArea()
 
-        ScrollView {
-          VStack(spacing: 0) {
-            // Large artwork
-            artworkSection
-              .padding(.top, 20)
+        GeometryReader { geometry in
+            ScrollView {
+                // This container ensures content spans at least the full screen height
+                VStack(spacing: 0) {
+                    
+                    // 1. Artwork & Info Group
+                    VStack(spacing: 0) {
+                        artworkSection
+                            .padding(.top, geometry.size.height * 0.02)
+                        
+                        episodeInfoSection
+                            .padding(.top, 24)
+                    }
+                    
+                    Spacer(minLength: 20) // Flexible space
 
-            // Episode info
-            episodeInfoSection
-              .padding(.top, 24)
+                    // 2. Playback Group (Progress + Controls)
+                    VStack(spacing: 24) {
+                        progressSection
+                            .padding(.horizontal, 24)
+                        
+                        controlsSection
+                    }
 
-            // Progress bar
-            progressSection
-              .padding(.horizontal, 24)
-              .padding(.top, 32)
+                    Spacer(minLength: 20) // Flexible space
 
-            // Playback controls
-            controlsSection
-              .padding(.top, 24)
+                    // 3. Bottom Actions
+                    bottomActionsSection
+                        .padding(.bottom, (viewModel.hasTranscript && !viewModel.transcriptSegments.isEmpty) ? 20 : 40)
 
-            // Bottom actions
-            bottomActionsSection
-              .padding(.top, 24)
-
-            // Transcript preview section (if available)
-            if viewModel.hasTranscript {
-              transcriptPreviewSection
-                .padding(.top, 24)
+                    // 4. Transcript - ONLY renders if data exists
+                    if viewModel.hasTranscript && !viewModel.transcriptSegments.isEmpty {
+                        transcriptPreviewSection
+                            .padding(.top, 10)
+                            .padding(.bottom, 40)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .frame(minHeight: geometry.size.height) // Forces the Spacers to work
             }
-
-            Spacer(minLength: 40)
-          }
         }
         .blur(radius: showSpeedPicker || showQueue ? 3 : 0)
 
