@@ -390,12 +390,18 @@ struct SavedEpisodesView: View {
           }
         }
         .listStyle(.plain)
+        .refreshable {
+          viewModel.setModelContext(modelContext)
+        }
       }
     }
     .navigationTitle("Saved")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif
+    .onAppear {
+      viewModel.setModelContext(modelContext)
+    }
   }
 
   private var emptyStateView: some View {
@@ -446,12 +452,18 @@ struct DownloadedEpisodesView: View {
           }
         }
         .listStyle(.plain)
+        .refreshable {
+          viewModel.setModelContext(modelContext)
+        }
       }
     }
     .navigationTitle("Downloaded")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif
+    .onAppear {
+      viewModel.setModelContext(modelContext)
+    }
   }
 
   private var emptyStateView: some View {
@@ -502,12 +514,18 @@ struct LatestEpisodesView: View {
           }
         }
         .listStyle(.plain)
+        .refreshable {
+          viewModel.setModelContext(modelContext)
+        }
       }
     }
     .navigationTitle("Latest Episodes")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif
+    .onAppear {
+      viewModel.setModelContext(modelContext)
+    }
   }
 
   private var emptyStateView: some View {

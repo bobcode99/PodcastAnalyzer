@@ -162,12 +162,10 @@ class LibraryViewModel: ObservableObject {
 
   func setModelContext(_ context: ModelContext) {
     self.modelContext = context
-    // Only load if we haven't or if we need a fresh start
-    if !isAlreadyLoaded {
-      Task {
-        await loadAll()
-        isAlreadyLoaded = true
-      }
+    // Always reload data when context is set (e.g., when view appears or pull-to-refresh)
+    Task {
+      await loadAll()
+      isAlreadyLoaded = true
     }
   }
 
@@ -241,16 +239,18 @@ class LibraryViewModel: ObservableObject {
   private func loadSavedEpisodes() async {
     guard let context = modelContext else { return }
 
+    // Fetch ALL and filter in memory to avoid predicate issues with Unicode
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      predicate: #Predicate { $0.isStarred == true },
       sortBy: [SortDescriptor(\.downloadedDate, order: .reverse)]
     )
 
     do {
-      let models = try context.fetch(descriptor)
-      // Since we're @MainActor, map directly
-      let results = models.compactMap { model in
-        self.findEpisodeInfo(for: model)
+      let allModels = try context.fetch(descriptor)
+      // Filter for starred episodes in memory
+      let starredModels = allModels.filter { $0.isStarred }
+      // Map to LibraryEpisode - always succeeds due to fallback
+      let results = starredModels.map { model in
+        self.createLibraryEpisode(from: model)
       }
       self.savedEpisodes = results
       logger.info("Loaded \(self.savedEpisodes.count) saved episodes")
@@ -264,18 +264,26 @@ class LibraryViewModel: ObservableObject {
   private func loadDownloadedEpisodes() async {
     guard let context = modelContext else { return }
 
-    // OPTIMIZATION: Instead of looping ALL episodes,
-    // query the EpisodeDownloadModel directly!
+    // Fetch ALL EpisodeDownloadModel and filter in memory
+    // This avoids potential SwiftData predicate issues with Unicode strings
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      predicate: #Predicate { $0.localAudioPath != nil },
       sortBy: [SortDescriptor(\.downloadedDate, order: .reverse)]
     )
 
     do {
-      let downloadedModels = try context.fetch(descriptor)
-      // Since we're @MainActor, map directly
-      let results = downloadedModels.compactMap { model in
-        self.findEpisodeInfo(for: model)
+      let allModels = try context.fetch(descriptor)
+      logger.info("Fetched \(allModels.count) total EpisodeDownloadModel entries")
+
+      // Filter for downloaded episodes in memory (localAudioPath is not nil and not empty)
+      let downloadedModels = allModels.filter { model in
+        guard let path = model.localAudioPath else { return false }
+        return !path.isEmpty
+      }
+      logger.info("Found \(downloadedModels.count) models with localAudioPath")
+
+      // Map to LibraryEpisode - always succeeds due to fallback
+      let results = downloadedModels.map { model in
+        self.createLibraryEpisode(from: model)
       }
       self.downloadedEpisodes = results
       logger.info("Loaded \(self.downloadedEpisodes.count) downloaded episodes")
@@ -324,6 +332,56 @@ class LibraryViewModel: ObservableObject {
   }
 
   // MARK: - Helper Methods
+
+  /// Create a LibraryEpisode from EpisodeDownloadModel - always succeeds using stored data
+  private func createLibraryEpisode(from model: EpisodeDownloadModel) -> LibraryEpisode {
+    // Try to find full episode info from podcasts first
+    if let (podcastTitle, episodeTitle) = parseEpisodeKey(model.id) {
+      // Verify parsed titles match stored titles (catches mis-parsing due to | in episode titles)
+      if podcastTitle == model.podcastTitle && episodeTitle == model.episodeTitle {
+        // Try to find full podcast info for richer data
+        if let podcast = allPodcasts.first(where: { $0.podcastInfo.title == podcastTitle }),
+           let episode = podcast.podcastInfo.episodes.first(where: { $0.title == episodeTitle }) {
+          return LibraryEpisode(
+            id: model.id,
+            podcastTitle: podcastTitle,
+            imageURL: episode.imageURL ?? podcast.podcastInfo.imageURL,
+            language: podcast.podcastInfo.language,
+            episodeInfo: episode,
+            isStarred: model.isStarred,
+            isDownloaded: model.localAudioPath != nil,
+            isCompleted: model.isCompleted,
+            lastPlaybackPosition: model.lastPlaybackPosition
+          )
+        }
+      }
+    }
+
+    // Fallback: use the stored data from EpisodeDownloadModel directly
+    // This handles episodes with special characters, unsubscribed podcasts, etc.
+    let durationSeconds: Int? = model.duration > 0 ? Int(model.duration) : nil
+    let episodeInfo = PodcastEpisodeInfo(
+      title: model.episodeTitle,
+      podcastEpisodeDescription: nil,
+      pubDate: model.pubDate,
+      audioURL: model.audioURL,
+      imageURL: model.imageURL,
+      duration: durationSeconds,
+      guid: nil
+    )
+
+    return LibraryEpisode(
+      id: model.id,
+      podcastTitle: model.podcastTitle,
+      imageURL: model.imageURL,
+      language: "en",
+      episodeInfo: episodeInfo,
+      isStarred: model.isStarred,
+      isDownloaded: model.localAudioPath != nil,
+      isCompleted: model.isCompleted,
+      lastPlaybackPosition: model.lastPlaybackPosition
+    )
+  }
 
   /// Parse episode key, supporting both new format (Unit Separator) and old format (|) for backward compatibility
   private func parseEpisodeKey(_ episodeKey: String) -> (podcastTitle: String, episodeTitle: String)? {

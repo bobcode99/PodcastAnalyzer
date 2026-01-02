@@ -66,6 +66,7 @@ class EnhancedAudioManager: NSObject {
     static let lastEpisodeTitle = "lastEpisodeTitle"
     static let lastPodcastTitle = "lastPodcastTitle"
     static let lastPlaybackTime = "lastPlaybackTime"
+    static let lastDuration = "lastDuration"
     static let lastAudioURL = "lastAudioURL"
     static let playbackRate = "playbackRate"
     static let lastImageURL = "lastImageURL"
@@ -372,9 +373,9 @@ class EnhancedAudioManager: NSObject {
     // Just set the current episode info without playing
     currentEpisode = state.episode
     currentTime = state.time
-    duration = 0  // Will be updated when user plays
+    duration = state.duration  // Restore saved duration for correct progress display
 
-    logger.info("Restored last episode: \(state.episode.title) at \(state.time)s")
+    logger.info("Restored last episode: \(state.episode.title) at \(state.time)s / \(state.duration)s")
   }
 
   // MARK: - Caption Management
@@ -603,15 +604,16 @@ class EnhancedAudioManager: NSObject {
     UserDefaults.standard.set(episode.title, forKey: Keys.lastEpisodeTitle)
     UserDefaults.standard.set(episode.podcastTitle, forKey: Keys.lastPodcastTitle)
     UserDefaults.standard.set(currentTime, forKey: Keys.lastPlaybackTime)
+    UserDefaults.standard.set(duration, forKey: Keys.lastDuration)
     UserDefaults.standard.set(episode.audioURL, forKey: Keys.lastAudioURL)
     if let imageURL = imageURL {
       UserDefaults.standard.set(imageURL, forKey: Keys.lastImageURL)
     }
 
-    logger.debug("Saved playback state: \(episode.title) at \(self.currentTime)s")
+    logger.debug("Saved playback state: \(episode.title) at \(self.currentTime)s / \(self.duration)s")
   }
 
-  func loadLastPlaybackState() -> (episode: PlaybackEpisode, time: TimeInterval, imageURL: String?)?
+  func loadLastPlaybackState() -> (episode: PlaybackEpisode, time: TimeInterval, duration: TimeInterval, imageURL: String?)?
   {
     guard let title = UserDefaults.standard.string(forKey: Keys.lastEpisodeTitle),
       let podcastTitle = UserDefaults.standard.string(forKey: Keys.lastPodcastTitle),
@@ -621,6 +623,7 @@ class EnhancedAudioManager: NSObject {
     }
 
     let time = UserDefaults.standard.double(forKey: Keys.lastPlaybackTime)
+    let savedDuration = UserDefaults.standard.double(forKey: Keys.lastDuration)
     let imageURL = UserDefaults.standard.string(forKey: Keys.lastImageURL)
 
     let episode = PlaybackEpisode(
@@ -631,7 +634,7 @@ class EnhancedAudioManager: NSObject {
       imageURL: imageURL
     )
 
-    return (episode, time, imageURL)
+    return (episode, time, savedDuration, imageURL)
   }
 
   private func loadPlaybackRate() {
@@ -643,6 +646,7 @@ class EnhancedAudioManager: NSObject {
     UserDefaults.standard.removeObject(forKey: Keys.lastEpisodeTitle)
     UserDefaults.standard.removeObject(forKey: Keys.lastPodcastTitle)
     UserDefaults.standard.removeObject(forKey: Keys.lastPlaybackTime)
+    UserDefaults.standard.removeObject(forKey: Keys.lastDuration)
     UserDefaults.standard.removeObject(forKey: Keys.lastAudioURL)
     UserDefaults.standard.removeObject(forKey: Keys.lastImageURL)
   }
