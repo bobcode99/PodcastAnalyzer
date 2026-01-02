@@ -503,11 +503,8 @@ struct ExpandedPlayerView: View {
   private var bottomActionsSection: some View {
     HStack {
       // AirPlay button (placeholder)
-      Button(action: {}) {
-        Image(systemName: "airplayaudio")
-          .font(.title3)
-          .foregroundColor(.secondary)
-      }
+      AirPlayButton()
+        .frame(width: 44, height: 44)
 
       Spacer()
 
