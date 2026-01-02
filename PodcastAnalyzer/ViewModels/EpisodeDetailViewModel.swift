@@ -99,12 +99,14 @@ final class EpisodeDetailViewModel {
     checkAndObserveTranscriptJob()
   }
 
+  /// Episode key using centralized utility
+  private var episodeKey: String {
+    EpisodeKeyUtils.makeKey(podcastTitle: podcastTitle, episodeTitle: episode.title)
+  }
+
   /// Checks if there's an active transcript job and starts observing
   private func checkAndObserveTranscriptJob() {
-    // Use Unit Separator (U+001F) as delimiter - same as TranscriptManager
-    let delimiter = "\u{1F}"
-    let jobId = "\(podcastTitle)\(delimiter)\(episode.title)"
-    if TranscriptManager.shared.activeJobs[jobId] != nil {
+    if TranscriptManager.shared.activeJobs[episodeKey] != nil {
       observeTranscriptManager()
     }
   }
@@ -214,7 +216,7 @@ final class EpisodeDetailViewModel {
     }
 
     let playbackEpisode = PlaybackEpisode(
-      id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)",
+      id: episodeKey,
       title: episode.title,
       podcastTitle: podcastTitle,
       audioURL: playbackURL,
@@ -305,7 +307,7 @@ final class EpisodeDetailViewModel {
   private func refreshEpisodeModel() {
     guard let context = modelContext else { return }
 
-    let id = "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
+    let id = episodeKey
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
       predicate: #Predicate { $0.id == id }
     )
@@ -320,15 +322,12 @@ final class EpisodeDetailViewModel {
     }
   }
 
-  // Use Unit Separator (U+001F) as delimiter - same as EpisodeDownloadModel
-  private static let episodeKeyDelimiter = "\u{1F}"
-
   // MARK: - SwiftData Persistence
 
   private func loadEpisodeModel() {
     guard let context = modelContext else { return }
 
-    let id = "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
+    let id = episodeKey
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
       predicate: #Predicate { $0.id == id }
     )
@@ -539,7 +538,7 @@ final class EpisodeDetailViewModel {
     }
 
     let playbackEpisode = PlaybackEpisode(
-      id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)",
+      id: episodeKey,
       title: episode.title,
       podcastTitle: podcastTitle,
       audioURL: audioURLString,

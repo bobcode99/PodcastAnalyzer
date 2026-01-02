@@ -686,47 +686,24 @@ struct EpisodeRowView: View {
   @State private var shareCancellable: AnyCancellable?
   @State private var hasAIAnalysis: Bool = false
 
-  // Use Unit Separator (U+001F) as delimiter
-  private static let episodeKeyDelimiter = "\u{1F}"
-
-  private var downloadState: DownloadState {
-    downloadManager.getDownloadState(
-      episodeTitle: episode.title,
-      podcastTitle: podcastTitle
-    )
+  // Status checker using centralized utility
+  private var statusChecker: EpisodeStatusChecker {
+    EpisodeStatusChecker(episode: episode, podcastTitle: podcastTitle)
   }
 
-  private var isDownloaded: Bool {
-    if case .downloaded = downloadState { return true }
-    return false
-  }
+  private var downloadState: DownloadState { statusChecker.downloadState }
+  private var isDownloaded: Bool { statusChecker.isDownloaded }
+  private var playbackURL: String { statusChecker.playbackURL }
 
   private var hasCaptions: Bool {
     // First check if there's an active job that's completed
     if let status = transcriptJobStatus, case .completed = status {
       return true
     }
-
-    let fm = FileManager.default
-    let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    let captionsDir = docsDir.appendingPathComponent(
-      "Captions",
-      isDirectory: true
-    )
-
-    let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
-    let baseFileName = "\(podcastTitle)_\(episode.title)"
-      .components(separatedBy: invalidCharacters)
-      .joined(separator: "_")
-      .trimmingCharacters(in: .whitespaces)
-
-    let srtPath = captionsDir.appendingPathComponent("\(baseFileName).srt")
-    return fm.fileExists(atPath: srtPath.path)
+    return statusChecker.hasTranscript
   }
 
-  private var jobId: String {
-    "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
-  }
+  private var jobId: String { statusChecker.episodeKey }
 
   private var transcriptJobStatus: TranscriptJobStatus? {
     return transcriptManager.activeJobs[jobId]?.status
@@ -774,13 +751,6 @@ struct EpisodeRowView: View {
       && currentEpisode.podcastTitle == podcastTitle
   }
 
-  private var playbackURL: String {
-    if case .downloaded(let path) = downloadState {
-      return "file://" + path
-    }
-    return episode.audioURL ?? ""
-  }
-
   private var durationText: String? {
     if let model = episodeModel,
       model.duration > 0 && model.progress > 0 && model.progress < 1
@@ -819,16 +789,7 @@ struct EpisodeRowView: View {
   }
 
   private func checkAIAnalysis() {
-    guard let audioURL = episode.audioURL else { return }
-    let descriptor = FetchDescriptor<EpisodeAIAnalysis>(
-      predicate: #Predicate { $0.episodeAudioURL == audioURL }
-    )
-    if let model = try? modelContext.fetch(descriptor).first {
-      hasAIAnalysis =
-        model.hasFullAnalysis || model.hasSummary || model.hasEntities
-        || model.hasHighlights
-        || (model.qaHistoryJSON != nil && !model.qaHistoryJSON!.isEmpty)
-    }
+    hasAIAnalysis = statusChecker.hasAIAnalysis(in: modelContext)
   }
 
   var body: some View {
@@ -1067,8 +1028,7 @@ struct EpisodeRowView: View {
       onPlayNext: {
         guard let audioURL = episode.audioURL else { return }
         let playbackEpisode = PlaybackEpisode(
-          id:
-            "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)",
+          id: statusChecker.episodeKey,
           title: episode.title,
           podcastTitle: podcastTitle,
           audioURL: audioURL,
@@ -1139,7 +1099,7 @@ struct EpisodeRowView: View {
     let imageURL = episode.imageURL ?? fallbackImageURL ?? ""
 
     let playbackEpisode = PlaybackEpisode(
-      id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)",
+      id: statusChecker.episodeKey,
       title: episode.title,
       podcastTitle: podcastTitle,
       audioURL: playbackURL,

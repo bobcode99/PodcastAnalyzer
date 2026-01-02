@@ -182,17 +182,11 @@ struct HomeView: View {
 struct UpNextCard: View {
   let episode: LibraryEpisode
   @Environment(\.modelContext) private var modelContext
-  @ObservedObject private var downloadManager = DownloadManager.shared
   @State private var hasAIAnalysis = false
   @State private var hasTranscript = false
 
-  private var isDownloaded: Bool {
-    let state = downloadManager.getDownloadState(
-      episodeTitle: episode.episodeInfo.title,
-      podcastTitle: episode.podcastTitle
-    )
-    if case .downloaded = state { return true }
-    return false
+  private var statusChecker: EpisodeStatusChecker {
+    EpisodeStatusChecker(episode: episode)
   }
 
   var body: some View {
@@ -202,24 +196,12 @@ struct UpNextCard: View {
         CachedArtworkImage(urlString: episode.imageURL, size: 140, cornerRadius: 12)
 
         // Status icons overlay
-        HStack(spacing: 3) {
-          if episode.isStarred {
-            statusIcon("star.fill", color: .yellow)
-          }
-          if isDownloaded {
-            statusIcon("arrow.down.circle.fill", color: .green)
-          }
-          if hasTranscript {
-            statusIcon("captions.bubble.fill", color: .purple)
-          }
-          if hasAIAnalysis {
-            statusIcon("sparkles", color: .orange)
-          }
-        }
-        .padding(4)
-        .background(.ultraThinMaterial)
-        .cornerRadius(6)
-        .padding(4)
+        EpisodeStatusIconsCompact(
+          isStarred: episode.isStarred,
+          isDownloaded: statusChecker.isDownloaded,
+          hasTranscript: hasTranscript,
+          hasAIAnalysis: hasAIAnalysis
+        )
       }
 
       // Podcast title
@@ -242,11 +224,11 @@ struct UpNextCard: View {
             .font(.caption2)
             .foregroundColor(.secondary)
         }
-        if episode.lastPlaybackPosition > 0 && episode.lastPlaybackPosition < 1 {
+        if episode.hasProgress {
           Text("•")
             .font(.caption2)
             .foregroundColor(.secondary)
-          Text("\(Int(episode.lastPlaybackPosition * 100))%")
+          Text("\(Int(episode.progress * 100))%")
             .font(.caption2)
             .foregroundColor(.blue)
         }
@@ -254,40 +236,8 @@ struct UpNextCard: View {
     }
     .frame(width: 140)
     .onAppear {
-      checkTranscript()
-      checkAIAnalysis()
-    }
-  }
-
-  private func statusIcon(_ name: String, color: Color) -> some View {
-    Image(systemName: name)
-      .font(.system(size: 9, weight: .bold))
-      .foregroundColor(color)
-  }
-
-  private func checkTranscript() {
-    let fm = FileManager.default
-    let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    let captionsDir = docsDir.appendingPathComponent("Captions", isDirectory: true)
-    let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
-    let baseFileName = "\(episode.podcastTitle)_\(episode.episodeInfo.title)"
-      .components(separatedBy: invalidCharacters)
-      .joined(separator: "_")
-      .trimmingCharacters(in: .whitespaces)
-    let srtPath = captionsDir.appendingPathComponent("\(baseFileName).srt")
-    hasTranscript = fm.fileExists(atPath: srtPath.path)
-  }
-
-  private func checkAIAnalysis() {
-    guard let audioURL = episode.episodeInfo.audioURL else { return }
-    let descriptor = FetchDescriptor<EpisodeAIAnalysis>(
-      predicate: #Predicate { $0.episodeAudioURL == audioURL }
-    )
-    if let model = try? modelContext.fetch(descriptor).first {
-      hasAIAnalysis =
-        model.hasFullAnalysis || model.hasSummary || model.hasEntities
-        || model.hasHighlights
-        || (model.qaHistoryJSON != nil && !model.qaHistoryJSON!.isEmpty)
+      hasTranscript = statusChecker.hasTranscript
+      hasAIAnalysis = statusChecker.hasAIAnalysis(in: modelContext)
     }
   }
 }
@@ -300,17 +250,12 @@ struct UpNextContextMenu: View {
   @ObservedObject private var downloadManager = DownloadManager.shared
   private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
 
-  private var downloadState: DownloadState {
-    downloadManager.getDownloadState(
-      episodeTitle: episode.episodeInfo.title,
-      podcastTitle: episode.podcastTitle
-    )
+  private var statusChecker: EpisodeStatusChecker {
+    EpisodeStatusChecker(episode: episode)
   }
 
-  private var isDownloaded: Bool {
-    if case .downloaded = downloadState { return true }
-    return false
-  }
+  private var downloadState: DownloadState { statusChecker.downloadState }
+  private var isDownloaded: Bool { statusChecker.isDownloaded }
 
   var body: some View {
     // Go to Show

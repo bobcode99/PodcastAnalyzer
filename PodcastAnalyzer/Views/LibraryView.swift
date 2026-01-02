@@ -551,6 +551,11 @@ struct LibraryEpisodeRowView: View {
   let episode: LibraryEpisode
   @Environment(\.modelContext) private var modelContext
   @State private var hasAIAnalysis: Bool = false
+  @State private var hasTranscript: Bool = false
+
+  private var statusChecker: EpisodeStatusChecker {
+    EpisodeStatusChecker(episode: episode)
+  }
 
   private var plainDescription: String? {
     guard let desc = episode.episodeInfo.podcastEpisodeDescription else { return nil }
@@ -561,17 +566,9 @@ struct LibraryEpisodeRowView: View {
     return stripped.isEmpty ? nil : stripped
   }
 
-  private func checkAIAnalysis() {
-    guard let audioURL = episode.episodeInfo.audioURL else { return }
-    let descriptor = FetchDescriptor<EpisodeAIAnalysis>(
-      predicate: #Predicate { $0.episodeAudioURL == audioURL }
-    )
-    if let model = try? modelContext.fetch(descriptor).first {
-      hasAIAnalysis =
-        model.hasFullAnalysis || model.hasSummary || model.hasEntities
-        || model.hasHighlights
-        || (model.qaHistoryJSON != nil && !model.qaHistoryJSON!.isEmpty)
-    }
+  private func checkStatus() {
+    hasTranscript = statusChecker.hasTranscript
+    hasAIAnalysis = statusChecker.hasAIAnalysis(in: modelContext)
   }
 
   var body: some View {
@@ -605,35 +602,26 @@ struct LibraryEpisodeRowView: View {
               .foregroundColor(.secondary)
           }
 
-          // Status indicators
-          if episode.isDownloaded {
-            Image(systemName: "arrow.down.circle.fill")
-              .font(.system(size: 10))
-              .foregroundColor(.green)
+          // Progress indicator
+          if episode.hasProgress {
+            Text("\(Int(episode.progress * 100))%")
+              .font(.caption2)
+              .foregroundColor(.blue)
           }
 
-          if episode.isStarred {
-            Image(systemName: "star.fill")
-              .font(.system(size: 10))
-              .foregroundColor(.yellow)
-          }
-
-          if hasAIAnalysis {
-            Image(systemName: "sparkles")
-              .font(.system(size: 10))
-              .foregroundColor(.orange)
-          }
-
-          if episode.isCompleted {
-            Image(systemName: "checkmark.circle.fill")
-              .font(.system(size: 10))
-              .foregroundColor(.green)
-          }
+          // Status indicators using utility
+          EpisodeStatusIcons(
+            isStarred: episode.isStarred,
+            isDownloaded: episode.isDownloaded || statusChecker.isDownloaded,
+            hasTranscript: hasTranscript,
+            hasAIAnalysis: hasAIAnalysis,
+            isCompleted: episode.isCompleted
+          )
         }
       }
     }
     .padding(.vertical, 4)
-    .onAppear { checkAIAnalysis() }
+    .onAppear { checkStatus() }
   }
 }
 
@@ -647,27 +635,14 @@ struct LibraryEpisodeContextMenu: View {
   private let downloadManager = DownloadManager.shared
   private let audioManager = EnhancedAudioManager.shared
 
-  // Use Unit Separator (U+001F) as delimiter
-  private static let episodeKeyDelimiter = "\u{1F}"
-
-  private var downloadState: DownloadState {
-    downloadManager.getDownloadState(
-      episodeTitle: episode.episodeInfo.title,
-      podcastTitle: episode.podcastTitle
-    )
+  private var statusChecker: EpisodeStatusChecker {
+    EpisodeStatusChecker(episode: episode)
   }
 
-  private var isDownloaded: Bool {
-    if case .downloaded = downloadState { return true }
-    return false
-  }
+  private var downloadState: DownloadState { statusChecker.downloadState }
 
-  private var playbackURL: String {
-    if case .downloaded(let path) = downloadState {
-      return "file://" + path
-    }
-    return episode.episodeInfo.audioURL ?? ""
-  }
+  private var isDownloaded: Bool { statusChecker.isDownloaded }
+  private var playbackURL: String { statusChecker.playbackURL }
 
   var body: some View {
     // Go to Show
@@ -767,10 +742,10 @@ struct LibraryEpisodeContextMenu: View {
   }
 
   private func playEpisode() {
-    guard let audioURL = episode.episodeInfo.audioURL else { return }
+    guard episode.episodeInfo.audioURL != nil else { return }
 
     let playbackEpisode = PlaybackEpisode(
-      id: "\(episode.podcastTitle)\(Self.episodeKeyDelimiter)\(episode.episodeInfo.title)",
+      id: statusChecker.episodeKey,
       title: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle,
       audioURL: playbackURL,
@@ -791,10 +766,10 @@ struct LibraryEpisodeContextMenu: View {
   }
 
   private func addToPlayNext() {
-    guard let audioURL = episode.episodeInfo.audioURL else { return }
+    guard episode.episodeInfo.audioURL != nil else { return }
 
     let playbackEpisode = PlaybackEpisode(
-      id: "\(episode.podcastTitle)\(Self.episodeKeyDelimiter)\(episode.episodeInfo.title)",
+      id: statusChecker.episodeKey,
       title: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle,
       audioURL: playbackURL,
@@ -809,7 +784,7 @@ struct LibraryEpisodeContextMenu: View {
   }
 
   private func toggleStar() {
-    let episodeKey = "\(episode.podcastTitle)\(Self.episodeKeyDelimiter)\(episode.episodeInfo.title)"
+    let episodeKey = statusChecker.episodeKey
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
       predicate: #Predicate { $0.id == episodeKey }
     )
@@ -833,7 +808,7 @@ struct LibraryEpisodeContextMenu: View {
   }
 
   private func togglePlayed() {
-    let episodeKey = "\(episode.podcastTitle)\(Self.episodeKeyDelimiter)\(episode.episodeInfo.title)"
+    let episodeKey = statusChecker.episodeKey
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
       predicate: #Predicate { $0.id == episodeKey }
     )
