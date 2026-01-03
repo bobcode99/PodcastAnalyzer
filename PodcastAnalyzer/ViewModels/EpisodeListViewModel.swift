@@ -240,7 +240,8 @@ final class EpisodeListViewModel {
   // MARK: - Timer Management
 
   func startRefreshTimer() {
-    refreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+    // Refresh every 5 seconds instead of 2 to reduce CPU usage
+    refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
       guard let self else { return }
       Task { @MainActor in
         self.loadEpisodeModels()
@@ -360,6 +361,17 @@ final class EpisodeListViewModel {
       context.insert(model)
       try? context.save()
       episodeModels[key] = model
+    }
+  }
+
+  // MARK: - Cleanup
+
+  /// Clean up all resources to prevent memory leaks
+  func cleanup() {
+    stopRefreshTimer()
+    if let observer = downloadCompletionObserver {
+      NotificationCenter.default.removeObserver(observer)
+      downloadCompletionObserver = nil
     }
   }
 }

@@ -151,7 +151,8 @@ struct EpisodeListView: View {
       viewModel?.startRefreshTimer()
     }
     .onDisappear {
-      viewModel?.stopRefreshTimer()
+      // Clean up all resources (timer, observers) to prevent memory leaks
+      viewModel?.cleanup()
     }
     .task {
       await lookupApplePodcastURL(title: podcastModel.podcastInfo.title)
@@ -671,7 +672,6 @@ struct EpisodeRowView: View {
   let fallbackImageURL: String?
   let podcastLanguage: String
   @ObservedObject var downloadManager: DownloadManager
-  @ObservedObject var transcriptManager = TranscriptManager.shared
   let episodeModel: EpisodeDownloadModel?
   let onToggleStar: () -> Void
   let onDownload: () -> Void
@@ -686,6 +686,12 @@ struct EpisodeRowView: View {
   @State private var shareCancellable: AnyCancellable?
   @State private var hasAIAnalysis: Bool = false
 
+  // Transcript state - only updated on appear and when actively transcribing this episode
+  @State private var hasCaptions: Bool = false
+  @State private var isTranscribing: Bool = false
+  @State private var transcriptProgress: Double? = nil
+  @State private var isDownloadingModel: Bool = false
+
   // Status checker using centralized utility
   private var statusChecker: EpisodeStatusChecker {
     EpisodeStatusChecker(episode: episode, podcastTitle: podcastTitle)
@@ -694,50 +700,7 @@ struct EpisodeRowView: View {
   private var downloadState: DownloadState { statusChecker.downloadState }
   private var isDownloaded: Bool { statusChecker.isDownloaded }
   private var playbackURL: String { statusChecker.playbackURL }
-
-  private var hasCaptions: Bool {
-    // First check if there's an active job that's completed
-    if let status = transcriptJobStatus, case .completed = status {
-      return true
-    }
-    return statusChecker.hasTranscript
-  }
-
   private var jobId: String { statusChecker.episodeKey }
-
-  private var transcriptJobStatus: TranscriptJobStatus? {
-    return transcriptManager.activeJobs[jobId]?.status
-  }
-
-  private var isTranscribing: Bool {
-    guard let status = transcriptJobStatus else { return false }
-    switch status {
-    case .queued, .downloadingModel, .transcribing:
-      return true
-    default:
-      return false
-    }
-  }
-
-  private var transcriptProgress: Double? {
-    guard let status = transcriptJobStatus else { return nil }
-    switch status {
-    case .queued:
-      return 0.0
-    case .downloadingModel(let progress):
-      return progress
-    case .transcribing(let progress):
-      return progress
-    default:
-      return nil
-    }
-  }
-
-  private var isDownloadingModel: Bool {
-    guard let status = transcriptJobStatus else { return false }
-    if case .downloadingModel = status { return true }
-    return false
-  }
 
   private var isStarred: Bool { episodeModel?.isStarred ?? false }
   private var isCompleted: Bool { episodeModel?.isCompleted ?? false }
@@ -755,6 +718,7 @@ struct EpisodeRowView: View {
     episode.imageURL ?? fallbackImageURL ?? ""
   }
 
+  // Cache the plain description to avoid regex on every render
   private var plainDescription: String? {
     guard let desc = episode.podcastEpisodeDescription else { return nil }
     let stripped = desc.replacingOccurrences(
@@ -774,6 +738,48 @@ struct EpisodeRowView: View {
 
   private func checkAIAnalysis() {
     hasAIAnalysis = statusChecker.hasAIAnalysis(in: modelContext)
+  }
+
+  private func updateTranscriptStatus() {
+    // Check if transcript file exists
+    let fileExists = statusChecker.hasTranscript
+
+    // Check for active job only for this specific episode
+    let transcriptManager = TranscriptManager.shared
+    if let job = transcriptManager.activeJobs[jobId] {
+      switch job.status {
+      case .completed:
+        hasCaptions = true
+        isTranscribing = false
+        transcriptProgress = nil
+        isDownloadingModel = false
+      case .queued:
+        hasCaptions = fileExists
+        isTranscribing = true
+        transcriptProgress = 0.0
+        isDownloadingModel = false
+      case .downloadingModel(let progress):
+        hasCaptions = fileExists
+        isTranscribing = true
+        transcriptProgress = progress
+        isDownloadingModel = true
+      case .transcribing(let progress):
+        hasCaptions = fileExists
+        isTranscribing = true
+        transcriptProgress = progress
+        isDownloadingModel = false
+      case .failed:
+        hasCaptions = fileExists
+        isTranscribing = false
+        transcriptProgress = nil
+        isDownloadingModel = false
+      }
+    } else {
+      hasCaptions = fileExists
+      isTranscribing = false
+      transcriptProgress = nil
+      isDownloadingModel = false
+    }
   }
 
   var body: some View {
@@ -798,7 +804,10 @@ struct EpisodeRowView: View {
     .swipeActions(edge: .leading, allowsFullSwipe: true) {
       leadingSwipeActions
     }
-    .onAppear { checkAIAnalysis() }
+    .onAppear {
+      checkAIAnalysis()
+      updateTranscriptStatus()
+    }
   }
 
   @ViewBuilder

@@ -1573,4 +1573,16 @@ final class EpisodeDetailViewModel {
       return nil
     }
   }
+
+  // MARK: - Cleanup
+
+  /// Cancel all active subscriptions to prevent memory leaks
+  func cleanup() {
+    cancellables.removeAll()
+  }
+
+  deinit {
+    // Cancel all Combine subscriptions
+    cancellables.removeAll()
+  }
 }

@@ -2,7 +2,7 @@
 //  MacMiniPlayerBar.swift
 //  PodcastAnalyzer
 //
-//  macOS-specific mini player bar at bottom of window
+//  macOS-specific mini player bar at bottom of window (Apple Podcasts style)
 //
 
 #if os(macOS)
@@ -11,6 +11,8 @@ import SwiftUI
 struct MacMiniPlayerBar: View {
   @State private var audioManager = EnhancedAudioManager.shared
   @State private var showExpandedPlayer = false
+  @State private var isHoveringProgress = false
+  @State private var isDraggingProgress = false
 
   private var progressPercentage: Double {
     guard audioManager.duration > 0 else { return 0 }
@@ -19,54 +21,55 @@ struct MacMiniPlayerBar: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      // Progress bar
-      GeometryReader { geometry in
-        ZStack(alignment: .leading) {
-          Rectangle()
-            .fill(Color.gray.opacity(0.2))
-
-          Rectangle()
-            .fill(Color.accentColor)
-            .frame(width: geometry.size.width * progressPercentage)
+      // Interactive progress bar (Apple Podcasts style)
+      progressBar
+        .frame(height: isHoveringProgress || isDraggingProgress ? 6 : 3)
+        .animation(.easeInOut(duration: 0.15), value: isHoveringProgress)
+        .onHover { hovering in
+          isHoveringProgress = hovering
         }
-      }
-      .frame(height: 3)
 
       // Player controls
       HStack(spacing: 16) {
-        // Artwork and info
-        HStack(spacing: 12) {
-          if let episode = audioManager.currentEpisode {
-            CachedArtworkImage(urlString: episode.imageURL, size: 44, cornerRadius: 6)
+        // Left: Artwork and episode info (clickable to expand)
+        Button(action: { showExpandedPlayer = true }) {
+          HStack(spacing: 12) {
+            if let episode = audioManager.currentEpisode {
+              CachedArtworkImage(urlString: episode.imageURL, size: 48, cornerRadius: 6)
 
-            VStack(alignment: .leading, spacing: 2) {
-              Text(episode.title)
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .lineLimit(1)
+              VStack(alignment: .leading, spacing: 2) {
+                Text(episode.title)
+                  .font(.subheadline)
+                  .fontWeight(.medium)
+                  .lineLimit(1)
+                  .foregroundColor(.primary)
 
-              Text(episode.podcastTitle)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .lineLimit(1)
+                Text(episode.podcastTitle)
+                  .font(.caption)
+                  .foregroundColor(.secondary)
+                  .lineLimit(1)
+              }
+              .frame(maxWidth: 280, alignment: .leading)
             }
-            .frame(maxWidth: 250, alignment: .leading)
           }
         }
+        .buttonStyle(.plain)
+        .help("Show full player")
 
         Spacer()
 
-        // Playback controls
-        HStack(spacing: 20) {
+        // Center: Playback controls
+        HStack(spacing: 24) {
           // Skip backward
           Button(action: { audioManager.skipBackward(seconds: 15) }) {
             Image(systemName: "gobackward.15")
-              .font(.title3)
+              .font(.system(size: 18))
+              .foregroundColor(.primary)
           }
           .buttonStyle(.plain)
           .help("Skip back 15 seconds")
 
-          // Play/Pause
+          // Play/Pause (larger, prominent)
           Button(action: {
             if audioManager.isPlaying {
               audioManager.pause()
@@ -75,7 +78,10 @@ struct MacMiniPlayerBar: View {
             }
           }) {
             Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
-              .font(.title2)
+              .font(.system(size: 24))
+              .foregroundColor(.primary)
+              .frame(width: 44, height: 44)
+              .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
           .help(audioManager.isPlaying ? "Pause" : "Play")
@@ -84,7 +90,8 @@ struct MacMiniPlayerBar: View {
           // Skip forward
           Button(action: { audioManager.skipForward(seconds: 30) }) {
             Image(systemName: "goforward.30")
-              .font(.title3)
+              .font(.system(size: 18))
+              .foregroundColor(.primary)
           }
           .buttonStyle(.plain)
           .help("Skip forward 30 seconds")
@@ -92,56 +99,97 @@ struct MacMiniPlayerBar: View {
 
         Spacer()
 
-        // Time and additional controls
-        HStack(spacing: 16) {
+        // Right: Time, speed, and controls
+        HStack(spacing: 12) {
           // Current time / Duration
           Text("\(formatTime(audioManager.currentTime)) / \(formatTime(audioManager.duration))")
-            .font(.caption)
+            .font(.system(size: 11))
             .foregroundColor(.secondary)
             .monospacedDigit()
+            .frame(width: 90, alignment: .trailing)
 
-          // Playback speed
+          // Playback speed button
           Menu {
             ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { speed in
-              Button(formatSpeed(Float(speed))) {
-                audioManager.setPlaybackRate(Float(speed))
+              Button(action: { audioManager.setPlaybackRate(Float(speed)) }) {
+                HStack {
+                  Text(formatSpeed(Float(speed)))
+                  if abs(audioManager.playbackRate - Float(speed)) < 0.01 {
+                    Image(systemName: "checkmark")
+                  }
+                }
               }
             }
           } label: {
             Text(formatSpeed(audioManager.playbackRate))
-              .font(.caption)
+              .font(.system(size: 11, weight: .medium))
               .padding(.horizontal, 8)
               .padding(.vertical, 4)
               .background(Color.gray.opacity(0.15))
               .cornerRadius(4)
           }
           .menuStyle(.borderlessButton)
-          .frame(width: 50)
+          .frame(width: 44)
           .help("Playback speed")
 
           // Expand button
           Button(action: { showExpandedPlayer = true }) {
             Image(systemName: "arrow.up.left.and.arrow.down.right")
-              .font(.caption)
+              .font(.system(size: 12))
+              .foregroundColor(.secondary)
           }
           .buttonStyle(.plain)
           .help("Expand player")
         }
-        .frame(width: 250, alignment: .trailing)
+        .frame(width: 220, alignment: .trailing)
       }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 10)
-      .background(Color.platformSecondaryBackground)
+      .padding(.horizontal, 20)
+      .padding(.vertical, 12)
     }
     .sheet(isPresented: $showExpandedPlayer) {
       MacExpandedPlayerView()
     }
   }
 
+  // MARK: - Progress Bar
+
+  @ViewBuilder
+  private var progressBar: some View {
+    GeometryReader { geometry in
+      ZStack(alignment: .leading) {
+        // Background track
+        Rectangle()
+          .fill(Color.gray.opacity(0.2))
+
+        // Progress fill
+        Rectangle()
+          .fill(Color.accentColor)
+          .frame(width: geometry.size.width * progressPercentage)
+      }
+      .contentShape(Rectangle())
+      .gesture(
+        DragGesture(minimumDistance: 0)
+          .onChanged { value in
+            isDraggingProgress = true
+            let progress = max(0, min(1, value.location.x / geometry.size.width))
+            let newTime = progress * audioManager.duration
+            audioManager.seek(to: newTime)
+          }
+          .onEnded { _ in
+            isDraggingProgress = false
+          }
+      )
+    }
+  }
+
   private func formatTime(_ time: TimeInterval) -> String {
     guard time.isFinite && time >= 0 else { return "0:00" }
-    let minutes = Int(time) / 60
+    let hours = Int(time) / 3600
+    let minutes = (Int(time) % 3600) / 60
     let seconds = Int(time) % 60
+    if hours > 0 {
+      return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+    }
     return String(format: "%d:%02d", minutes, seconds)
   }
 

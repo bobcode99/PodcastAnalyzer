@@ -33,8 +33,8 @@ struct EpisodeDetailView: View {
 
     // Timer to refresh transcript highlighting during playback
     @State private var refreshTrigger = false
-    let playbackTimer = Timer.publish(every: 0.5, on: .main, in: .common)
-        .autoconnect()
+    // Static timer shared across all instances to prevent memory leaks from recreation
+    private static let playbackTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     init(
         episode: PodcastEpisodeInfo,
@@ -159,6 +159,10 @@ struct EpisodeDetailView: View {
         .onAppear {
             viewModel.setModelContext(modelContext)
             viewModel.checkTranscriptStatus()
+        }
+        .onDisappear {
+            // Clean up subscriptions to prevent memory leaks
+            viewModel.cleanup()
         }
     }
 
@@ -441,7 +445,7 @@ struct EpisodeDetailView: View {
                 }
             }
         }
-        .onReceive(playbackTimer) { _ in
+        .onReceive(Self.playbackTimer) { _ in
             if viewModel.isPlayingThisEpisode { refreshTrigger.toggle() }
         }
     }

@@ -35,7 +35,7 @@ enum MacSidebarItem: String, CaseIterable, Identifiable, Hashable {
     case .libraryLatest: return "clock.fill"
     }
   }
-  
+
   // Convert to LibrarySubItem if applicable
   var librarySubItem: LibrarySubItem? {
     switch self {
@@ -104,31 +104,36 @@ struct MacContentView: View {
     audioManager.currentEpisode != nil
   }
 
+  // Mini player height constant for consistent spacing
+  private let miniPlayerHeight: CGFloat = 72
+
   var body: some View {
-    NavigationSplitView(columnVisibility: $columnVisibility) {
-      // Sidebar
-      sidebarContent
-        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
-    } detail: {
-      // Main content area with mini player using overlay to ensure it's always on top
-      mainContent
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Add bottom padding when mini player is visible to prevent overlap
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-          if hasCurrentEpisode {
-            MacMiniPlayerBar()
-              .background(.ultraThinMaterial)
-              .clipShape(RoundedRectangle(cornerRadius: 12))
-              .shadow(color: .black.opacity(0.1), radius: 8, y: -2)
-              .padding(.horizontal, 12)
-              .padding(.bottom, 8)
-              .transition(.move(edge: .bottom).combined(with: .opacity))
-          }
+    // Use ZStack to ensure mini player is ALWAYS at the absolute bottom of the window
+    ZStack(alignment: .bottom) {
+      NavigationSplitView(columnVisibility: $columnVisibility) {
+        // Sidebar
+        sidebarContent
+          .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+      } detail: {
+        // Main content area
+        mainContent
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+      .navigationSplitViewStyle(.balanced)
+      // Add bottom padding to prevent content from being hidden by mini player
+      .padding(.bottom, hasCurrentEpisode ? miniPlayerHeight : 0)
+
+      // Mini player bar at absolute bottom - spans full width like Apple Podcasts
+      if hasCurrentEpisode {
+        VStack(spacing: 0) {
+          Divider()
+          MacMiniPlayerBar()
         }
-        .animation(.easeInOut(duration: 0.25), value: hasCurrentEpisode)
+        .background(.ultraThinMaterial)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+      }
     }
-    
-    .navigationSplitViewStyle(.balanced)
+    .animation(.easeInOut(duration: 0.25), value: hasCurrentEpisode)
     .frame(minWidth: 900, minHeight: 600)
     .onAppear {
       audioManager.restoreLastEpisode()
