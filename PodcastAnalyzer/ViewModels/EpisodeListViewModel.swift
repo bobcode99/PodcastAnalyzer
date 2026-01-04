@@ -239,6 +239,9 @@ final class EpisodeListViewModel {
   // MARK: - Timer Management
 
   func startRefreshTimer() {
+    // Stop any existing timer first to prevent duplicates
+    stopRefreshTimer()
+
     // Refresh every 5 seconds instead of 2 to reduce CPU usage
     refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
       guard let self else { return }
@@ -373,4 +376,5 @@ final class EpisodeListViewModel {
       downloadCompletionObserver = nil
     }
   }
+
 }

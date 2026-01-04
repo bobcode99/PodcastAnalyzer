@@ -5,7 +5,7 @@
 //  Created by Bob on 2025/12/23.
 //
 
-import Combine
+import Observation
 import SwiftUI
 
 @MainActor
@@ -19,8 +19,14 @@ final class PodcastSearchViewModel {
   var episodesForSelectedPodcast: [Episode]? = nil
   var isLoadingEpisodes = false
 
+  @ObservationIgnored
   private let service = ApplePodcastService()
-  private var cancellables = Set<AnyCancellable>()
+
+  @ObservationIgnored
+  private var searchTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var episodeTask: Task<Void, Never>?
 
   func performSearch() {
     guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -28,34 +34,57 @@ final class PodcastSearchViewModel {
       return
     }
 
+    // Cancel previous search
+    searchTask?.cancel()
+
     isLoading = true
     podcasts = []
 
-    service.searchPodcasts(term: searchText, limit: 20)
-      .sink { [weak self] completion in
-        self?.isLoading = false
-        if case .failure(let error) = completion {
+    searchTask = Task {
+      do {
+        let results = try await service.searchPodcasts(term: searchText, limit: 20)
+        if !Task.isCancelled {
+          podcasts = results
+        }
+      } catch {
+        if !Task.isCancelled {
           print("Search error: \(error)")
         }
-      } receiveValue: { [weak self] results in
-        self?.podcasts = results
       }
-      .store(in: &cancellables)
+      if !Task.isCancelled {
+        isLoading = false
+      }
+    }
   }
 
   func loadEpisodes(from feedUrl: String) {
+    // Cancel previous episode load
+    episodeTask?.cancel()
+
     isLoadingEpisodes = true
     episodesForSelectedPodcast = nil
 
-    service.fetchEpisodesFromRSS(feedUrl: feedUrl, limit: 20)
-      .sink { [weak self] completion in
-        self?.isLoadingEpisodes = false
-        if case .failure(let error) = completion {
+    episodeTask = Task {
+      do {
+        let episodes = try await service.fetchEpisodesFromRSS(feedUrl: feedUrl, limit: 20)
+        if !Task.isCancelled {
+          episodesForSelectedPodcast = episodes
+        }
+      } catch {
+        if !Task.isCancelled {
           print("RSS error: \(error)")
         }
-      } receiveValue: { [weak self] episodes in
-        self?.episodesForSelectedPodcast = episodes
       }
-      .store(in: &cancellables)
+      if !Task.isCancelled {
+        isLoadingEpisodes = false
+      }
+    }
+  }
+
+  func cleanup() {
+    searchTask?.cancel()
+    searchTask = nil
+    episodeTask?.cancel()
+    episodeTask = nil
   }
 }

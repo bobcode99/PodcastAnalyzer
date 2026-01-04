@@ -158,7 +158,9 @@ struct EpisodeAIAnalysisView: View {
   // MARK: - Tab Button
 
   private func tabButton(for tab: CloudAnalysisTab) -> some View {
-    Button(action: { selectedTab = tab }) {
+    Button {
+      selectedTab = tab
+    } label: {
       HStack(spacing: 6) {
         Image(systemName: tab.icon)
           .font(.system(size: 12))
@@ -167,11 +169,17 @@ struct EpisodeAIAnalysisView: View {
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
-      .background(selectedTab == tab ? Color.blue : Color.gray.opacity(0.1))
+      .background(
+        RoundedRectangle(cornerRadius: 8)
+          .fill(selectedTab == tab ? Color.accentColor : Color.clear)
+      )
       .foregroundColor(selectedTab == tab ? .white : .primary)
-      .cornerRadius(8)
     }
+    #if os(macOS)
+    .buttonStyle(.plain)      // 🔑 THIS fixes the weird macOS behavior
+    #endif
   }
+
 
   // MARK: - Summary Tab
 

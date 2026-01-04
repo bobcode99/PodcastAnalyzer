@@ -208,6 +208,9 @@ final class EpisodeStatusObserver {
   @ObservationIgnored
   private var isObserving = false
 
+  @ObservationIgnored
+  private var isCleaned = false
+
   init(episodeTitle: String, podcastTitle: String, audioURL: String? = nil) {
     self.episodeTitle = episodeTitle
     self.podcastTitle = podcastTitle
@@ -246,26 +249,34 @@ final class EpisodeStatusObserver {
   }
 
   private func observeDownloadManager() {
+    // Don't start observation if already cleaned up
+    guard !isCleaned else { return }
+
     withObservationTracking {
       // Access the property to register observation
       _ = downloadManager.downloadStates
     } onChange: {
       Task { @MainActor [weak self] in
-        self?.updateDownloadStatus()
-        self?.observeDownloadManager()
+        guard let self, !self.isCleaned else { return }
+        self.updateDownloadStatus()
+        self.observeDownloadManager()
       }
     }
   }
 
   private func observeTranscriptManager() {
+    // Don't start observation if already cleaned up
+    guard !isCleaned else { return }
+
     withObservationTracking {
       // Access properties to register observation
       _ = transcriptManager.activeJobs
       _ = transcriptManager.isProcessing
     } onChange: {
       Task { @MainActor [weak self] in
-        self?.updateTranscriptStatus()
-        self?.observeTranscriptManager()
+        guard let self, !self.isCleaned else { return }
+        self.updateTranscriptStatus()
+        self.observeTranscriptManager()
       }
     }
   }
@@ -372,6 +383,7 @@ final class EpisodeStatusObserver {
   }
 
   func cleanup() {
+    isCleaned = true
     isObserving = false
   }
 }

@@ -5,12 +5,11 @@
 //  Unified view for browsing podcast episodes - works for both subscribed and unsubscribed podcasts.
 //
 
-import Combine
 import SwiftData
 import SwiftUI
 
 #if os(iOS)
-import UIKit
+  import UIKit
 #endif
 
 // MARK: - Episode Filter Enum
@@ -37,7 +36,9 @@ enum EpisodeFilter: String, CaseIterable {
 
 enum PodcastSource {
   case model(PodcastInfoModel)
-  case browse(collectionId: String, podcastName: String, artistName: String, artworkURL: String, applePodcastURL: String?)
+  case browse(
+    collectionId: String, podcastName: String, artistName: String, artworkURL: String,
+    applePodcastURL: String?)
 }
 
 // MARK: - Episode List View
@@ -109,9 +110,9 @@ struct EpisodeListView: View {
 
   private var toolbarPlacement: ToolbarItemPlacement {
     #if os(iOS)
-    return .topBarTrailing
+      return .topBarTrailing
     #else
-    return .primaryAction
+      return .primaryAction
     #endif
   }
 
@@ -126,8 +127,12 @@ struct EpisodeListView: View {
     }
     .navigationTitle(navigationTitle)
     #if os(iOS)
-    .navigationBarTitleDisplayMode(.inline)
+      .navigationBarTitleDisplayMode(.inline)
     #endif
+    .onDisappear {
+      // Clean up all resources when view disappears (works for both modes)
+      viewModel?.cleanup()
+    }
   }
 
   // MARK: - Model Content (for existing PodcastInfoModel)
@@ -149,10 +154,6 @@ struct EpisodeListView: View {
         viewModel = vm
       }
       viewModel?.startRefreshTimer()
-    }
-    .onDisappear {
-      // Clean up all resources (timer, observers) to prevent memory leaks
-      viewModel?.cleanup()
     }
     .task {
       await lookupApplePodcastURL(title: podcastModel.podcastInfo.title)
@@ -182,7 +183,8 @@ struct EpisodeListView: View {
   private var loadingView: some View {
     VStack(spacing: 20) {
       if case .browse(_, let name, _, let artwork, _) = source {
-        AsyncImage(url: URL(string: artwork.replacingOccurrences(of: "100x100", with: "300x300"))) { phase in
+        AsyncImage(url: URL(string: artwork.replacingOccurrences(of: "100x100", with: "300x300"))) {
+          phase in
           if let image = phase.image {
             image.resizable().scaledToFit()
           } else {
@@ -225,7 +227,9 @@ struct EpisodeListView: View {
   }
 
   private func loadBrowsePodcast() async {
-    guard case .browse(let collectionId, let podcastName, _, _, let appleURL) = source else { return }
+    guard case .browse(let collectionId, let podcastName, _, _, let appleURL) = source else {
+      return
+    }
 
     isLoadingRSS = true
     loadError = nil
@@ -255,24 +259,10 @@ struct EpisodeListView: View {
 
     // Look up RSS URL from Apple
     do {
-      let feedUrl = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-        var cancellable: AnyCancellable?
-        cancellable = applePodcastService.lookupPodcast(collectionId: collectionId)
-          .sink(
-            receiveCompletion: { completion in
-              if case .failure(let error) = completion {
-                continuation.resume(throwing: error)
-              }
-              cancellable?.cancel()
-            },
-            receiveValue: { podcast in
-              if let feedUrl = podcast?.feedUrl {
-                continuation.resume(returning: feedUrl)
-              } else {
-                continuation.resume(throwing: URLError(.badServerResponse))
-              }
-            }
-          )
+      guard let podcast = try await applePodcastService.lookupPodcast(collectionId: collectionId),
+        let feedUrl = podcast.feedUrl
+      else {
+        throw URLError(.badServerResponse)
       }
 
       // Fetch RSS with caching
@@ -484,25 +474,18 @@ struct EpisodeListView: View {
   // MARK: - Apple Podcast Lookup
 
   private func lookupApplePodcastURL(title: String) async {
-    await withCheckedContinuation { continuation in
-      var cancellable: AnyCancellable?
-      cancellable = applePodcastService.searchPodcasts(term: title, limit: 5)
-        .sink(
-          receiveCompletion: { _ in
-            continuation.resume()
-            cancellable?.cancel()
-          },
-          receiveValue: { podcasts in
-            // Find matching podcast by name
-            if let match = podcasts.first(where: {
-              $0.collectionName.lowercased() == title.lowercased()
-            }) ?? podcasts.first {
-              // Construct Apple Podcasts URL
-              let urlString = "https://podcasts.apple.com/podcast/id\(match.collectionId)"
-              applePodcastURL = URL(string: urlString)
-            }
-          }
-        )
+    do {
+      let podcasts = try await applePodcastService.searchPodcasts(term: title, limit: 5)
+      // Find matching podcast by name
+      if let match = podcasts.first(where: {
+        $0.collectionName.lowercased() == title.lowercased()
+      }) ?? podcasts.first {
+        // Construct Apple Podcasts URL
+        let urlString = "https://podcasts.apple.com/podcast/id\(match.collectionId)"
+        applePodcastURL = URL(string: urlString)
+      }
+    } catch {
+      // Silently fail - Apple URL is optional
     }
   }
 
@@ -683,7 +666,7 @@ struct EpisodeRowView: View {
     EnhancedAudioManager.shared
   }
   private let applePodcastService = ApplePodcastService()
-  @State private var shareCancellable: AnyCancellable?
+  @State private var shareTask: Task<Void, Never>?
   @State private var hasAIAnalysis: Bool = false
 
   // Transcript state - only updated on appear and when actively transcribing this episode
@@ -1086,21 +1069,34 @@ struct EpisodeRowView: View {
   }
 
   private func shareEpisode() {
-    shareCancellable = applePodcastService.getAppleEpisodeLink(
-      episodeTitle: episode.title,
-      episodeGuid: episode.guid
-    )
-    .timeout(.seconds(5), scheduler: DispatchQueue.main)
-    .sink(
-      receiveCompletion: { completion in
-        if case .failure = completion {
+    shareTask?.cancel()
+    shareTask = Task {
+      do {
+        // Use timeout with task group
+        let appleUrl = try await withThrowingTaskGroup(of: String?.self) { group in
+          group.addTask {
+            try await applePodcastService.getAppleEpisodeLink(
+              episodeTitle: episode.title,
+              episodeGuid: episode.guid
+            )
+          }
+          group.addTask {
+            try await Task.sleep(nanoseconds: 5_000_000_000)
+            throw CancellationError()
+          }
+          let result = try await group.next()!
+          group.cancelAll()
+          return result
+        }
+        if !Task.isCancelled {
+          shareWithURL(appleUrl ?? episode.audioURL)
+        }
+      } catch {
+        if !Task.isCancelled {
           shareWithURL(episode.audioURL)
         }
-      },
-      receiveValue: { appleUrl in
-        shareWithURL(appleUrl ?? episode.audioURL)
       }
-    )
+    }
   }
 
   private func shareWithURL(_ urlString: String?) {

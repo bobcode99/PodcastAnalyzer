@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 
 struct SearchResponse: Decodable {
@@ -91,7 +90,9 @@ struct AppleRSSGenre: Decodable {
     let url: String
 }
 
-class ApplePodcastService {
+// MARK: - Apple Podcast Service (Swift 6 async/await)
+
+class ApplePodcastService: Sendable {
 
     private let baseURL = "https://itunes.apple.com"
     private let rssBaseURL = Constants.appleRSSBaseURL
@@ -102,36 +103,30 @@ class ApplePodcastService {
     /// - Parameters:
     ///   - region: Country code (e.g., "us", "tw", "jp")
     ///   - limit: Number of podcasts to fetch (max 200)
-    /// - Returns: Publisher with array of top podcasts
-    func fetchTopPodcasts(region: String = "us", limit: Int = 10) -> AnyPublisher<[AppleRSSPodcast], Error> {
+    /// - Returns: Array of top podcasts
+    func fetchTopPodcasts(region: String = "us", limit: Int = 10) async throws -> [AppleRSSPodcast] {
         let urlString = "\(rssBaseURL)/\(region)/podcasts/top/\(limit)/podcasts.json"
 
         guard let url = URL(string: urlString) else {
-            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+            throw URLError(.badURL)
         }
 
-        return URLSession.shared.dataTaskPublisher(for: url)
-            .map { $0.data }
-            .decode(type: AppleRSSFeedResponse.self, decoder: JSONDecoder())
-            .map { $0.feed.results }
-            .receive(on: DispatchQueue.main)
-            .eraseToAnyPublisher()
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let response = try JSONDecoder().decode(AppleRSSFeedResponse.self, from: data)
+        return response.feed.results
     }
 
     /// Looks up a podcast's RSS feed URL from its collection ID
-    func lookupPodcast(collectionId: String) -> AnyPublisher<Podcast?, Error> {
+    func lookupPodcast(collectionId: String) async throws -> Podcast? {
         let urlString = "\(baseURL)/lookup?id=\(collectionId)&entity=podcast"
 
         guard let url = URL(string: urlString) else {
-            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+            throw URLError(.badURL)
         }
 
-        return URLSession.shared.dataTaskPublisher(for: url)
-            .map { $0.data }
-            .decode(type: SearchResponse.self, decoder: JSONDecoder())
-            .map { $0.results.first }
-            .receive(on: DispatchQueue.main)
-            .eraseToAnyPublisher()
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let response = try JSONDecoder().decode(SearchResponse.self, from: data)
+        return response.results.first
     }
 
     /// Finds the Apple Podcasts episode link by matching the episode GUID
@@ -139,102 +134,86 @@ class ApplePodcastService {
     ///   - episodeTitle: Episode title for search query
     ///   - episodeGuid: The RSS feed GUID to match against Apple's episodeGuid
     ///   - country: Country code for the search (default: "tw")
-    /// - Returns: Publisher with the Apple episode URL or nil
+    /// - Returns: The Apple episode URL or nil
     func getAppleEpisodeLink(
         episodeTitle: String,
         episodeGuid: String?,
         country: String = "tw"
-    ) -> AnyPublisher<String?, Error> {
+    ) async throws -> String? {
         let encoded = episodeTitle.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let urlString = "https://itunes.apple.com/search?term=\(encoded)&entity=podcastEpisode&limit=15&country=\(country)"
 
         guard let url = URL(string: urlString) else {
-            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+            throw URLError(.badURL)
         }
 
-        return URLSession.shared.dataTaskPublisher(for: url)
-            .map { $0.data }
-            .decode(type: EpisodeSearchResponse.self, decoder: JSONDecoder())
-            .map { response in
-                // Priority 1: Match by episodeGuid
-                if let guid = episodeGuid,
-                   let match = response.results.first(where: { $0.episodeGuid == guid }) {
-                    return match.trackViewUrl
-                }
-                // Fallback: return first result
-                return response.results.first?.trackViewUrl
-            }
-            .receive(on: DispatchQueue.main)
-            .eraseToAnyPublisher()
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let response = try JSONDecoder().decode(EpisodeSearchResponse.self, from: data)
+
+        // Priority 1: Match by episodeGuid
+        if let guid = episodeGuid,
+           let match = response.results.first(where: { $0.episodeGuid == guid }) {
+            return match.trackViewUrl
+        }
+        // Fallback: return first result
+        return response.results.first?.trackViewUrl
     }
-    // Search podcasts - unchanged
-    func searchPodcasts(term: String, limit: Int = 20) -> AnyPublisher<[Podcast], Error> {
+
+    // Search podcasts
+    func searchPodcasts(term: String, limit: Int = 20) async throws -> [Podcast] {
         let encoded = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let urlString =
             "\(baseURL)/search?media=podcast&entity=podcast&term=\(encoded)&limit=\(limit)"
 
         guard let url = URL(string: urlString) else {
-            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+            throw URLError(.badURL)
         }
 
-        return URLSession.shared.dataTaskPublisher(for: url)
-            .map { $0.data }
-            .decode(type: SearchResponse.self, decoder: JSONDecoder())
-            .map { $0.results }
-            .receive(on: DispatchQueue.main)
-            .eraseToAnyPublisher()
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let response = try JSONDecoder().decode(SearchResponse.self, from: data)
+        return response.results
     }
-    // Updated: Fetch episodes from Apple (fixed to handle only podcast return without error)
-    func fetchEpisodes(for collectionId: Int, limit: Int = 200) -> AnyPublisher<[Episode], Error> {
+
+    // Fetch episodes from Apple (fixed to handle only podcast return without error)
+    func fetchEpisodes(for collectionId: Int, limit: Int = 200) async throws -> [Episode] {
         let urlString = "\(baseURL)/lookup?id=\(collectionId)&entity=podcastEpisode&limit=\(limit)"
 
-        print(urlString)
         guard let url = URL(string: urlString) else {
-            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+            throw URLError(.badURL)
         }
 
-        return URLSession.shared.dataTaskPublisher(for: url)
-            .map { $0.data }
-            .tryMap { data in
-                // Parse as dict first (like ObjectMapper in Java to avoid direct decode errors)
-                let json =
-                    try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
-                guard let results = json?["results"] as? [[String: Any]] else {
-                    throw URLError(.badServerResponse)
-                }
+        let (data, _) = try await URLSession.shared.data(from: url)
 
-                var episodes: [Episode] = []
-                for item in results.dropFirst() {  // Skip first (podcast); like filtering in a Java stream
-                    let itemData = try JSONSerialization.data(withJSONObject: item, options: [])
-                    let episode = try JSONDecoder().decode(Episode.self, from: itemData)
-                    episodes.append(episode)
-                }
-                return episodes
-            }
-            .receive(on: DispatchQueue.main)
-            .eraseToAnyPublisher()
+        // Parse as dict first (like ObjectMapper in Java to avoid direct decode errors)
+        let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+        guard let results = json?["results"] as? [[String: Any]] else {
+            throw URLError(.badServerResponse)
+        }
+
+        var episodes: [Episode] = []
+        for item in results.dropFirst() {  // Skip first (podcast); like filtering in a Java stream
+            let itemData = try JSONSerialization.data(withJSONObject: item, options: [])
+            let episode = try JSONDecoder().decode(Episode.self, from: itemData)
+            episodes.append(episode)
+        }
+        return episodes
     }
 
-    // New: Fetch episodes from RSS feed (alternative since Apple doesn't return them)
-    // Like fetching XML in Spring Boot with RestTemplate, then parsing with JAXB
-    func fetchEpisodesFromRSS(feedUrl: String, limit: Int = 200) -> AnyPublisher<[Episode], Error> {
+    // Fetch episodes from RSS feed (alternative since Apple doesn't return them)
+    func fetchEpisodesFromRSS(feedUrl: String, limit: Int = 200) async throws -> [Episode] {
         guard let url = URL(string: feedUrl) else {
-            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+            throw URLError(.badURL)
         }
 
-        return URLSession.shared.dataTaskPublisher(for: url)
-            .map { $0.data }
-            .tryMap { data in
-                let parser = RSSParser(data: data)
-                let episodes = try parser.parse()
-                return Array(episodes.prefix(limit))  // Limit like Pageable in Spring Data
-            }
-            .receive(on: DispatchQueue.main)
-            .eraseToAnyPublisher()
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let parser = RSSParser(data: data)
+        let episodes = try parser.parse()
+        return Array(episodes.prefix(limit))
     }
 }
 
-// New: RSS Parser class (like a custom XML parser service in Java)
+// MARK: - RSS Parser class (like a custom XML parser service in Java)
+
 class RSSParser: NSObject, XMLParserDelegate {
 
     private let data: Data
@@ -353,33 +332,6 @@ class RSSParser: NSObject, XMLParserDelegate {
                 episodeFileExtension: nil
             )
             episodes.append(episode)
-        }
-    }
-}
-
-// Extension to convert Combine publishers to async/await (unchanged)
-extension Publisher where Output: Sendable {
-    func async() async throws -> Output {
-        try await withCheckedThrowingContinuation { continuation in
-            var cancellable: AnyCancellable?
-            cancellable =
-                self
-                .receive(on: DispatchQueue.main)
-                .sink(
-                    receiveCompletion: { completion in
-                        switch completion {
-                        case .finished:
-                            break
-                        case .failure(let error):
-                            continuation.resume(throwing: error)
-                        }
-                        cancellable?.cancel()
-                    },
-                    receiveValue: { value in
-                        continuation.resume(returning: value)
-                        cancellable?.cancel()
-                    }
-                )
         }
     }
 }

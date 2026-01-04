@@ -6,7 +6,6 @@
 //
 
 #if os(macOS)
-import Combine
 import SwiftData
 import SwiftUI
 
@@ -108,6 +107,9 @@ struct MacContentView: View {
   private let miniPlayerHeight: CGFloat = 72
 
   var body: some View {
+    // Create bindable references for @Observable singletons
+    @Bindable var importManager = importManager
+
     // Use ZStack to ensure mini player is ALWAYS at the absolute bottom of the window
     ZStack(alignment: .bottom) {
       NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -131,10 +133,6 @@ struct MacContentView: View {
             .cornerRadius(12) // Rounded corners
             .shadow(radius: 8) // Hover/lift shadow
             .transition(.move(edge: .bottom).combined(with: .opacity))
-//            .overlay(
-//                RoundedRectangle(cornerRadius: 20)
-//                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
-//            )
         }
     }
     .animation(.easeInOut(duration: 0.25), value: hasCurrentEpisode)
@@ -142,11 +140,11 @@ struct MacContentView: View {
     .onAppear {
       audioManager.restoreLastEpisode()
     }
-      .sheet(isPresented: Binding(get: { importManager.showImportSheet }, set: { importManager.showImportSheet = $0 })) {
+    .sheet(isPresented: $importManager.showImportSheet) {
       PodcastImportSheet()
         .frame(minWidth: 400, minHeight: 300)
     }
-    .onChange(of: Binding(get: { notificationManager.shouldNavigate }, set: { notificationManager.shouldNavigate = $0 })) { shouldNavigate in
+    .onChange(of: notificationManager.shouldNavigate) { _, shouldNavigate in
       if shouldNavigate, let target = notificationManager.navigationTarget {
         handleNotificationNavigation(target: target)
       }

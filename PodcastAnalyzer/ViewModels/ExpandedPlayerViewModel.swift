@@ -5,7 +5,7 @@
 //  ViewModel for expanded player view - supports Apple Podcasts style UI
 //
 
-import Combine
+import Observation
 import SwiftData
 import SwiftUI
 
@@ -40,13 +40,28 @@ final class ExpandedPlayerViewModel {
   var transcriptSegments: [TranscriptSegment] = []
   var transcriptSearchQuery: String = ""
 
+  @ObservationIgnored
   private let audioManager = EnhancedAudioManager.shared
+
+  @ObservationIgnored
   private let downloadManager = DownloadManager.shared
+
+  @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
+
+  @ObservationIgnored
   private var updateTimer: Timer?
+
+  @ObservationIgnored
   private let applePodcastService = ApplePodcastService()
-  private var shareCancellable: AnyCancellable?
+
+  @ObservationIgnored
+  private var shareTask: Task<Void, Never>?
+
+  @ObservationIgnored
   private var modelContext: ModelContext?
+
+  @ObservationIgnored
   private var lastLoadedEpisodeId: String?
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
@@ -248,24 +263,43 @@ final class ExpandedPlayerViewModel {
   func shareEpisode() {
     guard let episode = currentEpisode else { return }
 
-    // Try to find Apple Podcast URL first
-    shareCancellable = applePodcastService.getAppleEpisodeLink(
-      episodeTitle: episode.title,
-      episodeGuid: episode.guid
-    )
-    .timeout(.seconds(5), scheduler: DispatchQueue.main)
-    .sink(
-      receiveCompletion: { [weak self] completion in
-        if case .failure = completion {
-          // On error, fall back to audio URL
-          self?.shareWithURL(episode.audioURL)
+    // Cancel previous share task
+    shareTask?.cancel()
+
+    // Try to find Apple Podcast URL first with timeout
+    shareTask = Task {
+      do {
+        let appleUrl = try await withTimeout(seconds: 5) {
+          try await self.applePodcastService.getAppleEpisodeLink(
+            episodeTitle: episode.title,
+            episodeGuid: episode.guid
+          )
         }
-      },
-      receiveValue: { [weak self] appleUrl in
-        // Use Apple URL if found, otherwise fall back to audio URL
-        self?.shareWithURL(appleUrl ?? episode.audioURL)
+        if !Task.isCancelled {
+          shareWithURL(appleUrl ?? episode.audioURL)
+        }
+      } catch {
+        if !Task.isCancelled {
+          // On error, fall back to audio URL
+          shareWithURL(episode.audioURL)
+        }
       }
-    )
+    }
+  }
+
+  private func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+      group.addTask {
+        try await operation()
+      }
+      group.addTask {
+        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        throw CancellationError()
+      }
+      let result = try await group.next()!
+      group.cancelAll()
+      return result
+    }
   }
 
   private func shareWithURL(_ urlString: String?) {
