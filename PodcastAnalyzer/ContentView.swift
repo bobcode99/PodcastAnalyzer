@@ -4,7 +4,6 @@
 //
 //
 
-import Combine
 import SwiftData
 import SwiftUI
 
@@ -23,8 +22,8 @@ struct ContentView: View {
 #if os(iOS)
 struct iOSContentView: View {
   @State private var audioManager = EnhancedAudioManager.shared
-  @ObservedObject private var importManager = PodcastImportManager.shared
-  @ObservedObject private var notificationManager = NotificationNavigationManager.shared
+  @State private var importManager = PodcastImportManager.shared
+  @State private var notificationManager = NotificationNavigationManager.shared
   @Environment(\.modelContext) private var modelContext
 
   // Navigation state for notification-triggered navigation
@@ -78,14 +77,15 @@ struct iOSContentView: View {
       // Restore last played episode on app launch
       audioManager.restoreLastEpisode()
     }
-    .sheet(isPresented: $importManager.showImportSheet) {
-      PodcastImportSheet()
-    }
-    .onChange(of: notificationManager.shouldNavigate) { _, shouldNavigate in
-      if shouldNavigate, let target = notificationManager.navigationTarget {
-        handleNotificationNavigation(target: target)
-      }
-    }
+// Using @Bindable locally for the sheet binding
+        .sheet(isPresented: Binding(get: { importManager.showImportSheet }, set: { importManager.showImportSheet = $0 })) {
+            PodcastImportSheet()
+        }
+        .onChange(of: notificationManager.shouldNavigate) { _, shouldNavigate in
+            if shouldNavigate, let target = notificationManager.navigationTarget {
+                handleNotificationNavigation(target: target)
+            }
+        }
   }
 
   private func handleNotificationNavigation(target: NotificationNavigationTarget) {
@@ -125,7 +125,7 @@ struct iOSContentView: View {
 // MARK: - Podcast Import Sheet
 
 struct PodcastImportSheet: View {
-  @ObservedObject private var importManager = PodcastImportManager.shared
+  @Bindable private var importManager = PodcastImportManager.shared
   @Environment(\.dismiss) private var dismiss
 
   var body: some View {

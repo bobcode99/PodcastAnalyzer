@@ -6,6 +6,7 @@
 //
 
 import Combine
+import Observation
 import SwiftData
 import SwiftUI
 import ZMarkupParser
@@ -48,12 +49,20 @@ final class EpisodeDetailViewModel {
     Text("Loading...").foregroundColor(.secondary)
   )
 
+  @ObservationIgnored
   let episode: PodcastEpisodeInfo
+
+  @ObservationIgnored
   let podcastTitle: String
+
+  @ObservationIgnored
   private let fallbackImageURL: String?
 
   // Reference singletons
+  @ObservationIgnored
   let audioManager = EnhancedAudioManager.shared
+
+  @ObservationIgnored
   private let downloadManager = DownloadManager.shared
 
   // Download state
@@ -63,6 +72,8 @@ final class EpisodeDetailViewModel {
   var transcriptState: TranscriptState = .idle
   var transcriptText: String = ""
   var isModelReady: Bool = false
+
+  @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
 
   // Parsed transcript segments for live captions
@@ -70,11 +81,19 @@ final class EpisodeDetailViewModel {
   var transcriptSearchQuery: String = ""
 
   // Playback state from SwiftData
+  @ObservationIgnored
   private var episodeModel: EpisodeDownloadModel?
+
+  @ObservationIgnored
   private var modelContext: ModelContext?
 
-  // Cancellables for observation
+  // Cancellables for observation (still used for timers and other Combine publishers)
+  @ObservationIgnored
   private var cancellables = Set<AnyCancellable>()
+
+  // Flag to track transcript manager observation
+  @ObservationIgnored
+  private var isObservingTranscriptManager = false
 
   // Podcast language for transcription
   var podcastLanguage: String = "en"
@@ -629,34 +648,46 @@ final class EpisodeDetailViewModel {
 
   /// Observes TranscriptManager for job status updates
   private func observeTranscriptManager() {
-    TranscriptManager.shared.$activeJobs
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self] jobs in
-        guard let self = self else { return }
-        // Use Unit Separator (U+001F) as delimiter - same as TranscriptManager
-        let delimiter = "\u{1F}"
-        let jobId = "\(self.podcastTitle)\(delimiter)\(self.episode.title)"
+    guard !isObservingTranscriptManager else { return }
+    isObservingTranscriptManager = true
+    startTranscriptObservation()
+  }
 
-        if let job = jobs[jobId] {
-          // Update local state based on job status
-          switch job.status {
-          case .queued:
-            self.transcriptState = .transcribing(progress: 0)
-          case .downloadingModel(let progress):
-            self.transcriptState = .downloadingModel(progress: progress)
-          case .transcribing(let progress):
-            self.transcriptState = .transcribing(progress: progress)
-          case .completed:
-            // Load the transcript from disk
-            Task {
-              await self.loadExistingTranscript()
-            }
-          case .failed(let error):
-            self.transcriptState = .error(error)
-          }
-        }
+  private func startTranscriptObservation() {
+    withObservationTracking {
+      // Access the property to register observation
+      _ = TranscriptManager.shared.activeJobs
+    } onChange: {
+      Task { @MainActor [weak self] in
+        self?.handleTranscriptJobUpdate()
+        self?.startTranscriptObservation()
       }
-      .store(in: &cancellables)
+    }
+  }
+
+  private func handleTranscriptJobUpdate() {
+    // Use Unit Separator (U+001F) as delimiter - same as TranscriptManager
+    let delimiter = "\u{1F}"
+    let jobId = "\(podcastTitle)\(delimiter)\(episode.title)"
+
+    if let job = TranscriptManager.shared.activeJobs[jobId] {
+      // Update local state based on job status
+      switch job.status {
+      case .queued:
+        transcriptState = .transcribing(progress: 0)
+      case .downloadingModel(let progress):
+        transcriptState = .downloadingModel(progress: progress)
+      case .transcribing(let progress):
+        transcriptState = .transcribing(progress: progress)
+      case .completed:
+        // Load the transcript from disk
+        Task {
+          await loadExistingTranscript()
+        }
+      case .failed(let error):
+        transcriptState = .error(error)
+      }
+    }
   }
 
   func copyTranscriptToClipboard() {

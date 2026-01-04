@@ -47,7 +47,7 @@ struct EpisodeListView: View {
 
   @Environment(\.modelContext) private var modelContext
   @Environment(\.dismiss) private var dismiss
-  @ObservedObject private var downloadManager = DownloadManager.shared
+  @Bindable private var downloadManager = DownloadManager.shared
   @State private var viewModel: EpisodeListViewModel?
   @State private var episodeToDelete: PodcastEpisodeInfo?
   @State private var showDeleteConfirmation = false

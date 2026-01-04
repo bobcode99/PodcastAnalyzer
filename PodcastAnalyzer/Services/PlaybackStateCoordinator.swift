@@ -11,7 +11,8 @@ import SwiftData
 import os.log
 
 @MainActor
-class PlaybackStateCoordinator: ObservableObject {
+@Observable
+class PlaybackStateCoordinator {
   static var shared: PlaybackStateCoordinator?
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager for consistency

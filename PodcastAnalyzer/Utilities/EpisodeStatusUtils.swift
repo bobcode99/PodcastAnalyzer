@@ -5,8 +5,8 @@
 //  Centralized utilities for checking episode status (downloaded, transcript, AI analysis, etc.)
 //
 
-import Combine
 import Foundation
+import Observation
 import SwiftData
 import SwiftUI
 
@@ -183,18 +183,30 @@ final class EpisodeStatusObserver {
   var hasAIAnalysis: Bool = false
 
   // Episode info
+  @ObservationIgnored
   private let episodeTitle: String
+
+  @ObservationIgnored
   private let podcastTitle: String
+
+  @ObservationIgnored
   private let audioURL: String?
+
+  @ObservationIgnored
   private let episodeKey: String
 
   // Managers
+  @ObservationIgnored
   private let downloadManager = DownloadManager.shared
+
+  @ObservationIgnored
   private let transcriptManager = TranscriptManager.shared
 
-  // Subscriptions
-  private var cancellables = Set<AnyCancellable>()
+  @ObservationIgnored
   private var modelContext: ModelContext?
+
+  @ObservationIgnored
+  private var isObserving = false
 
   init(episodeTitle: String, podcastTitle: String, audioURL: String? = nil) {
     self.episodeTitle = episodeTitle
@@ -227,29 +239,35 @@ final class EpisodeStatusObserver {
   }
 
   private func setupObservers() {
-    // Observe DownloadManager state changes
-    downloadManager.$downloadStates
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self] _ in
+    guard !isObserving else { return }
+    isObserving = true
+    observeDownloadManager()
+    observeTranscriptManager()
+  }
+
+  private func observeDownloadManager() {
+    withObservationTracking {
+      // Access the property to register observation
+      _ = downloadManager.downloadStates
+    } onChange: {
+      Task { @MainActor [weak self] in
         self?.updateDownloadStatus()
+        self?.observeDownloadManager()
       }
-      .store(in: &cancellables)
+    }
+  }
 
-    // Observe TranscriptManager active jobs
-    transcriptManager.$activeJobs
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self] _ in
+  private func observeTranscriptManager() {
+    withObservationTracking {
+      // Access properties to register observation
+      _ = transcriptManager.activeJobs
+      _ = transcriptManager.isProcessing
+    } onChange: {
+      Task { @MainActor [weak self] in
         self?.updateTranscriptStatus()
+        self?.observeTranscriptManager()
       }
-      .store(in: &cancellables)
-
-    // Observe TranscriptManager processing state
-    transcriptManager.$isProcessing
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self] _ in
-        self?.updateTranscriptStatus()
-      }
-      .store(in: &cancellables)
+    }
   }
 
   func updateAllStatus() {
@@ -354,6 +372,6 @@ final class EpisodeStatusObserver {
   }
 
   func cleanup() {
-    cancellables.removeAll()
+    isObserving = false
   }
 }

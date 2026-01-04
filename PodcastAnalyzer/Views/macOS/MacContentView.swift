@@ -82,8 +82,8 @@ enum LibrarySubItem: String, CaseIterable, Identifiable {
 struct MacContentView: View {
   // Use @State for @Observable to ensure SwiftUI properly tracks changes
   @State private var audioManager = EnhancedAudioManager.shared
-  @ObservedObject private var importManager = PodcastImportManager.shared
-  @ObservedObject private var notificationManager = NotificationNavigationManager.shared
+  @State private var importManager = PodcastImportManager.shared
+  @State private var notificationManager = NotificationNavigationManager.shared
   @Environment(\.modelContext) private var modelContext
   @Environment(\.openSettings) private var openSettings
 
@@ -120,29 +120,33 @@ struct MacContentView: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
       .navigationSplitViewStyle(.balanced)
-      // Add bottom padding to prevent content from being hidden by mini player
-      .padding(.bottom, hasCurrentEpisode ? miniPlayerHeight : 0)
+        // Removed .padding(.bottom) - let miniplayer overlay naturally
 
-      // Mini player bar at absolute bottom - spans full width like Apple Podcasts
-      if hasCurrentEpisode {
-        VStack(spacing: 0) {
-          Divider()
+      // Mini player at absolute bottom, now fixed-width and centered for floating feel
+        if hasCurrentEpisode {
           MacMiniPlayerBar()
+            .frame(width: 800) // Fixed width - adjust this value (e.g., 600-1000) to fit your app's typical window
+            .padding(.bottom, 20) // Lift from bottom edge
+            .background(.ultraThinMaterial) // Blurry glass effect
+            .cornerRadius(12) // Rounded corners
+            .shadow(radius: 8) // Hover/lift shadow
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+//            .overlay(
+//                RoundedRectangle(cornerRadius: 20)
+//                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+//            )
         }
-        .background(.ultraThinMaterial)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-      }
     }
     .animation(.easeInOut(duration: 0.25), value: hasCurrentEpisode)
     .frame(minWidth: 900, minHeight: 600)
     .onAppear {
       audioManager.restoreLastEpisode()
     }
-    .sheet(isPresented: $importManager.showImportSheet) {
+      .sheet(isPresented: Binding(get: { importManager.showImportSheet }, set: { importManager.showImportSheet = $0 })) {
       PodcastImportSheet()
         .frame(minWidth: 400, minHeight: 300)
     }
-    .onChange(of: notificationManager.shouldNavigate) { _, shouldNavigate in
+    .onChange(of: Binding(get: { notificationManager.shouldNavigate }, set: { notificationManager.shouldNavigate = $0 })) { shouldNavigate in
       if shouldNavigate, let target = notificationManager.navigationTarget {
         handleNotificationNavigation(target: target)
       }

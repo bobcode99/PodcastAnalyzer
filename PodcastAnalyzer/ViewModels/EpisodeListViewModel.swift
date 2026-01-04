@@ -19,7 +19,6 @@ import AppKit
 @MainActor
 @Observable
 final class EpisodeListViewModel {
-  // MARK: - Published State
   var episodeModels: [String: EpisodeDownloadModel] = [:]
   var selectedFilter: EpisodeFilter = .all
   var sortOldestFirst: Bool = false

@@ -78,15 +78,15 @@ struct GeneralSettingsTab: View {
 // MARK: - Sync Settings Tab
 
 struct SyncSettingsTab: View {
-  @StateObject private var syncManager = BackgroundSyncManager.shared
+  @State private var syncManager = BackgroundSyncManager.shared
 
   var body: some View {
     Form {
       Section {
-        Toggle("Enable Background Sync", isOn: $syncManager.isBackgroundSyncEnabled)
+          Toggle("Enable Background Sync", isOn: Binding(get: { syncManager.isBackgroundSyncEnabled }, set: { syncManager.isBackgroundSyncEnabled = $0 }))
 
         if syncManager.isBackgroundSyncEnabled {
-          Toggle("New Episode Notifications", isOn: $syncManager.isNotificationsEnabled)
+          Toggle("New Episode Notifications", isOn: Binding(get: { syncManager.isNotificationsEnabled }, set: { syncManager.isNotificationsEnabled = $0 }))
 
           if let lastSync = syncManager.lastSyncDate {
             HStack {

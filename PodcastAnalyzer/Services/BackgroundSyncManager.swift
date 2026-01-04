@@ -8,21 +8,22 @@
 #if os(iOS)
 import BackgroundTasks
 #endif
-import Combine
 import Foundation
+import Observation
 import SwiftData
 import UserNotifications
 import os.log
 
 @MainActor
-class BackgroundSyncManager: ObservableObject {
+@Observable
+class BackgroundSyncManager {
   static let shared = BackgroundSyncManager()
 
   // Background task identifier
   static let backgroundTaskIdentifier = "com.podcast.analyzer.refresh"
 
   // Settings
-  @Published var isBackgroundSyncEnabled: Bool {
+  var isBackgroundSyncEnabled: Bool {
     didSet {
       UserDefaults.standard.set(isBackgroundSyncEnabled, forKey: Keys.backgroundSyncEnabled)
       if isBackgroundSyncEnabled {
@@ -33,7 +34,7 @@ class BackgroundSyncManager: ObservableObject {
     }
   }
 
-  @Published var isNotificationsEnabled: Bool {
+  var isNotificationsEnabled: Bool {
     didSet {
       UserDefaults.standard.set(isNotificationsEnabled, forKey: Keys.notificationsEnabled)
       if isNotificationsEnabled {
@@ -42,12 +43,17 @@ class BackgroundSyncManager: ObservableObject {
     }
   }
 
-  @Published var notificationPermissionStatus: UNAuthorizationStatus = .notDetermined
-  @Published var lastSyncDate: Date?
-  @Published var isSyncing: Bool = false
+  var notificationPermissionStatus: UNAuthorizationStatus = .notDetermined
+  var lastSyncDate: Date?
+  var isSyncing: Bool = false
 
+  @ObservationIgnored
   private let rssService = PodcastRssService()
+
+  @ObservationIgnored
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "BackgroundSync")
+
+  @ObservationIgnored
   private var modelContainer: ModelContainer?
 
   private enum Keys {
@@ -308,6 +314,7 @@ class BackgroundSyncManager: ObservableObject {
 
   // MARK: - Foreground Timer (Optional: for when app is active)
 
+  @ObservationIgnored
   private var foregroundTimer: Timer?
 
   func startForegroundSync() {

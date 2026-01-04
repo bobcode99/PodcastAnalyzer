@@ -5,7 +5,6 @@
 //  ViewModel for transcript generation - handles speech-to-text processing
 //
 
-import Combine
 import SwiftData
 import SwiftUI
 import os.log
@@ -25,11 +24,12 @@ enum TranscriptState: Equatable {
 // MARK: - ViewModel
 
 @MainActor
-class TranscriptGenerationViewModel: ObservableObject {
-  @Published var state: TranscriptState = .idle
-  @Published var transcriptText: String = ""
-  @Published var showCopySuccess: Bool = false
-  @Published var isModelReady: Bool = false
+@Observable
+class TranscriptGenerationViewModel {
+  var state: TranscriptState = .idle
+  var transcriptText: String = ""
+  var showCopySuccess: Bool = false
+  var isModelReady: Bool = false
 
   private let episode: PodcastEpisodeInfo
   private let podcastTitle: String

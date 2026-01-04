@@ -8,7 +8,7 @@ import UIKit
 
 struct SettingsView: View {
   @State private var viewModel = SettingsViewModel()
-  @StateObject private var syncManager = BackgroundSyncManager.shared
+  @State private var syncManager = BackgroundSyncManager.shared
   @Environment(\.modelContext) var modelContext
   @State private var showAddFeedSheet = false
 
@@ -19,7 +19,7 @@ struct SettingsView: View {
       List {
         // MARK: - Sync & Notifications Section
         Section {
-          Toggle(isOn: $syncManager.isBackgroundSyncEnabled) {
+          Toggle(isOn: Binding(get: { syncManager.isBackgroundSyncEnabled }, set: { syncManager.isBackgroundSyncEnabled = $0 })) {
             HStack {
               Image(systemName: "arrow.triangle.2.circlepath")
                 .foregroundColor(.blue)
@@ -35,7 +35,7 @@ struct SettingsView: View {
             }
           }
 
-          Toggle(isOn: $syncManager.isNotificationsEnabled) {
+          Toggle(isOn: Binding(get: { syncManager.isNotificationsEnabled }, set: { syncManager.isNotificationsEnabled = $0 })) {
             HStack {
               Image(systemName: "bell.badge")
                 .foregroundColor(.orange)

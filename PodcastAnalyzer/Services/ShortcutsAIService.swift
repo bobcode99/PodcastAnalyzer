@@ -6,7 +6,6 @@
 //  Runs shortcuts directly with x-callback-url and gets results back
 //
 
-import Combine
 import Foundation
 import os.log
 
@@ -21,13 +20,14 @@ private let logger = Logger(subsystem: "com.podcastanalyzer", category: "Shortcu
 // MARK: - Shortcuts AI Service
 
 @MainActor
-class ShortcutsAIService: ObservableObject {
+@Observable
+class ShortcutsAIService {
     static let shared = ShortcutsAIService()
 
-    @Published var isProcessing = false
-    @Published var lastResult: String?
-    @Published var lastError: String?
-    @Published var shortcutName: String {
+    var isProcessing = false
+    var lastResult: String?
+    var lastError: String?
+    var shortcutName: String {
         didSet {
             UserDefaults.standard.set(shortcutName, forKey: "shortcuts_ai_name")
         }

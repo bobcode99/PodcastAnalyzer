@@ -5,7 +5,6 @@
 //  Manages background transcript generation across the app
 //
 
-import Combine
 import Foundation
 import SwiftData
 import os.log
@@ -31,7 +30,8 @@ struct TranscriptJob: Identifiable {
 
 /// Manages background transcript generation with parallel processing
 @available(iOS 17.0, *)
-class TranscriptManager: ObservableObject {
+@Observable
+class TranscriptManager {
   static let shared = TranscriptManager()
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager for consistency
@@ -45,9 +45,8 @@ class TranscriptManager: ObservableObject {
     return "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episodeTitle)"
   }
 
-  // Published state for UI observation
-  @Published var activeJobs: [String: TranscriptJob] = [:]
-  @Published var isProcessing: Bool = false
+  var activeJobs: [String: TranscriptJob] = [:]
+  var isProcessing: Bool = false
 
   // Maximum concurrent transcript jobs
   // Increased for better performance on modern devices

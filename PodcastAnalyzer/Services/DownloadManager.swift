@@ -12,8 +12,8 @@
 //  Manages episode downloads with progress tracking
 //
 
-import Combine  // ✅ Add this
 import Foundation
+import Observation
 import os.log
 
 enum DownloadState: Codable, Equatable {
@@ -24,28 +24,31 @@ enum DownloadState: Codable, Equatable {
   case failed(error: String)
 }
 
-class DownloadManager: NSObject, ObservableObject {
+@Observable
+class DownloadManager: NSObject {
   static let shared = DownloadManager()
 
-  // ✅ Use @Published instead
-  @Published var downloadStates: [String: DownloadState] = [:]
+  var downloadStates: [String: DownloadState] = [:]
 
+  @ObservationIgnored
   private var activeDownloads: [String: URLSessionDownloadTask] = [:]
 
   // Store original URLs to get proper file extensions
+  @ObservationIgnored
   private var originalURLs: [String: URL] = [:]
 
   // Store episode info for auto-transcript
+  @ObservationIgnored
   private var episodeLanguages: [String: String] = [:]  // episodeKey -> language
 
   // Auto-transcript setting
-  @Published var autoTranscriptEnabled: Bool {
+  var autoTranscriptEnabled: Bool {
     didSet {
       UserDefaults.standard.set(autoTranscriptEnabled, forKey: "autoTranscriptEnabled")
     }
   }
 
-  // ✅ Make it a lazy stored property
+  @ObservationIgnored
   private lazy var urlSession: URLSession = {
     let config = URLSessionConfiguration.background(
       withIdentifier: "com.podcast.analyzer.downloads")
@@ -54,7 +57,10 @@ class DownloadManager: NSObject, ObservableObject {
     return URLSession(configuration: config, delegate: self, delegateQueue: nil)
   }()
 
+  @ObservationIgnored
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "DownloadManager")
+
+  @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
 
   override private init() {
