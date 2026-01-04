@@ -33,17 +33,18 @@ enum TranscriptModelStatus: Equatable {
 }
 
 @MainActor
-class SettingsViewModel: ObservableObject {
-  @Published var rssUrlInput: String = ""
-  @Published var successMessage: String = ""
-  @Published var errorMessage: String = ""
-  @Published var podcastInfoModelList: [PodcastInfoModel] = []
-  @Published var isValidating: Bool = false
-  @Published var defaultPlaybackSpeed: Float = 1.0
+@Observable
+final class SettingsViewModel {
+  var rssUrlInput: String = ""
+  var successMessage: String = ""
+  var errorMessage: String = ""
+  var podcastInfoModelList: [PodcastInfoModel] = []
+  var isValidating: Bool = false
+  var defaultPlaybackSpeed: Float = 1.0
 
   // Transcript model status and locale
-  @Published var transcriptModelStatus: TranscriptModelStatus = .checking
-  @Published var selectedTranscriptLocale: String = "zh-tw"
+  var transcriptModelStatus: TranscriptModelStatus = .checking
+  var selectedTranscriptLocale: String = "zh-tw"
 
   private var successMessageTask: Task<Void, Never>?
   private var transcriptDownloadTask: Task<Void, Never>?
@@ -51,7 +52,7 @@ class SettingsViewModel: ObservableObject {
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "SettingsViewModel")
 
   // Default region for top podcasts
-  @Published var selectedRegion: String = "us"
+  var selectedRegion: String = "us"
 
   private enum Keys {
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"

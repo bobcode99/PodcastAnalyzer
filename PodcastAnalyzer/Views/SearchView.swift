@@ -23,7 +23,7 @@ enum SearchTab: String, CaseIterable {
 // MARK: - Main Search View
 
 struct PodcastSearchView: View {
-    @StateObject private var viewModel = PodcastSearchViewModel()
+    @State private var viewModel = PodcastSearchViewModel()
     @Environment(\.modelContext) private var modelContext
     @Query(filter: #Predicate<PodcastInfoModel> { $0.isSubscribed == true })
     private var subscribedPodcasts: [PodcastInfoModel]

@@ -269,7 +269,7 @@ struct MacContentView: View {
 // MARK: - Placeholder Views (to be implemented)
 
 struct MacHomeContentView: View {
-  @StateObject private var viewModel = HomeViewModel()
+  @State private var viewModel = HomeViewModel()
   @Environment(\.modelContext) private var modelContext
 
   var body: some View {
@@ -438,7 +438,7 @@ struct MacTopPodcastRow: View {
 }
 
 struct MacLibraryPodcastsView: View {
-  @StateObject private var viewModel = LibraryViewModel(modelContext: nil)
+  @State private var viewModel = LibraryViewModel(modelContext: nil)
   @Environment(\.modelContext) private var modelContext
 
   private let columns = [
@@ -502,7 +502,7 @@ struct MacPodcastGridCell: View {
 }
 
 struct MacLibrarySavedView: View {
-  @StateObject private var viewModel = LibraryViewModel(modelContext: nil)
+  @State private var viewModel = LibraryViewModel(modelContext: nil)
   @Environment(\.modelContext) private var modelContext
 
   var body: some View {
@@ -549,7 +549,7 @@ struct MacLibrarySavedView: View {
 }
 
 struct MacLibraryDownloadedView: View {
-  @StateObject private var viewModel = LibraryViewModel(modelContext: nil)
+  @State private var viewModel = LibraryViewModel(modelContext: nil)
   @Environment(\.modelContext) private var modelContext
 
   var body: some View {
@@ -596,7 +596,7 @@ struct MacLibraryDownloadedView: View {
 }
 
 struct MacLibraryLatestView: View {
-  @StateObject private var viewModel = LibraryViewModel(modelContext: nil)
+  @State private var viewModel = LibraryViewModel(modelContext: nil)
   @Environment(\.modelContext) private var modelContext
 
   var body: some View {
@@ -643,7 +643,7 @@ struct MacLibraryLatestView: View {
 }
 
 struct MacSearchView: View {
-  @StateObject private var viewModel = PodcastSearchViewModel()
+  @State private var viewModel = PodcastSearchViewModel()
   @Environment(\.modelContext) private var modelContext
   @Query(filter: #Predicate<PodcastInfoModel> { $0.isSubscribed == true })
   private var subscribedPodcasts: [PodcastInfoModel]

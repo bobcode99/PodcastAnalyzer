@@ -15,7 +15,7 @@ import UIKit
 struct ExpandedPlayerView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.modelContext) private var modelContext
-  @StateObject private var viewModel = ExpandedPlayerViewModel()
+  @State private var viewModel = ExpandedPlayerViewModel()
   @State private var showEpisodeDetail = false
   @State private var showPodcastEpisodeList = false
   @State private var showSpeedPicker = false
@@ -887,7 +887,7 @@ struct SpeedButton: View {
 
 struct TranscriptFullScreenView: View {
   @Environment(\.dismiss) private var dismiss
-  @ObservedObject var viewModel: ExpandedPlayerViewModel
+  @Bindable var viewModel: ExpandedPlayerViewModel
 
   private var toolbarPlacement: ToolbarItemPlacement {
     #if os(iOS)

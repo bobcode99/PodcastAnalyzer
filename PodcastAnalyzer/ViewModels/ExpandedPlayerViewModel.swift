@@ -16,28 +16,29 @@ import AppKit
 #endif
 
 @MainActor
-class ExpandedPlayerViewModel: ObservableObject {
-  @Published var isPlaying: Bool = false
-  @Published var episodeTitle: String = ""
-  @Published var podcastTitle: String = ""
-  @Published var imageURL: URL?
-  @Published var progress: Double = 0
-  @Published var currentTime: TimeInterval = 0
-  @Published var duration: TimeInterval = 1
-  @Published var playbackSpeed: Float = 1.0
-  @Published var currentEpisode: PlaybackEpisode?
-  @Published var episodeDate: Date?
-  @Published var isStarred: Bool = false
-  @Published var isCompleted: Bool = false
-  @Published var queue: [PlaybackEpisode] = []
-  @Published var episodeDescription: String?
-  @Published var downloadState: DownloadState = .notDownloaded
-  @Published var podcastModel: PodcastInfoModel?
+@Observable
+final class ExpandedPlayerViewModel {
+  var isPlaying: Bool = false
+  var episodeTitle: String = ""
+  var podcastTitle: String = ""
+  var imageURL: URL?
+  var progress: Double = 0
+  var currentTime: TimeInterval = 0
+  var duration: TimeInterval = 1
+  var playbackSpeed: Float = 1.0
+  var currentEpisode: PlaybackEpisode?
+  var episodeDate: Date?
+  var isStarred: Bool = false
+  var isCompleted: Bool = false
+  var queue: [PlaybackEpisode] = []
+  var episodeDescription: String?
+  var downloadState: DownloadState = .notDownloaded
+  var podcastModel: PodcastInfoModel?
 
   // Transcript properties
-  @Published var hasTranscript: Bool = false
-  @Published var transcriptSegments: [TranscriptSegment] = []
-  @Published var transcriptSearchQuery: String = ""
+  var hasTranscript: Bool = false
+  var transcriptSegments: [TranscriptSegment] = []
+  var transcriptSearchQuery: String = ""
 
   private let audioManager = EnhancedAudioManager.shared
   private let downloadManager = DownloadManager.shared
@@ -527,7 +528,9 @@ class ExpandedPlayerViewModel: ObservableObject {
     }
   }
 
-  deinit {
+  /// Clean up resources. Call this from onDisappear.
+  func cleanup() {
     updateTimer?.invalidate()
+    updateTimer = nil
   }
 }

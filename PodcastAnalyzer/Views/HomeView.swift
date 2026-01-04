@@ -14,7 +14,7 @@ import UIKit
 #endif
 
 struct HomeView: View {
-  @StateObject private var viewModel = HomeViewModel()
+  @State private var viewModel = HomeViewModel()
   @Environment(\.modelContext) private var modelContext
   @State private var showRegionPicker = false
 
@@ -262,8 +262,9 @@ struct UpNextCard: View {
 
 struct UpNextContextMenu: View {
   let episode: LibraryEpisode
-  @ObservedObject var viewModel: HomeViewModel
-  @ObservedObject private var downloadManager = DownloadManager.shared
+  var viewModel: HomeViewModel
+
+  private var downloadManager: DownloadManager { DownloadManager.shared }
   private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
 
   private var statusChecker: EpisodeStatusChecker {
@@ -393,7 +394,7 @@ struct UpNextContextMenu: View {
 struct TopPodcastRow: View {
   let podcast: AppleRSSPodcast
   let rank: Int
-  @ObservedObject var viewModel: HomeViewModel
+  var viewModel: HomeViewModel
 
   var body: some View {
     NavigationLink(destination: EpisodeListView(
@@ -541,7 +542,7 @@ struct RegionPickerSheet: View {
 
 struct PodcastPreviewSheet: View {
   let podcast: AppleRSSPodcast
-  @ObservedObject var viewModel: HomeViewModel
+  var viewModel: HomeViewModel
   @Environment(\.dismiss) private var dismiss
 
   var body: some View {
@@ -660,7 +661,7 @@ struct PodcastPreviewSheet: View {
 struct UpNextListView: View {
   let episodes: [LibraryEpisode]
   @Environment(\.modelContext) private var modelContext
-  @StateObject private var viewModel = HomeViewModel()
+  @State private var viewModel = HomeViewModel()
 
   var body: some View {
     List(episodes) { episode in

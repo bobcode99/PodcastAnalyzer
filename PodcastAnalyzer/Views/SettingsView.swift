@@ -7,7 +7,7 @@ import UIKit
 #endif
 
 struct SettingsView: View {
-  @StateObject private var viewModel = SettingsViewModel()
+  @State private var viewModel = SettingsViewModel()
   @StateObject private var syncManager = BackgroundSyncManager.shared
   @Environment(\.modelContext) var modelContext
   @State private var showAddFeedSheet = false
@@ -419,7 +419,7 @@ struct FeedRowView: View {
 
 // MARK: - Add Feed Sheet View
 struct AddFeedView: View {
-  @ObservedObject var viewModel: SettingsViewModel
+  @Bindable var viewModel: SettingsViewModel
   var modelContext: ModelContext
   var onDismiss: () -> Void
 

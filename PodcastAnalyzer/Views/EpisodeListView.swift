@@ -671,7 +671,7 @@ struct EpisodeRowView: View {
   let podcastTitle: String
   let fallbackImageURL: String?
   let podcastLanguage: String
-  @ObservedObject var downloadManager: DownloadManager
+  var downloadManager: DownloadManager
   let episodeModel: EpisodeDownloadModel?
   let onToggleStar: () -> Void
   let onDownload: () -> Void

@@ -118,7 +118,7 @@ struct SyncSettingsTab: View {
 // MARK: - Playback Settings Tab
 
 struct PlaybackSettingsTab: View {
-  @StateObject private var viewModel = SettingsViewModel()
+  @State private var viewModel = SettingsViewModel()
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
   var body: some View {
@@ -156,7 +156,7 @@ struct PlaybackSettingsTab: View {
 // MARK: - Transcript Settings Tab
 
 struct TranscriptSettingsTab: View {
-  @StateObject private var viewModel = SettingsViewModel()
+  @State private var viewModel = SettingsViewModel()
 
   var body: some View {
     Form {

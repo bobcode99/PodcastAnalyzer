@@ -38,13 +38,14 @@ struct LibraryEpisode: Identifiable {
 // MARK: - Library ViewModel
 
 @MainActor
-class LibraryViewModel: ObservableObject {
-  @Published var podcastInfoModelList: [PodcastInfoModel] = []
-  @Published var savedEpisodes: [LibraryEpisode] = []
-  @Published var downloadedEpisodes: [LibraryEpisode] = []
-  @Published var latestEpisodes: [LibraryEpisode] = []
-  @Published var isLoading = false
-  @Published var error: String?
+@Observable
+final class LibraryViewModel {
+  var podcastInfoModelList: [PodcastInfoModel] = []
+  var savedEpisodes: [LibraryEpisode] = []
+  var downloadedEpisodes: [LibraryEpisode] = []
+  var latestEpisodes: [LibraryEpisode] = []
+  var isLoading = false
+  var error: String?
 
   /// Podcasts sorted by most recent episode date (for Library grid)
   var podcastsSortedByRecentUpdate: [PodcastInfoModel] {
@@ -80,9 +81,11 @@ class LibraryViewModel: ObservableObject {
     setupDownloadCompletionObserver()
   }
 
-  deinit {
+  /// Clean up resources. Call this from onDisappear.
+  func cleanup() {
     if let observer = downloadCompletionObserver {
       NotificationCenter.default.removeObserver(observer)
+      downloadCompletionObserver = nil
     }
   }
 

@@ -12,16 +12,17 @@ import SwiftUI
 import os.log
 
 @MainActor
-class HomeViewModel: ObservableObject {
+@Observable
+final class HomeViewModel {
   // Up Next episodes (unplayed from subscribed podcasts)
-  @Published var upNextEpisodes: [LibraryEpisode] = []
+  var upNextEpisodes: [LibraryEpisode] = []
 
   // Top podcasts from Apple RSS
-  @Published var topPodcasts: [AppleRSSPodcast] = []
-  @Published var isLoadingTopPodcasts = false
+  var topPodcasts: [AppleRSSPodcast] = []
+  var isLoadingTopPodcasts = false
 
   // Region selection - synced with Settings
-  @Published var selectedRegion: String = "us" {
+  var selectedRegion: String = "us" {
     didSet {
       if oldValue != selectedRegion {
         // Save to UserDefaults for consistency
@@ -32,10 +33,10 @@ class HomeViewModel: ObservableObject {
   }
 
   // Podcast preview/subscription
-  @Published var selectedPodcast: AppleRSSPodcast?
-  @Published var isSubscribing = false
-  @Published var subscriptionError: String?
-  @Published var subscriptionSuccess = false
+  var selectedPodcast: AppleRSSPodcast?
+  var isSubscribing = false
+  var subscriptionError: String?
+  var subscriptionSuccess = false
 
   private var podcastInfoModelList: [PodcastInfoModel] = []
   private let applePodcastService = ApplePodcastService()
@@ -147,11 +148,11 @@ class HomeViewModel: ObservableObject {
     if !episodeKeys.isEmpty {
       // Create a Set for fast lookup
       let episodeKeySet = Set(episodeKeys)
-      
+
       // Fetch all episode models (or we could fetch only those with state set)
       // For now, fetch all and filter - still better than N individual queries
       let descriptor = FetchDescriptor<EpisodeDownloadModel>()
-      
+
       do {
         let models = try context.fetch(descriptor)
         // Filter to only include models we need

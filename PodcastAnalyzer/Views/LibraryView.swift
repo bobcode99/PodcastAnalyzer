@@ -17,7 +17,7 @@ import UIKit
 // MARK: - Library View
 
 struct LibraryView: View {
-  @StateObject private var viewModel: LibraryViewModel
+  @State private var viewModel = LibraryViewModel(modelContext: nil)
   @Environment(\.modelContext) private var modelContext
 
   // Grid layout: 2 columns
@@ -29,10 +29,6 @@ struct LibraryView: View {
   // Context menu state
   @State private var podcastToUnsubscribe: PodcastInfoModel?
   @State private var showUnsubscribeConfirmation = false
-
-  init() {
-    _viewModel = StateObject(wrappedValue: LibraryViewModel(modelContext: nil))
-  }
 
   var body: some View {
     NavigationStack {
@@ -362,7 +358,7 @@ struct PodcastGridCell: View {
 // MARK: - Saved Episodes View (Sub-page)
 
 struct SavedEpisodesView: View {
-  @ObservedObject var viewModel: LibraryViewModel
+  var viewModel: LibraryViewModel
   @Environment(\.modelContext) private var modelContext
 
   var body: some View {
@@ -424,7 +420,7 @@ struct SavedEpisodesView: View {
 // MARK: - Downloaded Episodes View (Sub-page)
 
 struct DownloadedEpisodesView: View {
-  @ObservedObject var viewModel: LibraryViewModel
+  var viewModel: LibraryViewModel
   @Environment(\.modelContext) private var modelContext
 
   var body: some View {
@@ -486,7 +482,7 @@ struct DownloadedEpisodesView: View {
 // MARK: - Latest Episodes View (Sub-page)
 
 struct LatestEpisodesView: View {
-  @ObservedObject var viewModel: LibraryViewModel
+  var viewModel: LibraryViewModel
   @Environment(\.modelContext) private var modelContext
 
   var body: some View {
