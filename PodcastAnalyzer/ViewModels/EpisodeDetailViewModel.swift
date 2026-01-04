@@ -676,13 +676,17 @@ final class EpisodeDetailViewModel {
   }
 
   private func startTranscriptObservation() {
+    // Don't start if we've stopped observing
+    guard isObservingTranscriptManager else { return }
+
     withObservationTracking {
       // Access the property to register observation
       _ = TranscriptManager.shared.activeJobs
     } onChange: {
       Task { @MainActor [weak self] in
-        self?.handleTranscriptJobUpdate()
-        self?.startTranscriptObservation()
+        guard let self, self.isObservingTranscriptManager else { return }
+        self.handleTranscriptJobUpdate()
+        self.startTranscriptObservation()
       }
     }
   }
@@ -1631,11 +1635,14 @@ final class EpisodeDetailViewModel {
 
   /// Cancel all active subscriptions to prevent memory leaks
   func cleanup() {
-    cancellables.removeAll()
-  }
+    // Stop transcript observation
+    isObservingTranscriptManager = false
 
-  deinit {
-    // Cancel all Combine subscriptions
+    // Cancel share task
+    shareTask?.cancel()
+    shareTask = nil
+
+    // Cancel all Combine subscriptions (timers)
     cancellables.removeAll()
   }
 }
