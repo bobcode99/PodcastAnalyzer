@@ -612,9 +612,8 @@ struct LibraryEpisodeRowView: View {
 
         // Play button and status indicators
         HStack(spacing: 6) {
-          // Play button with progress
-          EpisodePlayButtonWithProgress(
-            audioManager: audioManager,
+          // Play button with progress (reactive for live updates)
+          ReactiveEpisodePlayButton(
             episode: episode,
             action: playEpisode
           )

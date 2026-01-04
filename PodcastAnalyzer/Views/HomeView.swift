@@ -243,9 +243,8 @@ struct UpNextCard: View {
         .lineLimit(2)
         .multilineTextAlignment(.leading)
 
-      // Play button with progress
-      EpisodePlayButtonWithProgress(
-        audioManager: audioManager,
+      // Play button with progress (reactive for live updates)
+      ReactiveEpisodePlayButton(
         episode: episode,
         action: playEpisode
       )
