@@ -546,14 +546,9 @@ struct LatestEpisodesView: View {
 struct LibraryEpisodeRowView: View {
   let episode: LibraryEpisode
   @Environment(\.modelContext) private var modelContext
-  @State private var hasAIAnalysis: Bool = false
-  @State private var hasTranscript: Bool = false
+  @State private var statusObserver: EpisodeStatusObserver?
 
   private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
-
-  private var statusChecker: EpisodeStatusChecker {
-    EpisodeStatusChecker(episode: episode)
-  }
 
   private var plainDescription: String? {
     guard let desc = episode.episodeInfo.podcastEpisodeDescription else { return nil }
@@ -564,19 +559,15 @@ struct LibraryEpisodeRowView: View {
     return stripped.isEmpty ? nil : stripped
   }
 
-  private func checkStatus() {
-    hasTranscript = statusChecker.hasTranscript
-    hasAIAnalysis = statusChecker.hasAIAnalysis(in: modelContext)
-  }
-
   private func playEpisode() {
     guard episode.episodeInfo.audioURL != nil else { return }
+    guard let observer = statusObserver else { return }
 
     let playbackEpisode = PlaybackEpisode(
-      id: statusChecker.episodeKey,
+      id: EpisodeKeyUtils.makeKey(podcastTitle: episode.podcastTitle, episodeTitle: episode.episodeInfo.title),
       title: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle,
-      audioURL: statusChecker.playbackURL,
+      audioURL: observer.playbackURL,
       imageURL: episode.imageURL,
       episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
       pubDate: episode.episodeInfo.pubDate,
@@ -586,7 +577,7 @@ struct LibraryEpisodeRowView: View {
 
     audioManager.play(
       episode: playbackEpisode,
-      audioURL: statusChecker.playbackURL,
+      audioURL: observer.playbackURL,
       startTime: episode.lastPlaybackPosition,
       imageURL: episode.imageURL ?? "",
       useDefaultSpeed: episode.lastPlaybackPosition == 0
@@ -610,7 +601,7 @@ struct LibraryEpisodeRowView: View {
           .fontWeight(.medium)
           .lineLimit(2)
 
-        // Play button and status indicators
+        // Play button and status indicators (reactive)
         HStack(spacing: 6) {
           // Play button with progress (reactive for live updates)
           ReactiveEpisodePlayButton(
@@ -618,15 +609,20 @@ struct LibraryEpisodeRowView: View {
             action: playEpisode
           )
 
-          // Status indicators using utility
-          EpisodeStatusIcons(
-            isStarred: episode.isStarred,
-            isDownloaded: episode.isDownloaded || statusChecker.isDownloaded,
-            hasTranscript: hasTranscript,
-            hasAIAnalysis: hasAIAnalysis,
-            isCompleted: episode.isCompleted,
-            showCompleted: false  // Already shown in play button as replay icon
-          )
+          // Status indicators using observer for reactive updates
+          if let observer = statusObserver {
+            EpisodeStatusIcons(
+              isStarred: episode.isStarred,
+              isDownloaded: observer.isDownloaded,
+              hasTranscript: observer.hasTranscript,
+              hasAIAnalysis: observer.hasAIAnalysis,
+              isCompleted: episode.isCompleted,
+              showCompleted: false,  // Already shown in play button as replay icon
+              isDownloading: observer.isDownloading,
+              downloadProgress: observer.downloadProgress,
+              isTranscribing: observer.isTranscribing
+            )
+          }
 
           Spacer()
 
@@ -640,7 +636,15 @@ struct LibraryEpisodeRowView: View {
       }
     }
     .padding(.vertical, 4)
-    .onAppear { checkStatus() }
+    .onAppear {
+      if statusObserver == nil {
+        statusObserver = EpisodeStatusObserver(episode: episode)
+      }
+      statusObserver?.setModelContext(modelContext)
+    }
+    .onDisappear {
+      statusObserver?.cleanup()
+    }
   }
 }
 

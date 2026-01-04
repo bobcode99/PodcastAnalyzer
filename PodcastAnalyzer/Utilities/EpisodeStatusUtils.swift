@@ -5,8 +5,10 @@
 //  Centralized utilities for checking episode status (downloaded, transcript, AI analysis, etc.)
 //
 
+import Combine
 import Foundation
 import SwiftData
+import SwiftUI
 
 // MARK: - Episode Key Utilities
 
@@ -163,3 +165,195 @@ struct EpisodeStatusChecker {
   }
 }
 
+// MARK: - Episode Status Observer
+
+/// Observable class that reactively tracks episode status changes
+/// Observes DownloadManager and TranscriptManager for real-time updates
+@MainActor
+@Observable
+final class EpisodeStatusObserver {
+  // Status properties
+  var downloadState: DownloadState = .notDownloaded
+  var isDownloaded: Bool = false
+  var isDownloading: Bool = false
+  var downloadProgress: Double = 0
+  var hasTranscript: Bool = false
+  var isTranscribing: Bool = false
+  var transcriptProgress: Double = 0
+  var hasAIAnalysis: Bool = false
+
+  // Episode info
+  private let episodeTitle: String
+  private let podcastTitle: String
+  private let audioURL: String?
+  private let episodeKey: String
+
+  // Managers
+  private let downloadManager = DownloadManager.shared
+  private let transcriptManager = TranscriptManager.shared
+
+  // Subscriptions
+  private var cancellables = Set<AnyCancellable>()
+  private var modelContext: ModelContext?
+
+  init(episodeTitle: String, podcastTitle: String, audioURL: String? = nil) {
+    self.episodeTitle = episodeTitle
+    self.podcastTitle = podcastTitle
+    self.audioURL = audioURL
+    self.episodeKey = EpisodeKeyUtils.makeKey(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
+    setupObservers()
+    updateAllStatus()
+  }
+
+  convenience init(episode: LibraryEpisode) {
+    self.init(
+      episodeTitle: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle,
+      audioURL: episode.episodeInfo.audioURL
+    )
+  }
+
+  convenience init(episode: PodcastEpisodeInfo, podcastTitle: String) {
+    self.init(
+      episodeTitle: episode.title,
+      podcastTitle: podcastTitle,
+      audioURL: episode.audioURL
+    )
+  }
+
+  func setModelContext(_ context: ModelContext) {
+    self.modelContext = context
+    checkAIAnalysis()
+  }
+
+  private func setupObservers() {
+    // Observe DownloadManager state changes
+    downloadManager.$downloadStates
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.updateDownloadStatus()
+      }
+      .store(in: &cancellables)
+
+    // Observe TranscriptManager active jobs
+    transcriptManager.$activeJobs
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.updateTranscriptStatus()
+      }
+      .store(in: &cancellables)
+
+    // Observe TranscriptManager processing state
+    transcriptManager.$isProcessing
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.updateTranscriptStatus()
+      }
+      .store(in: &cancellables)
+  }
+
+  func updateAllStatus() {
+    updateDownloadStatus()
+    updateTranscriptStatus()
+    checkAIAnalysis()
+  }
+
+  private func updateDownloadStatus() {
+    let state = downloadManager.getDownloadState(
+      episodeTitle: episodeTitle,
+      podcastTitle: podcastTitle
+    )
+    downloadState = state
+
+    switch state {
+    case .downloaded:
+      isDownloaded = true
+      isDownloading = false
+      downloadProgress = 1.0
+    case .downloading(let progress):
+      isDownloaded = false
+      isDownloading = true
+      downloadProgress = progress
+    case .finishing:
+      isDownloaded = false
+      isDownloading = true
+      downloadProgress = 1.0
+    case .failed:
+      isDownloaded = false
+      isDownloading = false
+      downloadProgress = 0
+    case .notDownloaded:
+      isDownloaded = false
+      isDownloading = false
+      downloadProgress = 0
+    }
+
+    // Also check transcript after download state changes (download completion enables transcript)
+    updateTranscriptStatus()
+  }
+
+  private func updateTranscriptStatus() {
+    // Check if transcript file exists
+    let checker = EpisodeStatusChecker(
+      episodeTitle: episodeTitle,
+      podcastTitle: podcastTitle,
+      audioURL: audioURL
+    )
+    hasTranscript = checker.hasTranscript
+
+    // Check if transcript is currently being generated
+    if let job = transcriptManager.activeJobs[episodeKey] {
+      isTranscribing = true
+      // Extract progress from job status
+      switch job.status {
+      case .transcribing(let progress), .downloadingModel(let progress):
+        transcriptProgress = progress
+      case .queued:
+        transcriptProgress = 0
+      case .completed:
+        transcriptProgress = 1.0
+        isTranscribing = false
+        hasTranscript = true
+      case .failed:
+        transcriptProgress = 0
+        isTranscribing = false
+      }
+    } else {
+      isTranscribing = false
+      transcriptProgress = hasTranscript ? 1.0 : 0
+    }
+  }
+
+  func checkAIAnalysis() {
+    guard let context = modelContext, let audioURL = audioURL else {
+      hasAIAnalysis = false
+      return
+    }
+
+    let descriptor = FetchDescriptor<EpisodeAIAnalysis>(
+      predicate: #Predicate { $0.episodeAudioURL == audioURL }
+    )
+
+    guard let model = try? context.fetch(descriptor).first else {
+      hasAIAnalysis = false
+      return
+    }
+
+    hasAIAnalysis = model.hasFullAnalysis
+      || model.hasSummary
+      || model.hasEntities
+      || model.hasHighlights
+      || (model.qaHistoryJSON != nil && !model.qaHistoryJSON!.isEmpty)
+  }
+
+  var playbackURL: String {
+    if case .downloaded(let path) = downloadState {
+      return "file://" + path
+    }
+    return audioURL ?? ""
+  }
+
+  func cleanup() {
+    cancellables.removeAll()
+  }
+}

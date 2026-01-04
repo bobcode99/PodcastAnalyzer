@@ -5,10 +5,7 @@
 //  Created by Bob on 2026/1/4.
 //
 
-
-import Combine
 import Foundation
-import SwiftData
 import SwiftUI
 
 /// Reusable view for displaying episode status icons
@@ -19,6 +16,9 @@ struct EpisodeStatusIcons: View {
   let hasAIAnalysis: Bool
   let isCompleted: Bool
   let showCompleted: Bool
+  let isDownloading: Bool
+  let downloadProgress: Double
+  let isTranscribing: Bool
 
   init(
     isStarred: Bool = false,
@@ -26,7 +26,10 @@ struct EpisodeStatusIcons: View {
     hasTranscript: Bool = false,
     hasAIAnalysis: Bool = false,
     isCompleted: Bool = false,
-    showCompleted: Bool = true
+    showCompleted: Bool = true,
+    isDownloading: Bool = false,
+    downloadProgress: Double = 0,
+    isTranscribing: Bool = false
   ) {
     self.isStarred = isStarred
     self.isDownloaded = isDownloaded
@@ -34,6 +37,9 @@ struct EpisodeStatusIcons: View {
     self.hasAIAnalysis = hasAIAnalysis
     self.isCompleted = isCompleted
     self.showCompleted = showCompleted
+    self.isDownloading = isDownloading
+    self.downloadProgress = downloadProgress
+    self.isTranscribing = isTranscribing
   }
 
   var body: some View {
@@ -42,11 +48,17 @@ struct EpisodeStatusIcons: View {
         statusIcon("star.fill", color: .yellow)
       }
 
-      if isDownloaded {
+      // Download status: show progress if downloading, icon if downloaded
+      if isDownloading {
+        downloadProgressView
+      } else if isDownloaded {
         statusIcon("arrow.down.circle.fill", color: .green)
       }
 
-      if hasTranscript {
+      // Transcript status: show progress if transcribing, icon if has transcript
+      if isTranscribing {
+        transcriptProgressView
+      } else if hasTranscript {
         statusIcon("captions.bubble.fill", color: .purple)
       }
 
@@ -64,5 +76,31 @@ struct EpisodeStatusIcons: View {
     Image(systemName: name)
       .font(.system(size: 10))
       .foregroundColor(color)
+  }
+
+  private var downloadProgressView: some View {
+    ZStack {
+      Circle()
+        .stroke(Color.blue.opacity(0.3), lineWidth: 2)
+      Circle()
+        .trim(from: 0, to: downloadProgress)
+        .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+        .rotationEffect(.degrees(-90))
+      Image(systemName: "arrow.down")
+        .font(.system(size: 6, weight: .bold))
+        .foregroundColor(.blue)
+    }
+    .frame(width: 14, height: 14)
+  }
+
+  private var transcriptProgressView: some View {
+    HStack(spacing: 2) {
+      ProgressView()
+        .scaleEffect(0.4)
+        .frame(width: 10, height: 10)
+      Image(systemName: "text.bubble")
+        .font(.system(size: 8, weight: .bold))
+        .foregroundColor(.purple)
+    }
   }
 }

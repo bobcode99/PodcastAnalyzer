@@ -182,23 +182,19 @@ struct HomeView: View {
 struct UpNextCard: View {
   let episode: LibraryEpisode
   @Environment(\.modelContext) private var modelContext
-  @State private var hasAIAnalysis = false
-  @State private var hasTranscript = false
+  @State private var statusObserver: EpisodeStatusObserver?
 
   private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
 
-  private var statusChecker: EpisodeStatusChecker {
-    EpisodeStatusChecker(episode: episode)
-  }
-
   private func playEpisode() {
     guard episode.episodeInfo.audioURL != nil else { return }
+    guard let observer = statusObserver else { return }
 
     let playbackEpisode = PlaybackEpisode(
-      id: statusChecker.episodeKey,
+      id: EpisodeKeyUtils.makeKey(podcastTitle: episode.podcastTitle, episodeTitle: episode.episodeInfo.title),
       title: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle,
-      audioURL: statusChecker.playbackURL,
+      audioURL: observer.playbackURL,
       imageURL: episode.imageURL,
       episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
       pubDate: episode.episodeInfo.pubDate,
@@ -208,7 +204,7 @@ struct UpNextCard: View {
 
     audioManager.play(
       episode: playbackEpisode,
-      audioURL: statusChecker.playbackURL,
+      audioURL: observer.playbackURL,
       startTime: episode.lastPlaybackPosition,
       imageURL: episode.imageURL ?? "",
       useDefaultSpeed: episode.lastPlaybackPosition == 0
@@ -221,13 +217,18 @@ struct UpNextCard: View {
       ZStack(alignment: .bottomTrailing) {
         CachedArtworkImage(urlString: episode.imageURL, size: 140, cornerRadius: 12)
 
-        // Status icons overlay
-        EpisodeStatusIconsCompact(
-          isStarred: episode.isStarred,
-          isDownloaded: statusChecker.isDownloaded,
-          hasTranscript: hasTranscript,
-          hasAIAnalysis: hasAIAnalysis
-        )
+        // Status icons overlay (reactive)
+        if let observer = statusObserver {
+          EpisodeStatusIconsCompact(
+            isStarred: episode.isStarred,
+            isDownloaded: observer.isDownloaded,
+            hasTranscript: observer.hasTranscript,
+            hasAIAnalysis: observer.hasAIAnalysis,
+            isDownloading: observer.isDownloading,
+            downloadProgress: observer.downloadProgress,
+            isTranscribing: observer.isTranscribing
+          )
+        }
       }
 
       // Podcast title
@@ -251,8 +252,13 @@ struct UpNextCard: View {
     }
     .frame(width: 140)
     .onAppear {
-      hasTranscript = statusChecker.hasTranscript
-      hasAIAnalysis = statusChecker.hasAIAnalysis(in: modelContext)
+      if statusObserver == nil {
+        statusObserver = EpisodeStatusObserver(episode: episode)
+      }
+      statusObserver?.setModelContext(modelContext)
+    }
+    .onDisappear {
+      statusObserver?.cleanup()
     }
   }
 }
