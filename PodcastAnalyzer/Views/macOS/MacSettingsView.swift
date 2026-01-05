@@ -11,7 +11,7 @@ import SwiftUI
 
 struct MacSettingsView: View {
   private enum Tabs: Hashable {
-    case general, sync, playback, transcript, ai, storage
+    case general, appearance, sync, playback, transcript, ai, storage
   }
 
   var body: some View {
@@ -21,6 +21,12 @@ struct MacSettingsView: View {
           Label("General", systemImage: "gearshape")
         }
         .tag(Tabs.general)
+
+      AppearanceSettingsTab()
+        .tabItem {
+          Label("Appearance", systemImage: "paintbrush")
+        }
+        .tag(Tabs.appearance)
 
       SyncSettingsTab()
         .tabItem {
@@ -68,6 +74,29 @@ struct GeneralSettingsTab: View {
           Text("1.0.0")
             .foregroundColor(.secondary)
         }
+      }
+    }
+    .formStyle(.grouped)
+    .padding()
+  }
+}
+
+// MARK: - Appearance Settings Tab
+
+struct AppearanceSettingsTab: View {
+  @State private var viewModel = SettingsViewModel()
+
+  var body: some View {
+    Form {
+      Section {
+        Toggle("Show Episode Artwork", isOn: Binding(
+          get: { viewModel.showEpisodeArtwork },
+          set: { viewModel.setShowEpisodeArtwork($0) }
+        ))
+      } header: {
+        Text("Episode Lists")
+      } footer: {
+        Text("Hide artwork in episode lists to reduce memory usage.")
       }
     }
     .formStyle(.grouped)

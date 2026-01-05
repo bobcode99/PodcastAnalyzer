@@ -47,6 +47,39 @@ final class LibraryViewModel {
   var isLoading = false
   var error: String?
 
+  // Search state for subpages
+  var savedSearchText: String = ""
+  var downloadedSearchText: String = ""
+  var latestSearchText: String = ""
+
+  // Filtered arrays based on search text
+  var filteredSavedEpisodes: [LibraryEpisode] {
+    guard !savedSearchText.isEmpty else { return savedEpisodes }
+    let query = savedSearchText.lowercased()
+    return savedEpisodes.filter {
+      $0.episodeInfo.title.lowercased().contains(query) ||
+      $0.podcastTitle.lowercased().contains(query)
+    }
+  }
+
+  var filteredDownloadedEpisodes: [LibraryEpisode] {
+    guard !downloadedSearchText.isEmpty else { return downloadedEpisodes }
+    let query = downloadedSearchText.lowercased()
+    return downloadedEpisodes.filter {
+      $0.episodeInfo.title.lowercased().contains(query) ||
+      $0.podcastTitle.lowercased().contains(query)
+    }
+  }
+
+  var filteredLatestEpisodes: [LibraryEpisode] {
+    guard !latestSearchText.isEmpty else { return latestEpisodes }
+    let query = latestSearchText.lowercased()
+    return latestEpisodes.filter {
+      $0.episodeInfo.title.lowercased().contains(query) ||
+      $0.podcastTitle.lowercased().contains(query)
+    }
+  }
+
   /// Podcasts sorted by most recent episode date (for Library grid)
   var podcastsSortedByRecentUpdate: [PodcastInfoModel] {
     podcastInfoModelList.sorted { p1, p2 in

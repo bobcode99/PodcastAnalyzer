@@ -53,16 +53,21 @@ final class SettingsViewModel {
   // Default region for top podcasts
   var selectedRegion: String = "us"
 
+  // Appearance settings
+  var showEpisodeArtwork: Bool = true
+
   private enum Keys {
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
     static let selectedTranscriptLocale = "selectedTranscriptLocale"
     static let selectedPodcastRegion = "selectedPodcastRegion"
+    static let showEpisodeArtwork = "showEpisodeArtwork"
   }
 
   init() {
     loadDefaultPlaybackSpeed()
     loadSelectedTranscriptLocale()
     loadSelectedRegion()
+    loadShowEpisodeArtwork()
   }
 
   // MARK: - Region Settings
@@ -80,6 +85,23 @@ final class SettingsViewModel {
       selectedRegion = saved
     } else {
       selectedRegion = "us"
+    }
+  }
+
+  // MARK: - Appearance Settings
+
+  func setShowEpisodeArtwork(_ show: Bool) {
+    showEpisodeArtwork = show
+    UserDefaults.standard.set(show, forKey: Keys.showEpisodeArtwork)
+    logger.info("Show episode artwork set to \(show)")
+  }
+
+  private func loadShowEpisodeArtwork() {
+    // Default to true if not set
+    if UserDefaults.standard.object(forKey: Keys.showEpisodeArtwork) == nil {
+      showEpisodeArtwork = true
+    } else {
+      showEpisodeArtwork = UserDefaults.standard.bool(forKey: Keys.showEpisodeArtwork)
     }
   }
 

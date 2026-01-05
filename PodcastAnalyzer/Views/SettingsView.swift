@@ -74,6 +74,25 @@ struct SettingsView: View {
           Text("Automatically check for new episodes every 5 minutes")
         }
 
+        // MARK: - Appearance Section
+        Section {
+          Toggle(isOn: Binding(
+            get: { viewModel.showEpisodeArtwork },
+            set: { viewModel.setShowEpisodeArtwork($0) }
+          )) {
+            HStack {
+              Image(systemName: "photo")
+                .foregroundColor(.blue)
+                .frame(width: 24)
+              Text("Show Episode Artwork")
+            }
+          }
+        } header: {
+          Text("Appearance")
+        } footer: {
+          Text("Hide artwork in episode lists to reduce memory usage")
+        }
+
         // MARK: - Subscriptions Section
         Section {
           Button(action: {

@@ -358,15 +358,16 @@ struct PodcastGridCell: View {
 // MARK: - Saved Episodes View (Sub-page)
 
 struct SavedEpisodesView: View {
-  var viewModel: LibraryViewModel
+  @Bindable var viewModel: LibraryViewModel
   @Environment(\.modelContext) private var modelContext
+  @State private var settingsViewModel = SettingsViewModel()
 
   var body: some View {
     Group {
       if viewModel.savedEpisodes.isEmpty {
         emptyStateView
       } else {
-        List(viewModel.savedEpisodes) { episode in
+        List(viewModel.filteredSavedEpisodes) { episode in
           NavigationLink(
             destination: EpisodeDetailView(
               episode: episode.episodeInfo,
@@ -375,7 +376,7 @@ struct SavedEpisodesView: View {
               podcastLanguage: episode.language
             )
           ) {
-            LibraryEpisodeRowView(episode: episode)
+            LibraryEpisodeRowView(episode: episode, showArtwork: settingsViewModel.showEpisodeArtwork)
           }
           .contextMenu {
             LibraryEpisodeContextMenu(
@@ -392,6 +393,7 @@ struct SavedEpisodesView: View {
       }
     }
     .navigationTitle("Saved")
+    .searchable(text: $viewModel.savedSearchText, prompt: "Search saved episodes")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif
@@ -420,15 +422,16 @@ struct SavedEpisodesView: View {
 // MARK: - Downloaded Episodes View (Sub-page)
 
 struct DownloadedEpisodesView: View {
-  var viewModel: LibraryViewModel
+  @Bindable var viewModel: LibraryViewModel
   @Environment(\.modelContext) private var modelContext
+  @State private var settingsViewModel = SettingsViewModel()
 
   var body: some View {
     Group {
       if viewModel.downloadedEpisodes.isEmpty {
         emptyStateView
       } else {
-        List(viewModel.downloadedEpisodes) { episode in
+        List(viewModel.filteredDownloadedEpisodes) { episode in
           NavigationLink(
             destination: EpisodeDetailView(
               episode: episode.episodeInfo,
@@ -437,7 +440,7 @@ struct DownloadedEpisodesView: View {
               podcastLanguage: episode.language
             )
           ) {
-            LibraryEpisodeRowView(episode: episode)
+            LibraryEpisodeRowView(episode: episode, showArtwork: settingsViewModel.showEpisodeArtwork)
           }
           .contextMenu {
             LibraryEpisodeContextMenu(
@@ -454,6 +457,7 @@ struct DownloadedEpisodesView: View {
       }
     }
     .navigationTitle("Downloaded")
+    .searchable(text: $viewModel.downloadedSearchText, prompt: "Search downloaded episodes")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif
@@ -482,15 +486,16 @@ struct DownloadedEpisodesView: View {
 // MARK: - Latest Episodes View (Sub-page)
 
 struct LatestEpisodesView: View {
-  var viewModel: LibraryViewModel
+  @Bindable var viewModel: LibraryViewModel
   @Environment(\.modelContext) private var modelContext
+  @State private var settingsViewModel = SettingsViewModel()
 
   var body: some View {
     Group {
       if viewModel.latestEpisodes.isEmpty {
         emptyStateView
       } else {
-        List(viewModel.latestEpisodes) { episode in
+        List(viewModel.filteredLatestEpisodes) { episode in
           NavigationLink(
             destination: EpisodeDetailView(
               episode: episode.episodeInfo,
@@ -499,7 +504,7 @@ struct LatestEpisodesView: View {
               podcastLanguage: episode.language
             )
           ) {
-            LibraryEpisodeRowView(episode: episode)
+            LibraryEpisodeRowView(episode: episode, showArtwork: settingsViewModel.showEpisodeArtwork)
           }
           .contextMenu {
             LibraryEpisodeContextMenu(
@@ -516,6 +521,7 @@ struct LatestEpisodesView: View {
       }
     }
     .navigationTitle("Latest Episodes")
+    .searchable(text: $viewModel.latestSearchText, prompt: "Search latest episodes")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif
@@ -545,6 +551,7 @@ struct LatestEpisodesView: View {
 
 struct LibraryEpisodeRowView: View {
   let episode: LibraryEpisode
+  var showArtwork: Bool = true
   @Environment(\.modelContext) private var modelContext
   @State private var statusObserver: EpisodeStatusObserver?
 
@@ -586,8 +593,10 @@ struct LibraryEpisodeRowView: View {
 
   var body: some View {
     HStack(spacing: 12) {
-      // Episode artwork - using CachedAsyncImage for better performance
-      CachedArtworkImage(urlString: episode.imageURL, size: 60, cornerRadius: 8)
+      // Episode artwork - conditionally shown based on settings
+      if showArtwork {
+        CachedArtworkImage(urlString: episode.imageURL, size: 60, cornerRadius: 8)
+      }
 
       VStack(alignment: .leading, spacing: 4) {
         // Podcast title

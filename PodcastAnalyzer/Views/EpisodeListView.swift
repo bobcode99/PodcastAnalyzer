@@ -50,6 +50,7 @@ struct EpisodeListView: View {
   @Environment(\.dismiss) private var dismiss
   @Bindable private var downloadManager = DownloadManager.shared
   @State private var viewModel: EpisodeListViewModel?
+  @State private var settingsViewModel = SettingsViewModel()
   @State private var episodeToDelete: PodcastEpisodeInfo?
   @State private var showDeleteConfirmation = false
   @State private var showUnsubscribeConfirmation = false
@@ -357,6 +358,7 @@ struct EpisodeListView: View {
             episodeModel: viewModel.episodeModels[
               viewModel.makeEpisodeKey(episode)
             ],
+            showArtwork: settingsViewModel.showEpisodeArtwork,
             onToggleStar: {
               viewModel.toggleStar(for: episode)
             },
@@ -656,6 +658,7 @@ struct EpisodeRowView: View {
   let podcastLanguage: String
   var downloadManager: DownloadManager
   let episodeModel: EpisodeDownloadModel?
+  var showArtwork: Bool = true
   let onToggleStar: () -> Void
   let onDownload: () -> Void
   let onDeleteRequested: () -> Void
@@ -775,7 +778,9 @@ struct EpisodeRowView: View {
       )
     ) {
       HStack(alignment: .center, spacing: 12) {
-        episodeThumbnail
+        if showArtwork {
+          episodeThumbnail
+        }
         episodeInfo
       }
       .padding(.vertical, 8)
