@@ -76,6 +76,9 @@ struct LibraryView: View {
       // This is the key: set the context once
       viewModel.setModelContext(modelContext)
     }
+    .onDisappear {
+      viewModel.cleanup()
+    }
     .confirmationDialog(
       "Unsubscribe from Podcast",
       isPresented: $showUnsubscribeConfirmation,

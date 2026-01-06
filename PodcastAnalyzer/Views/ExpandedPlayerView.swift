@@ -148,6 +148,9 @@ struct ExpandedPlayerView: View {
       .onAppear {
         viewModel.setModelContext(modelContext)
       }
+      .onDisappear {
+        viewModel.cleanup()
+      }
       .sheet(isPresented: $showFullTranscript) {
         TranscriptFullScreenView(viewModel: viewModel)
       }
