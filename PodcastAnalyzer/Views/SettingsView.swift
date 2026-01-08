@@ -133,10 +133,22 @@ struct SettingsView: View {
           .onChange(of: viewModel.defaultPlaybackSpeed) { _, newValue in
             viewModel.setDefaultPlaybackSpeed(newValue)
           }
+
+          Toggle(isOn: Binding(
+            get: { viewModel.autoPlayNextEpisode },
+            set: { viewModel.setAutoPlayNextEpisode($0) }
+          )) {
+            HStack {
+              Image(systemName: "shuffle")
+                .foregroundColor(.purple)
+                .frame(width: 24)
+              Text("Auto-Play Random Episode")
+            }
+          }
         } header: {
           Text("Playback")
         } footer: {
-          Text("New episodes will start at this speed")
+          Text("When enabled, a random unplayed episode will play when the queue is empty")
         }
 
         // MARK: - Region Section

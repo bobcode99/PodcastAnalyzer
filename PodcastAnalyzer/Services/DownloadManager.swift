@@ -78,8 +78,15 @@ class DownloadManager: NSObject {
     -> String?
   {
     let fm = FileManager.default
+
+    // Must match FileStorageManager's audioDirectory path exactly
+    #if os(macOS)
+    let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    let audioDir = appSupport.appendingPathComponent("PodcastAnalyzer/Audio", isDirectory: true)
+    #else
     let libraryDir = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
     let audioDir = libraryDir.appendingPathComponent("Audio", isDirectory: true)
+    #endif
 
     // Sanitize filename same way as FileStorageManager
     let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")

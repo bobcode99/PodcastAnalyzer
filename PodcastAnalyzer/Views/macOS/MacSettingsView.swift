@@ -161,10 +161,15 @@ struct PlaybackSettingsTab: View {
         .onChange(of: viewModel.defaultPlaybackSpeed) { _, newValue in
           viewModel.setDefaultPlaybackSpeed(newValue)
         }
+
+        Toggle("Auto-Play Random Episode", isOn: Binding(
+          get: { viewModel.autoPlayNextEpisode },
+          set: { viewModel.setAutoPlayNextEpisode($0) }
+        ))
       } header: {
         Text("Playback")
       } footer: {
-        Text("New episodes will start at this speed.")
+        Text("When enabled, a random unplayed episode will play when the queue is empty.")
       }
     }
     .formStyle(.grouped)

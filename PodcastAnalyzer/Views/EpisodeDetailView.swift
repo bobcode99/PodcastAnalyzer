@@ -431,17 +431,15 @@ struct EpisodeDetailView: View {
     // MARK: - Transcript Tab (FIXED)
     private var transcriptTab: some View {
         VStack(spacing: 0) {
-            if viewModel.isTranscriptProcessing {
-                // Case 1: Active Processing (Always show this if happening)
-                transcriptStatusSection
-            } else if viewModel.hasTranscript {
-                // Case 2: Transcript exists and we are idle
+            if viewModel.hasTranscript && !viewModel.isTranscriptProcessing {
+                // Case 1: Transcript exists and we are idle - show live captions
                 liveCaptionsView
             } else {
-                // Case 3: No transcript, idle or error
+                // Case 2: Processing or no transcript - wrap in ScrollView for consistent layout
                 ScrollView {
                     transcriptStatusSection
                         .padding(.vertical)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }

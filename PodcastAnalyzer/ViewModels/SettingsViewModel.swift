@@ -56,11 +56,15 @@ final class SettingsViewModel {
   // Appearance settings
   var showEpisodeArtwork: Bool = true
 
+  // Playback settings
+  var autoPlayNextEpisode: Bool = false
+
   private enum Keys {
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
     static let selectedTranscriptLocale = "selectedTranscriptLocale"
     static let selectedPodcastRegion = "selectedPodcastRegion"
     static let showEpisodeArtwork = "showEpisodeArtwork"
+    static let autoPlayNextEpisode = "autoPlayNextEpisode"
   }
 
   init() {
@@ -68,6 +72,7 @@ final class SettingsViewModel {
     loadSelectedTranscriptLocale()
     loadSelectedRegion()
     loadShowEpisodeArtwork()
+    loadAutoPlayNextEpisode()
   }
 
   // MARK: - Region Settings
@@ -103,6 +108,19 @@ final class SettingsViewModel {
     } else {
       showEpisodeArtwork = UserDefaults.standard.bool(forKey: Keys.showEpisodeArtwork)
     }
+  }
+
+  // MARK: - Playback Settings
+
+  func setAutoPlayNextEpisode(_ enabled: Bool) {
+    autoPlayNextEpisode = enabled
+    UserDefaults.standard.set(enabled, forKey: Keys.autoPlayNextEpisode)
+    logger.info("Auto-play next episode set to \(enabled)")
+  }
+
+  private func loadAutoPlayNextEpisode() {
+    // Default to false if not set
+    autoPlayNextEpisode = UserDefaults.standard.bool(forKey: Keys.autoPlayNextEpisode)
   }
 
   // MARK: - Transcript Locale Settings

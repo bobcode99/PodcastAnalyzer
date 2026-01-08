@@ -8,9 +8,7 @@
 import SwiftUI
 
 struct MiniPlayerBar: View {
-  @Environment(\.tabViewBottomAccessoryPlacement)
-  var placement
-
+  @Environment(\.tabViewBottomAccessoryPlacement) var placement
   @State private var audioManager = EnhancedAudioManager.shared
   @State private var showExpandedPlayer = false
 
@@ -19,14 +17,9 @@ struct MiniPlayerBar: View {
     return audioManager.currentTime / audioManager.duration
   }
 
-  private var imageURL: URL? {
-    guard let urlString = audioManager.currentEpisode?.imageURL else { return nil }
-    return URL(string: urlString)
-  }
-
   var body: some View {
     VStack(spacing: 0) {
-      // Progress bar
+      // Progress bar (hidden or 0 if not playing)
       GeometryReader { geometry in
         ZStack(alignment: .leading) {
           Rectangle()
@@ -42,40 +35,37 @@ struct MiniPlayerBar: View {
         }
       }
       .frame(height: 3)
+      .opacity(audioManager.currentEpisode == nil ? 0 : 1)
 
       // Main content
       HStack(spacing: 12) {
-        // Artwork
-        if let imageURL = imageURL {
-          AsyncImage(url: imageURL) { phase in
-            if let image = phase.image {
-              image
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-            } else {
-              Color.gray
+        // Artwork or Placeholder
+        Group {
+          if let urlString = audioManager.currentEpisode?.imageURL, let url = URL(string: urlString) {
+            AsyncImage(url: url) { phase in
+              if let image = phase.image {
+                image.resizable().aspectRatio(contentMode: .fill)
+              } else {
+                Color.gray
+              }
             }
+          } else {
+            RoundedRectangle(cornerRadius: 8)
+              .fill(Color.gray.opacity(0.3))
+              .overlay(Image(systemName: "music.note").foregroundColor(.secondary))
           }
-          .frame(width: 48, height: 48)
-          .clipShape(RoundedRectangle(cornerRadius: 8))
-        } else {
-          RoundedRectangle(cornerRadius: 8)
-            .fill(Color.gray.opacity(0.3))
-            .frame(width: 48, height: 48)
-            .overlay(
-              Image(systemName: "music.note")
-                .foregroundColor(.white)
-            )
         }
+        .frame(width: 48, height: 48)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
 
         // Episode info
         VStack(alignment: .leading, spacing: 2) {
-          Text(audioManager.currentEpisode?.title ?? "")
+          Text(audioManager.currentEpisode?.title ?? "Not Playing")
             .font(.subheadline)
             .fontWeight(.medium)
             .lineLimit(1)
 
-          Text(audioManager.currentEpisode?.podcastTitle ?? "")
+          Text(audioManager.currentEpisode?.podcastTitle ?? "Select an episode to play")
             .font(.caption)
             .foregroundColor(.secondary)
             .lineLimit(1)
@@ -85,14 +75,24 @@ struct MiniPlayerBar: View {
 
         // Play/Pause button
         Button(action: {
-          if audioManager.isPlaying {
-            audioManager.pause()
+          if let _ = audioManager.currentEpisode {
+            if audioManager.isPlaying {
+              audioManager.pause()
+            } else {
+              audioManager.resume()
+            }
           } else {
-            audioManager.resume()
+            // Logic to play last library item
+            audioManager.restoreLastEpisode()
+            // Small delay to allow restoration before playing
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                audioManager.resume()
+            }
           }
         }) {
           Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
             .font(.title2)
+            .frame(width: 32)
             .foregroundColor(.primary)
         }
 
@@ -105,23 +105,23 @@ struct MiniPlayerBar: View {
             .foregroundColor(.primary)
         }
         .padding(.trailing, 4)
+        .disabled(audioManager.currentEpisode == nil)
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 10)
       .background(Color.platformSecondaryBackground)
       .contentShape(Rectangle())
       .onTapGesture {
-        showExpandedPlayer = true
+        if audioManager.currentEpisode != nil {
+          showExpandedPlayer = true
+        }
       }
     }
     .sheet(isPresented: $showExpandedPlayer) {
       ExpandedPlayerView()
-//        .presentationDetents([.height(300), .large])
-//        .presentationDragIndicator(.visible)
     }
   }
 }
-
 // MARK: - Preview
 
 #Preview {

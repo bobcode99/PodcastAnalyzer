@@ -33,9 +33,10 @@ struct iOSContentView: View {
   @State private var notificationLanguage: String = "en"
   @State private var showNotificationEpisode: Bool = false
 
-  private var showMiniPlayer: Bool {
-    audioManager.currentEpisode != nil
-  }
+    private var showMiniPlayer: Bool {
+        // Change this to true so it always shows even if empty
+        return true
+    }
 
   var body: some View {
     TabView {

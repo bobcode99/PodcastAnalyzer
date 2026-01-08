@@ -365,6 +365,30 @@ final class LibraryViewModel {
     // Since we're @MainActor, update directly
     self.latestEpisodes = Array(sorted)
     logger.info("Loaded \(self.latestEpisodes.count) latest episodes")
+
+    // Update auto-play candidates (only episodes that haven't been completed)
+    updateAutoPlayCandidates()
+  }
+
+  /// Update the audio manager's auto-play candidates with unplayed episodes
+  private func updateAutoPlayCandidates() {
+    let unplayedEpisodes = latestEpisodes.filter { !$0.isCompleted }
+    let playbackEpisodes = unplayedEpisodes.compactMap { episode -> PlaybackEpisode? in
+      guard let audioURL = episode.episodeInfo.audioURL else { return nil }
+      return PlaybackEpisode(
+        id: episode.id,
+        title: episode.episodeInfo.title,
+        podcastTitle: episode.podcastTitle,
+        audioURL: audioURL,
+        imageURL: episode.imageURL,
+        episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+        pubDate: episode.episodeInfo.pubDate,
+        duration: episode.episodeInfo.duration,
+        guid: episode.episodeInfo.guid
+      )
+    }
+    EnhancedAudioManager.shared.updateAutoPlayCandidates(playbackEpisodes)
+    logger.info("Updated auto-play candidates with \(playbackEpisodes.count) unplayed episodes")
   }
 
   // MARK: - Helper Methods

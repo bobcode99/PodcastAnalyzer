@@ -54,6 +54,10 @@ class EnhancedAudioManager: NSObject {
   // Queue management
   var queue: [PlaybackEpisode] = []
   var hasRestoredLastEpisode: Bool = false
+  private let maxQueueSize = 50
+
+  // Auto-play candidates (unplayed episodes that can be randomly selected)
+  var autoPlayCandidates: [PlaybackEpisode] = []
 
   private var timeObserver: Any?
   private var cancellables = Set<AnyCancellable>()
@@ -71,6 +75,7 @@ class EnhancedAudioManager: NSObject {
     static let playbackRate = "playbackRate"
     static let lastImageURL = "lastImageURL"
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
+    static let autoPlayNextEpisode = "autoPlayNextEpisode"
   }
 
   override private init() {
@@ -269,12 +274,19 @@ class EnhancedAudioManager: NSObject {
       logger.info("Episode already in queue or currently playing")
       return
     }
+    // Enforce queue size limit
+    guard queue.count < maxQueueSize else {
+      logger.info("Queue is full (max \(self.maxQueueSize) episodes)")
+      return
+    }
     queue.append(episode)
-    logger.info("Added to queue: \(episode.title)")
+    logger.info("Added to queue: \(episode.title) (\(self.queue.count)/\(self.maxQueueSize))")
   }
 
   /// Add an episode to play next (first position in queue)
   func playNext(_ episode: PlaybackEpisode) {
+    // Check if already in queue (will be moved, not added)
+    let wasInQueue = queue.contains(where: { $0.id == episode.id })
     // Remove if already in queue
     queue.removeAll { $0.id == episode.id }
     // Don't add if currently playing
@@ -282,8 +294,13 @@ class EnhancedAudioManager: NSObject {
       logger.info("Episode is currently playing")
       return
     }
+    // Enforce queue size limit (only if adding new, not moving existing)
+    if !wasInQueue && queue.count >= maxQueueSize {
+      logger.info("Queue is full (max \(self.maxQueueSize) episodes)")
+      return
+    }
     queue.insert(episode, at: 0)
-    logger.info("Play next: \(episode.title)")
+    logger.info("Play next: \(episode.title) (\(self.queue.count)/\(self.maxQueueSize))")
   }
 
   /// Remove an episode from the queue
@@ -326,6 +343,25 @@ class EnhancedAudioManager: NSObject {
   func clearQueue() {
     queue.removeAll()
     logger.info("Queue cleared")
+  }
+
+  /// Update the list of auto-play candidates (unplayed episodes)
+  func updateAutoPlayCandidates(_ episodes: [PlaybackEpisode]) {
+    autoPlayCandidates = episodes
+    logger.info("Updated auto-play candidates: \(episodes.count) episodes")
+  }
+
+  /// Add episodes to auto-play candidates (avoids duplicates)
+  func addToAutoPlayCandidates(_ episodes: [PlaybackEpisode]) {
+    let existingIds = Set(autoPlayCandidates.map { $0.id })
+    let newEpisodes = episodes.filter { !existingIds.contains($0.id) }
+    autoPlayCandidates.append(contentsOf: newEpisodes)
+    logger.info("Added \(newEpisodes.count) to auto-play candidates (total: \(self.autoPlayCandidates.count))")
+  }
+
+  /// Remove an episode from auto-play candidates (e.g., after fully played)
+  func removeFromAutoPlayCandidates(_ episodeId: String) {
+    autoPlayCandidates.removeAll { $0.id == episodeId }
   }
 
   /// Play the next episode in queue
@@ -715,12 +751,33 @@ class EnhancedAudioManager: NSObject {
     isPlaying = false
     currentTime = 0
 
+    // Remove current episode from auto-play candidates (it's been fully played)
+    if let currentId = currentEpisode?.id {
+      removeFromAutoPlayCandidates(currentId)
+    }
+
     // Check if there's a next episode in queue
     if !queue.isEmpty {
       logger.info("Playing next episode from queue")
       playNextInQueue()
     } else {
-      clearPlaybackState()
+      // Check auto-play setting and try to play random unplayed episode
+      let autoPlayEnabled = UserDefaults.standard.bool(forKey: Keys.autoPlayNextEpisode)
+      if autoPlayEnabled, !autoPlayCandidates.isEmpty {
+        // Pick a random episode from candidates
+        let randomIndex = Int.random(in: 0..<autoPlayCandidates.count)
+        let nextEpisode = autoPlayCandidates[randomIndex]
+        logger.info("Auto-playing random episode: \(nextEpisode.title)")
+        play(
+          episode: nextEpisode,
+          audioURL: nextEpisode.audioURL,
+          startTime: 0,
+          imageURL: nextEpisode.imageURL,
+          useDefaultSpeed: false
+        )
+      } else {
+        clearPlaybackState()
+      }
     }
   }
 
