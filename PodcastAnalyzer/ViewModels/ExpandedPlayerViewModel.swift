@@ -201,13 +201,24 @@ final class ExpandedPlayerViewModel {
 
   // MARK: - Computed Properties
 
+  /// Whether duration is still loading (not yet available from player)
+  var isDurationLoading: Bool {
+    duration <= 0
+  }
+
   var currentTimeString: String {
     formatTime(currentTime)
   }
 
   var remainingTimeString: String {
+    guard duration > 0 else { return "--:--" }
     let remaining = duration - currentTime
     return "-" + formatTime(remaining)
+  }
+
+  var durationString: String {
+    guard duration > 0 else { return "--:--" }
+    return formatTime(duration)
   }
 
   // MARK: - Playback Actions

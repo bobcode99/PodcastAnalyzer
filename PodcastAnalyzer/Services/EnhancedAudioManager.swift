@@ -59,6 +59,9 @@ class EnhancedAudioManager: NSObject {
   // Auto-play candidates (unplayed episodes that can be randomly selected)
   var autoPlayCandidates: [PlaybackEpisode] = []
 
+  // Audio interruption handling - track if we should resume after interruption ends
+  private var wasPlayingBeforeInterruption: Bool = false
+
   private var timeObserver: Any?
   private var cancellables = Set<AnyCancellable>()
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "AudioManager")
@@ -82,6 +85,7 @@ class EnhancedAudioManager: NSObject {
     super.init()
     setupAudioSession()
     setupRemoteControls()
+    setupInterruptionObserver()
     #if os(iOS)
     // Critical for remote commands on iOS!
     UIApplication.shared.beginReceivingRemoteControlEvents()
@@ -102,6 +106,60 @@ class EnhancedAudioManager: NSObject {
     #else
     // macOS doesn't require AVAudioSession configuration
     logger.info("Audio manager initialized for macOS")
+    #endif
+  }
+
+  private func setupInterruptionObserver() {
+    #if os(iOS)
+    NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)
+      .sink { [weak self] notification in
+        self?.handleAudioInterruption(notification)
+      }
+      .store(in: &cancellables)
+    logger.info("Audio interruption observer configured")
+    #endif
+  }
+
+  private func handleAudioInterruption(_ notification: Notification) {
+    #if os(iOS)
+    guard let userInfo = notification.userInfo,
+          let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+          let type = AVAudioSession.InterruptionType(rawValue: typeValue)
+    else {
+      return
+    }
+
+    switch type {
+    case .began:
+      // Another app started playing audio (e.g., WhatsApp voice message, phone call)
+      wasPlayingBeforeInterruption = isPlaying
+      if isPlaying {
+        pause()
+        logger.info("Playback paused due to audio interruption")
+      }
+
+    case .ended:
+      // Interruption ended - check if we should resume
+      guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else {
+        return
+      }
+      let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+
+      // Only resume if:
+      // 1. We were playing before the interruption
+      // 2. The system indicates we should resume (.shouldResume option)
+      if wasPlayingBeforeInterruption && options.contains(.shouldResume) {
+        // Small delay to ensure audio session is fully restored
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+          self?.resume()
+          self?.logger.info("Playback resumed after audio interruption")
+        }
+      }
+      wasPlayingBeforeInterruption = false
+
+    @unknown default:
+      break
+    }
     #endif
   }
 
@@ -159,10 +217,14 @@ class EnhancedAudioManager: NSObject {
 
     cleanup()
 
-    // IMPORTANT: Reset duration and currentTime for new episode
-    // This prevents showing old duration in Now Playing
-    duration = 0
-    currentTime = 0
+    // Use cached duration from episode metadata if available
+    // This provides immediate feedback instead of showing 0:00
+    if let episodeDuration = episode.duration, episodeDuration > 0 {
+      duration = TimeInterval(episodeDuration)
+    } else {
+      duration = 0
+    }
+    currentTime = startTime > 0 ? startTime : 0
 
     // Apply default speed from settings for new episodes
     if useDefaultSpeed {
@@ -177,7 +239,7 @@ class EnhancedAudioManager: NSObject {
     player = AVPlayer(playerItem: playerItem)
     currentEpisode = episode
 
-    // Update Now Playing info (duration will be 0 initially, updated when available)
+    // Update Now Playing info with cached duration (will be refined when AVPlayer reports actual duration)
     updateNowPlayingInfo(imageURL: imageURL ?? episode.imageURL)
 
     if startTime > 0 {

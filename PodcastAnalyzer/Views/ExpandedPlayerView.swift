@@ -23,6 +23,10 @@ struct ExpandedPlayerView: View {
   @State private var showEllipsisMenu = false
   @State private var showFullTranscript = false
 
+  // Scrubbing state for smooth slider interaction
+  @State private var isScrubbing = false
+  @State private var scrubbingProgress: Double = 0
+
   // Speed options matching Apple Podcasts
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
   private let quickSpeeds: [Float] = [0.8, 1.0, 1.3, 1.5, 1.8, 2.0]
@@ -389,7 +393,12 @@ struct ExpandedPlayerView: View {
   }
   // MARK: - Progress Section
   private var progressSection: some View {
-    VStack(spacing: 8) {
+    // Use scrubbing progress when user is dragging, otherwise use actual progress
+    let displayProgress = isScrubbing ? scrubbingProgress : viewModel.progress
+    let displayCurrentTime = isScrubbing ? scrubbingProgress * viewModel.duration : viewModel.currentTime
+    let displayRemainingTime = viewModel.duration - displayCurrentTime
+
+    return VStack(spacing: 8) {
       // Seek slider
       GeometryReader { geometry in
         ZStack(alignment: .leading) {
@@ -402,45 +411,77 @@ struct ExpandedPlayerView: View {
           Capsule()
             .fill(Color.primary)
             .frame(
-              width: geometry.size.width * CGFloat(viewModel.progress),
+              width: geometry.size.width * CGFloat(displayProgress),
               height: 6
             )
 
-          // Thumb (optional, for visual feedback)
+          // Thumb - slightly larger when scrubbing for better feedback
           Circle()
             .fill(Color.primary)
-            .frame(width: 14, height: 14)
+            .frame(width: isScrubbing ? 18 : 14, height: isScrubbing ? 18 : 14)
             .offset(
               x: max(
                 0,
-                min(geometry.size.width * CGFloat(viewModel.progress) - 7, geometry.size.width - 14)
+                min(geometry.size.width * CGFloat(displayProgress) - (isScrubbing ? 9 : 7), geometry.size.width - (isScrubbing ? 18 : 14))
               )
             )
+            .animation(.easeOut(duration: 0.1), value: isScrubbing)
         }
         .gesture(
           DragGesture(minimumDistance: 0)
             .onChanged { value in
+              // Only allow scrubbing if duration is available
+              guard !viewModel.isDurationLoading else { return }
+              // Start scrubbing - only update visual progress, don't seek yet
+              if !isScrubbing {
+                isScrubbing = true
+                scrubbingProgress = viewModel.progress
+              }
               let progress = value.location.x / geometry.size.width
-              viewModel.seekToProgress(min(max(0, progress), 1))
+              scrubbingProgress = min(max(0, progress), 1)
+            }
+            .onEnded { value in
+              // Only seek if duration is available
+              guard !viewModel.isDurationLoading else { return }
+              // End scrubbing - now perform the actual seek
+              let progress = value.location.x / geometry.size.width
+              let finalProgress = min(max(0, progress), 1)
+              viewModel.seekToProgress(finalProgress)
+              isScrubbing = false
             }
         )
+        .opacity(viewModel.isDurationLoading ? 0.5 : 1.0)
       }
-      .frame(height: 14)
+      .frame(height: 18) // Slightly taller for better touch target
 
-      // Time labels
+      // Time labels - show scrubbing time when dragging
       HStack {
-        Text(viewModel.currentTimeString)
+        Text(formatTime(displayCurrentTime))
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundColor(isScrubbing ? .primary : .secondary)
           .monospacedDigit()
 
         Spacer()
 
-        Text(viewModel.remainingTimeString)
+        Text("-" + formatTime(displayRemainingTime))
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundColor(isScrubbing ? .primary : .secondary)
           .monospacedDigit()
       }
+    }
+  }
+
+  private func formatTime(_ time: TimeInterval) -> String {
+    guard time.isFinite && time >= 0 else { return "0:00" }
+
+    let hours = Int(time) / 3600
+    let minutes = Int(time) / 60 % 60
+    let seconds = Int(time) % 60
+
+    if hours > 0 {
+      return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+      return String(format: "%d:%02d", minutes, seconds)
     }
   }
 
