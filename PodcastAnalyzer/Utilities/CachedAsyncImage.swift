@@ -21,7 +21,26 @@ typealias CachedPlatformImage = UIImage
 typealias CachedPlatformImage = NSImage
 #endif
 
-// MARK: - Image Cache Manager (Thread-safe, non-actor for synchronous access)
+// MARK: - Download Coordinator (Actor for thread-safe async coordination)
+
+/// Actor that coordinates in-flight downloads to prevent duplicate requests
+private actor DownloadCoordinator {
+  private var inFlightDownloads: [String: Task<CachedPlatformImage?, Never>] = [:]
+
+  func getExistingTask(for key: String) -> Task<CachedPlatformImage?, Never>? {
+    inFlightDownloads[key]
+  }
+
+  func registerTask(_ task: Task<CachedPlatformImage?, Never>, for key: String) {
+    inFlightDownloads[key] = task
+  }
+
+  func removeTask(for key: String) {
+    inFlightDownloads.removeValue(forKey: key)
+  }
+}
+
+// MARK: - Image Cache Manager
 
 final class ImageCacheManager: @unchecked Sendable {
   static let shared = ImageCacheManager()
@@ -29,11 +48,12 @@ final class ImageCacheManager: @unchecked Sendable {
   private let memoryCache = NSCache<NSString, CachedPlatformImage>()
   private let fileManager = FileManager.default
   private let cacheDirectory: URL
-  private let lock = NSLock()
 
-  // Track in-flight downloads to prevent duplicate requests
-  private var inFlightDownloads: [String: Task<CachedPlatformImage?, Never>] = [:]
-  private let downloadLock = NSLock()
+  // Actor for coordinating downloads (replaces NSLock for async contexts)
+  private let downloadCoordinator = DownloadCoordinator()
+
+  // Serial queue for synchronous memory cache access (safer than NSLock)
+  private let memoryCacheQueue = DispatchQueue(label: "com.podcastanalyzer.imagecache.memory")
 
   private init() {
     // Set up memory cache limits
@@ -62,19 +82,21 @@ final class ImageCacheManager: @unchecked Sendable {
 
   // MARK: - Synchronous Memory Cache (for immediate UI response)
 
+  /// Synchronous cache lookup - safe to call from any context
   func getCachedSync(for url: URL) -> CachedPlatformImage? {
     let key = cacheKey(for: url) as NSString
-    lock.lock()
-    defer { lock.unlock() }
-    return memoryCache.object(forKey: key)
+    // NSCache is thread-safe, but we use queue for consistency
+    return memoryCacheQueue.sync {
+      memoryCache.object(forKey: key)
+    }
   }
 
   private func cacheInMemory(_ image: CachedPlatformImage, for url: URL) {
     let key = cacheKey(for: url) as NSString
     let cost = Int(image.size.width * image.size.height * 4)  // Approximate byte size
-    lock.lock()
-    memoryCache.setObject(image, forKey: key, cost: cost)
-    lock.unlock()
+    memoryCacheQueue.sync {
+      memoryCache.setObject(image, forKey: key, cost: cost)
+    }
   }
 
   // MARK: - Disk Cache
@@ -110,7 +132,7 @@ final class ImageCacheManager: @unchecked Sendable {
     #endif
   }
 
-  // MARK: - Download and Cache (with deduplication)
+  // MARK: - Download and Cache (with deduplication via actor)
 
   func downloadAndCache(from url: URL) async -> CachedPlatformImage? {
     let key = cacheKey(for: url)
@@ -120,27 +142,27 @@ final class ImageCacheManager: @unchecked Sendable {
       return cached
     }
 
-    // Check disk cache
+    // Check disk cache (synchronous but I/O bound)
     if let diskCached = getDiskCached(for: url) {
       return diskCached
     }
 
-    // Check if already downloading
-    downloadLock.lock()
-    if let existingTask = inFlightDownloads[key] {
-      downloadLock.unlock()
+    // Check if already downloading (actor-isolated, safe across await)
+    if let existingTask = await downloadCoordinator.getExistingTask(for: key) {
       return await existingTask.value
     }
 
     // Create download task
-    let task = Task<CachedPlatformImage?, Never> {
+    let task = Task<CachedPlatformImage?, Never> { [weak self] in
+      guard let self else { return nil }
+
       do {
         let (data, _) = try await URLSession.shared.data(from: url)
         guard let image = CachedPlatformImage(data: data) else { return nil }
 
         // Cache in memory and disk
-        cacheInMemory(image, for: url)
-        cacheToDisk(image, for: url)
+        self.cacheInMemory(image, for: url)
+        self.cacheToDisk(image, for: url)
 
         return image
       } catch {
@@ -148,15 +170,13 @@ final class ImageCacheManager: @unchecked Sendable {
       }
     }
 
-    inFlightDownloads[key] = task
-    downloadLock.unlock()
+    // Register task with coordinator
+    await downloadCoordinator.registerTask(task, for: key)
 
     let result = await task.value
 
-    // Remove from in-flight
-    downloadLock.lock()
-    inFlightDownloads.removeValue(forKey: key)
-    downloadLock.unlock()
+    // Remove from coordinator
+    await downloadCoordinator.removeTask(for: key)
 
     return result
   }
@@ -164,9 +184,9 @@ final class ImageCacheManager: @unchecked Sendable {
   // MARK: - Cache Cleanup
 
   func clearMemoryCache() {
-    lock.lock()
-    memoryCache.removeAllObjects()
-    lock.unlock()
+    memoryCacheQueue.sync {
+      memoryCache.removeAllObjects()
+    }
   }
 
   func clearDiskCache() {
