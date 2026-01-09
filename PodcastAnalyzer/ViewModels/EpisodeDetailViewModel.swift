@@ -261,8 +261,20 @@ final class EpisodeDetailViewModel {
       guid: episode.guid
     )
 
-    // Resume from saved position if available
-    let startTime = episodeModel?.lastPlaybackPosition ?? 0
+    // Resume from saved position, but reset to 0 if episode was marked as completed
+    // This allows users to replay completed episodes from the beginning
+    var startTime: TimeInterval = 0
+    if let model = episodeModel {
+      if model.isCompleted {
+        // Reset position for completed episodes (user wants to replay)
+        model.lastPlaybackPosition = 0
+        model.isCompleted = false
+        try? modelContext?.save()
+        startTime = 0
+      } else {
+        startTime = model.lastPlaybackPosition
+      }
+    }
 
     // Use default speed from settings only for fresh plays (not resuming)
     let useDefaultSpeed = startTime == 0

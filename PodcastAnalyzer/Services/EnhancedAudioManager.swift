@@ -120,48 +120,66 @@ class EnhancedAudioManager: NSObject {
     #endif
   }
 
-  private func handleAudioInterruption(_ notification: Notification) {
+private func handleAudioInterruption(_ notification: Notification) {
     #if os(iOS)
     guard let userInfo = notification.userInfo,
           let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
           let type = AVAudioSession.InterruptionType(rawValue: typeValue)
-    else {
-      return
-    }
+    else { return }
 
     switch type {
     case .began:
-      // Another app started playing audio (e.g., WhatsApp voice message, phone call)
-      wasPlayingBeforeInterruption = isPlaying
-      if isPlaying {
-        pause()
-        logger.info("Playback paused due to audio interruption")
-      }
+        // 1. Mark our state BEFORE we call pause()
+        wasPlayingBeforeInterruption = isPlaying
+        
+        if isPlaying {
+            // We use a local pause here to stop the player
+            // but we don't necessarily want to treat this as a "user-stop"
+            player?.pause()
+            isPlaying = false
+            updateNowPlayingPlaybackRate()
+            logger.info("Interruption began: Audio paused")
+        }
 
     case .ended:
-      // Interruption ended - check if we should resume
-      guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else {
-        return
-      }
-      let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-
-      // Only resume if:
-      // 1. We were playing before the interruption
-      // 2. The system indicates we should resume (.shouldResume option)
-      if wasPlayingBeforeInterruption && options.contains(.shouldResume) {
-        // Small delay to ensure audio session is fully restored
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-          self?.resume()
-          self?.logger.info("Playback resumed after audio interruption")
+        // 2. Determine if we SHOULD resume
+        // We check the system hint AND our manual flag
+        var shouldResume = false
+        if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+            if options.contains(.shouldResume) {
+                shouldResume = true
+            }
         }
-      }
-      wasPlayingBeforeInterruption = false
+        
+        // If system says yes OR our manual state says we were playing
+        let finalDecisionToResume = shouldResume || wasPlayingBeforeInterruption
+        
+        if finalDecisionToResume {
+            // 3. Mandatory Session Reactivation
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+                
+                // 4. Delayed Resume
+                // Audio hardware needs a moment to switch back from the other app
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    guard let self = self else { return }
+                    self.resume()
+                    self.wasPlayingBeforeInterruption = false
+                    self.logger.info("Interruption ended: Audio resumed")
+                }
+            } catch {
+                logger.error("Failed to reactivate session after interruption: \(error.localizedDescription)")
+            }
+        } else {
+            wasPlayingBeforeInterruption = false
+        }
 
     @unknown default:
-      break
+        break
     }
     #endif
-  }
+}
 
   private func setupRemoteControls() {
     let commandCenter = MPRemoteCommandCenter.shared()
