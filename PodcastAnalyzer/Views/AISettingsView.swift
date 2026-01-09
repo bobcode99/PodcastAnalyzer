@@ -27,7 +27,51 @@ struct AISettingsView: View {
     @State private var onDeviceAvailability: FoundationModelsAvailability = .unavailable(reason: "Checking...")
 
     var body: some View {
+        #if os(macOS)
+        macOSBody
+        #else
+        iOSBody
+        #endif
+    }
+
+    // MARK: - macOS Body
+    #if os(macOS)
+    private var macOSBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                formContent
+            }
+            .padding(20)
+            .frame(maxWidth: 600, alignment: .leading)
+        }
+        .frame(minWidth: 500, minHeight: 400)
+        .navigationTitle("AI Settings")
+        .alert(testResultSuccess ? "Success" : "Error", isPresented: $showingTestResult) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(testResultMessage)
+        }
+        .onAppear(perform: onAppearActions)
+    }
+    #endif
+
+    // MARK: - iOS Body
+    private var iOSBody: some View {
         Form {
+            formContent
+        }
+        .navigationTitle("AI Settings")
+        .alert(testResultSuccess ? "Success" : "Error", isPresented: $showingTestResult) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(testResultMessage)
+        }
+        .onAppear(perform: onAppearActions)
+    }
+
+    // MARK: - Shared Form Content
+    @ViewBuilder
+    private var formContent: some View {
             // MARK: - Provider Selection
             Section {
                 Picker("AI Provider", selection: $settings.selectedProvider) {
@@ -362,24 +406,20 @@ struct AISettingsView: View {
             } footer: {
                 Text("Larger context windows allow analyzing longer transcripts in a single request, resulting in better quality summaries.")
             }
-        }
-        .navigationTitle("AI Settings")
-        .alert(testResultSuccess ? "Success" : "Error", isPresented: $showingTestResult) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(testResultMessage)
-        }
-        .onAppear {
-            // Auto-fetch models if API key exists
-            let provider = settings.selectedProvider
-            let apiKey = settings.apiKey(for: provider)
-            if !apiKey.isEmpty && fetchedModels[provider] == nil {
-                fetchModels(for: provider)
-            }
+    }
 
-            // Check on-device AI availability
-            checkOnDeviceAvailability()
+    // MARK: - Actions
+
+    private func onAppearActions() {
+        // Auto-fetch models if API key exists
+        let provider = settings.selectedProvider
+        let apiKey = settings.apiKey(for: provider)
+        if !apiKey.isEmpty && fetchedModels[provider] == nil {
+            fetchModels(for: provider)
         }
+
+        // Check on-device AI availability
+        checkOnDeviceAvailability()
     }
 
     // MARK: - Helper Views

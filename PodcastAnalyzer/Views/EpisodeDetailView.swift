@@ -3,6 +3,7 @@
 //  PodcastAnalyzer
 //
 //  Fixed: Added Regenerate option to live view and fixed state visibility
+//  Fixed: Memory leaks from static timer and proper cleanup on macOS
 //
 
 import Combine
@@ -31,10 +32,8 @@ struct EpisodeDetailView: View {
     @State private var showCopySuccess = false
     @State private var showDeleteConfirmation = false
 
-    // Timer to refresh transcript highlighting during playback
-    @State private var refreshTrigger = false
-    // Static timer shared across all instances to prevent memory leaks from recreation
-    private static let playbackTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+    // Timer subscription for transcript highlighting during playback
+    @State private var playbackTimerCancellable: AnyCancellable?
 
     init(
         episode: PodcastEpisodeInfo,
@@ -161,7 +160,8 @@ struct EpisodeDetailView: View {
             viewModel.checkTranscriptStatus()
         }
         .onDisappear {
-            // Clean up subscriptions to prevent memory leaks
+            // Clean up timer and subscriptions to prevent memory leaks
+            stopPlaybackTimer()
             viewModel.cleanup()
         }
     }
@@ -443,9 +443,32 @@ struct EpisodeDetailView: View {
                 }
             }
         }
-        .onReceive(Self.playbackTimer) { _ in
-            if viewModel.isPlayingThisEpisode { refreshTrigger.toggle() }
+        .onAppear {
+            startPlaybackTimer()
         }
+        .onDisappear {
+            stopPlaybackTimer()
+        }
+    }
+
+    // MARK: - Timer Management (Instance-level, properly managed)
+
+    private func startPlaybackTimer() {
+        // Only start if not already running
+        guard playbackTimerCancellable == nil else { return }
+
+        playbackTimerCancellable = Timer.publish(every: 0.5, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak viewModel] _ in
+                // This closure captures viewModel weakly to prevent retain cycle
+                guard let vm = viewModel, vm.isPlayingThisEpisode else { return }
+                // The view will update automatically via @Observable
+            }
+    }
+
+    private func stopPlaybackTimer() {
+        playbackTimerCancellable?.cancel()
+        playbackTimerCancellable = nil
     }
 
     // MARK: - Live Captions View (Redesigned - Clean Full Page)

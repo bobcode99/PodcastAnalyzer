@@ -87,7 +87,14 @@ final class EpisodeDetailViewModel {
   @ObservationIgnored
   private var modelContext: ModelContext?
 
-  // Cancellables for observation (still used for timers and other Combine publishers)
+  // Timer cancellables - stored separately for explicit cleanup
+  @ObservationIgnored
+  private var downloadTimerCancellable: AnyCancellable?
+
+  @ObservationIgnored
+  private var playbackTimerCancellable: AnyCancellable?
+
+  // Cancellables for observation (still used for other Combine publishers)
   @ObservationIgnored
   private var cancellables = Set<AnyCancellable>()
 
@@ -312,23 +319,29 @@ final class EpisodeDetailViewModel {
   }
 
   private func observeDownloadState() {
-    // Poll for download state changes
-    Timer.publish(every: 0.5, on: .main, in: .common)
+    // Cancel any existing download timer first
+    downloadTimerCancellable?.cancel()
+
+    // Poll for download state changes - use instance variable for explicit cleanup
+    downloadTimerCancellable = Timer.publish(every: 0.5, on: .main, in: .common)
       .autoconnect()
       .sink { [weak self] _ in
-        self?.updateDownloadState()
+        guard let self else { return }
+        self.updateDownloadState()
       }
-      .store(in: &cancellables)
   }
 
   private func observePlaybackState() {
+    // Cancel any existing playback timer first
+    playbackTimerCancellable?.cancel()
+
     // Poll for playback state changes (duration, progress, completion)
-    Timer.publish(every: 2.0, on: .main, in: .common)
+    playbackTimerCancellable = Timer.publish(every: 2.0, on: .main, in: .common)
       .autoconnect()
       .sink { [weak self] _ in
-        self?.refreshEpisodeModel()
+        guard let self else { return }
+        self.refreshEpisodeModel()
       }
-      .store(in: &cancellables)
   }
 
   private func refreshEpisodeModel() {
@@ -1642,7 +1655,22 @@ final class EpisodeDetailViewModel {
     shareTask?.cancel()
     shareTask = nil
 
-    // Cancel all Combine subscriptions (timers)
+    // Explicitly cancel timers (critical for preventing memory leaks on macOS)
+    downloadTimerCancellable?.cancel()
+    downloadTimerCancellable = nil
+
+    playbackTimerCancellable?.cancel()
+    playbackTimerCancellable = nil
+
+    // Cancel all other Combine subscriptions
+    cancellables.removeAll()
+  }
+
+  deinit {
+    // Ensure cleanup even if cleanup() wasn't called (defensive programming)
+    downloadTimerCancellable?.cancel()
+    playbackTimerCancellable?.cancel()
+    shareTask?.cancel()
     cancellables.removeAll()
   }
 }
