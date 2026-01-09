@@ -127,6 +127,22 @@ class ShortcutsAIService {
         timeoutTask?.cancel()
         pendingContinuation?.resume(returning: result)
         pendingContinuation = nil
+
+        // Bring our app back to foreground
+        activateApp()
+    }
+
+    /// Brings our app to foreground after shortcut completes
+    private func activateApp() {
+        #if os(macOS)
+        // Activate our app window
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        // Also bring windows to front
+        for window in NSApplication.shared.windows {
+            window.makeKeyAndOrderFront(nil)
+        }
+        #endif
+        // iOS doesn't need this - the URL callback automatically brings the app forward
     }
 
     private func handleError(_ error: String) {
@@ -136,12 +152,137 @@ class ShortcutsAIService {
         timeoutTask?.cancel()
         pendingContinuation?.resume(throwing: ShortcutsError.shortcutFailed(error))
         pendingContinuation = nil
+
+        // Bring our app back to foreground
+        activateApp()
     }
 
     // MARK: - Run Shortcut Directly
 
     /// Runs the configured shortcut with input and waits for result
     func runShortcut(
+        input: String,
+        timeout: TimeInterval = 120
+    ) async throws -> String {
+        #if os(macOS)
+        // On macOS, use AppleScript for smoother experience (runs in background)
+        return try await runShortcutViaAppleScript(input: input, timeout: timeout)
+        #else
+        // On iOS, use URL scheme (requires app switch)
+        return try await runShortcutViaURLScheme(input: input, timeout: timeout)
+        #endif
+    }
+
+    // MARK: - macOS: CLI Method (Background Execution)
+
+    #if os(macOS)
+    /// Runs shortcut via command-line tool - background execution on macOS
+    /// Falls back to URL scheme if CLI fails (e.g., sandbox restrictions)
+    private func runShortcutViaAppleScript(
+        input: String,
+        timeout: TimeInterval = 120
+    ) async throws -> String {
+        // Try CLI method first (runs in background)
+        do {
+            return try await runShortcutViaCLI(input: input, timeout: timeout)
+        } catch {
+            // CLI failed - fall back to URL scheme (opens Shortcuts app briefly)
+            logger.warning("CLI method failed: \(error.localizedDescription). Falling back to URL scheme.")
+            return try await runShortcutViaURLScheme(input: input, timeout: timeout)
+        }
+    }
+
+    /// Runs shortcut via /usr/bin/shortcuts CLI - completely in background
+    private func runShortcutViaCLI(
+        input: String,
+        timeout: TimeInterval = 120
+    ) async throws -> String {
+        isProcessing = true
+        lastError = nil
+
+        // Use clipboard for input - shortcut should use "Get Clipboard" action
+        PlatformClipboard.string = input
+        logger.info("Running shortcut via CLI: \(self.shortcutName)")
+
+        return try await withCheckedThrowingContinuation { continuation in
+            var hasResumed = false
+
+            // Run shortcuts CLI in background
+            Task.detached { [shortcutName, input] in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
+                process.arguments = ["run", shortcutName]
+
+                let outputPipe = Pipe()
+                let errorPipe = Pipe()
+                process.standardOutput = outputPipe
+                process.standardError = errorPipe
+
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+
+                    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+
+                    let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let errorOutput = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                    await MainActor.run {
+                        guard !hasResumed else { return }
+                        hasResumed = true
+                        self.isProcessing = false
+                        self.timeoutTask?.cancel()
+
+                        if process.terminationStatus != 0 {
+                            let errorMsg = errorOutput ?? "Shortcut execution failed (exit code: \(process.terminationStatus))"
+                            self.lastError = errorMsg
+                            continuation.resume(throwing: ShortcutsError.shortcutFailed(errorMsg))
+                        } else if let output = output, !output.isEmpty {
+                            // Got output directly from shortcut
+                            self.lastResult = output
+                            continuation.resume(returning: output)
+                        } else {
+                            // Fallback: check clipboard for result
+                            // (shortcut should copy result to clipboard)
+                            if let clipboardResult = PlatformClipboard.string,
+                               !clipboardResult.isEmpty,
+                               clipboardResult != input {
+                                self.lastResult = clipboardResult
+                                continuation.resume(returning: clipboardResult)
+                            } else {
+                                continuation.resume(throwing: ShortcutsError.noResult)
+                            }
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        guard !hasResumed else { return }
+                        hasResumed = true
+                        self.isProcessing = false
+                        self.timeoutTask?.cancel()
+                        self.lastError = error.localizedDescription
+                        continuation.resume(throwing: ShortcutsError.shortcutFailed(error.localizedDescription))
+                    }
+                }
+            }
+
+            // Set timeout
+            self.timeoutTask = Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                guard !hasResumed else { return }
+                hasResumed = true
+                self.isProcessing = false
+                continuation.resume(throwing: ShortcutsError.timeout)
+            }
+        }
+    }
+    #endif
+
+    // MARK: - iOS: URL Scheme Method (Requires App Switch)
+
+    /// Runs shortcut via URL scheme - required for iOS
+    private func runShortcutViaURLScheme(
         input: String,
         timeout: TimeInterval = 120
     ) async throws -> String {
@@ -180,7 +321,7 @@ class ShortcutsAIService {
             throw ShortcutsError.invalidURL
         }
 
-        logger.info("Running shortcut: \(self.shortcutName)")
+        logger.info("Running shortcut via URL: \(self.shortcutName)")
 
         // Use withCheckedThrowingContinuation for async/await
         return try await withCheckedThrowingContinuation { continuation in
@@ -207,7 +348,7 @@ class ShortcutsAIService {
                 }
             }
             #else
-            // macOS: Use NSWorkspace to open URLs
+            // macOS fallback: Use NSWorkspace to open URLs
             let success = NSWorkspace.shared.open(url)
             if !success {
                 self.isProcessing = false
