@@ -8,7 +8,10 @@
 
 import SwiftData
 import SwiftUI
+
+#if os(iOS)
 import UIKit
+#endif
 
 struct EpisodeRowView: View {
   let episode: PodcastEpisodeInfo
@@ -22,6 +25,57 @@ struct EpisodeRowView: View {
   let onDownload: () -> Void
   let onDeleteRequested: () -> Void
   let onTogglePlayed: () -> Void
+
+  /// Primary initializer for PodcastEpisodeInfo (used in EpisodeListView)
+  init(
+    episode: PodcastEpisodeInfo,
+    podcastTitle: String,
+    fallbackImageURL: String?,
+    podcastLanguage: String,
+    downloadManager: DownloadManager = DownloadManager.shared,
+    episodeModel: EpisodeDownloadModel? = nil,
+    showArtwork: Bool = true,
+    onToggleStar: @escaping () -> Void,
+    onDownload: @escaping () -> Void,
+    onDeleteRequested: @escaping () -> Void,
+    onTogglePlayed: @escaping () -> Void
+  ) {
+    self.episode = episode
+    self.podcastTitle = podcastTitle
+    self.fallbackImageURL = fallbackImageURL
+    self.podcastLanguage = podcastLanguage
+    self.downloadManager = downloadManager
+    self.episodeModel = episodeModel
+    self.showArtwork = showArtwork
+    self.onToggleStar = onToggleStar
+    self.onDownload = onDownload
+    self.onDeleteRequested = onDeleteRequested
+    self.onTogglePlayed = onTogglePlayed
+  }
+
+  /// Convenience initializer for LibraryEpisode (used in Library views)
+  init(
+    libraryEpisode: LibraryEpisode,
+    downloadManager: DownloadManager = DownloadManager.shared,
+    episodeModel: EpisodeDownloadModel? = nil,
+    showArtwork: Bool = true,
+    onToggleStar: @escaping () -> Void,
+    onDownload: @escaping () -> Void,
+    onDeleteRequested: @escaping () -> Void,
+    onTogglePlayed: @escaping () -> Void
+  ) {
+    self.episode = libraryEpisode.episodeInfo
+    self.podcastTitle = libraryEpisode.podcastTitle
+    self.fallbackImageURL = libraryEpisode.imageURL
+    self.podcastLanguage = libraryEpisode.language
+    self.downloadManager = downloadManager
+    self.episodeModel = episodeModel
+    self.showArtwork = showArtwork
+    self.onToggleStar = onToggleStar
+    self.onDownload = onDownload
+    self.onDeleteRequested = onDeleteRequested
+    self.onTogglePlayed = onTogglePlayed
+  }
 
   @Environment(\.modelContext) private var modelContext
   private var audioManager: EnhancedAudioManager {

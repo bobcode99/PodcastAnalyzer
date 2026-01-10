@@ -91,12 +91,16 @@ struct EpisodePlayButton: View {
   private var durationText: String? {
       // Determine which value to format: remaining time or total duration
       let isInProgress = playbackProgress > 0 && playbackProgress < 1
-      guard let totalSeconds = duration, totalSeconds > 0 else { return nil }
-      
-      let secondsToFormat = isInProgress ? (totalSeconds - lastPlaybackPosition) : totalSeconds
-      let timeString = formatTimeUnits(Int(secondsToFormat))
-      
-      return isInProgress ? "\(timeString) left" : timeString
+
+      // If we have duration from the model, use it for precise calculation
+      if let totalSeconds = duration, totalSeconds > 0 {
+          let secondsToFormat = isInProgress ? (totalSeconds - lastPlaybackPosition) : totalSeconds
+          let timeString = formatTimeUnits(Int(secondsToFormat))
+          return isInProgress ? "\(timeString) left" : timeString
+      }
+
+      // Fallback to formatted duration from episode metadata (for unplayed episodes)
+      return formattedDuration
   }
 
   private func formatTimeUnits(_ totalSeconds: Int) -> String {
