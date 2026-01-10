@@ -64,6 +64,7 @@ class EnhancedAudioManager: NSObject {
 
   private var timeObserver: Any?
   private var cancellables = Set<AnyCancellable>()
+  private var interruptionCancellable: AnyCancellable?  // Kept separate so cleanup() doesn't remove it
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "AudioManager")
 
   // Use Unit Separator (U+001F) as delimiter - same as EpisodeDownloadModel
@@ -111,11 +112,11 @@ class EnhancedAudioManager: NSObject {
 
   private func setupInterruptionObserver() {
     #if os(iOS)
-    NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)
+    // Store in separate property so cleanup() doesn't remove it
+    interruptionCancellable = NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)
       .sink { [weak self] notification in
         self?.handleAudioInterruption(notification)
       }
-      .store(in: &cancellables)
     logger.info("Audio interruption observer configured")
     #endif
   }
@@ -126,6 +127,9 @@ private func handleAudioInterruption(_ notification: Notification) {
           let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
           let type = AVAudioSession.InterruptionType(rawValue: typeValue)
     else { return }
+
+    logger.info("Handling audio interruption: type=\(type.rawValue, privacy: .public)")
+
 
     switch type {
     case .began:

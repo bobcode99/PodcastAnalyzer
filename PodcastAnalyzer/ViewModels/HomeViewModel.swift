@@ -14,10 +14,15 @@ import os.log
 @MainActor
 @Observable
 final class HomeViewModel {
+  // Static cache shared across all instances to prevent duplicate API calls
+  private static var cachedTopPodcasts: [AppleRSSPodcast] = []
+  private static var cachedRegion: String = ""
+  private static var isLoadingTopPodcastsGlobally = false
+
   // Up Next episodes (unplayed from subscribed podcasts)
   var upNextEpisodes: [LibraryEpisode] = []
 
-  // Top podcasts from Apple RSS
+  // Top podcasts from Apple RSS - observable instance properties that sync with static cache
   var topPodcasts: [AppleRSSPodcast] = []
   var isLoadingTopPodcasts = false
 
@@ -27,7 +32,7 @@ final class HomeViewModel {
       if oldValue != selectedRegion {
         // Save to UserDefaults for consistency
         UserDefaults.standard.set(selectedRegion, forKey: "selectedPodcastRegion")
-        Task { await loadTopPodcasts() }
+        Task { await loadTopPodcasts(forceRefresh: true) }
       }
     }
   }
@@ -74,6 +79,11 @@ final class HomeViewModel {
       selectedRegion = saved
     }
 
+    // Restore from static cache if available for current region
+    if !Self.cachedTopPodcasts.isEmpty && Self.cachedRegion == selectedRegion {
+      topPodcasts = Self.cachedTopPodcasts
+    }
+
     // Listen for region changes from Settings using async sequence
     regionObserverTask = Task {
       for await notification in NotificationCenter.default.notifications(named: .podcastRegionChanged) {
@@ -88,26 +98,26 @@ final class HomeViewModel {
     self.modelContext = context
     // Only load if we haven't or if we need a fresh start
     if !isAlreadyLoaded {
+      isAlreadyLoaded = true  // Set immediately to prevent race condition
       Task {
         await loadAll()
-        isAlreadyLoaded = true
       }
     }
   }
 
   // MARK: - Load All Data
 
-  private func loadAll() async {
+  private func loadAll(forceRefresh: Bool = false) async {
     // Load feeds first, then episodes (episodes depend on feeds)
     await loadPodcastFeeds()
     // Load up next and top podcasts can run in parallel via async let
     async let upNextTask: () = loadUpNextEpisodes()
-    async let topPodcastsTask: () = loadTopPodcasts()
+    async let topPodcastsTask: () = loadTopPodcasts(forceRefresh: forceRefresh)
     _ = await (upNextTask, topPodcastsTask)
   }
 
   func refresh() async {
-    await loadAll()
+    await loadAll(forceRefresh: true)
   }
 
   // MARK: - Load Podcasts
@@ -231,17 +241,38 @@ final class HomeViewModel {
 
   // MARK: - Load Top Podcasts
 
-  private func loadTopPodcasts() async {
+  private func loadTopPodcasts(forceRefresh: Bool = false) async {
+    // Use cached data if available for this region (unless force refresh)
+    if !forceRefresh && !Self.cachedTopPodcasts.isEmpty && Self.cachedRegion == selectedRegion {
+      // Sync instance property from cache (for UI updates)
+      if topPodcasts.isEmpty {
+        topPodcasts = Self.cachedTopPodcasts
+      }
+      logger.debug("Using cached top podcasts for \(self.selectedRegion)")
+      return
+    }
+
+    // Skip if already loading globally
+    guard !Self.isLoadingTopPodcastsGlobally else {
+      logger.debug("Already loading top podcasts, skipping")
+      return
+    }
+
+    Self.isLoadingTopPodcastsGlobally = true
     isLoadingTopPodcasts = true
 
     do {
       let podcasts = try await applePodcastService.fetchTopPodcasts(region: selectedRegion, limit: 25)
-      topPodcasts = podcasts
+      // Update both static cache and observable instance property
+      Self.cachedTopPodcasts = podcasts
+      Self.cachedRegion = selectedRegion
+      topPodcasts = podcasts  // This triggers SwiftUI update
       logger.info("Loaded \(podcasts.count) top podcasts for \(self.selectedRegion)")
     } catch {
       logger.error("Failed to load top podcasts: \(error.localizedDescription)")
     }
 
+    Self.isLoadingTopPodcastsGlobally = false
     isLoadingTopPodcasts = false
   }
 

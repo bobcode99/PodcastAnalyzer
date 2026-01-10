@@ -85,16 +85,6 @@ struct MiniPlayerBar: View {
             .foregroundColor(.primary)
         }
 
-        // Forward 30s button
-        Button(action: {
-          audioManager.skipForward(seconds: 30)
-        }) {
-          Image(systemName: "goforward.30")
-            .font(.title3)
-            .foregroundColor(.primary)
-        }
-        .padding(.trailing, 4)
-        .disabled(audioManager.currentEpisode == nil)
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 10)
