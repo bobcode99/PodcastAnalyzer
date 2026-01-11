@@ -5,7 +5,6 @@
 //  Enhanced with download management and playback state
 //
 
-import Combine
 import Observation
 import SwiftData
 import SwiftUI
@@ -87,16 +86,12 @@ final class EpisodeDetailViewModel {
   @ObservationIgnored
   private var modelContext: ModelContext?
 
-  // Timer cancellables - stored separately for explicit cleanup
+  // Timer tasks - replaced Combine timers with Task-based timers for Swift 6
   @ObservationIgnored
-  private var downloadTimerCancellable: AnyCancellable?
+  private var downloadTimerTask: Task<Void, Never>?
 
   @ObservationIgnored
-  private var playbackTimerCancellable: AnyCancellable?
-
-  // Cancellables for observation (still used for other Combine publishers)
-  @ObservationIgnored
-  private var cancellables = Set<AnyCancellable>()
+  private var playbackTimerTask: Task<Void, Never>?
 
   // Flag to track transcript manager observation
   @ObservationIgnored
@@ -332,28 +327,30 @@ final class EpisodeDetailViewModel {
 
   private func observeDownloadState() {
     // Cancel any existing download timer first
-    downloadTimerCancellable?.cancel()
+    downloadTimerTask?.cancel()
 
-    // Poll for download state changes - use instance variable for explicit cleanup
-    downloadTimerCancellable = Timer.publish(every: 0.5, on: .main, in: .common)
-      .autoconnect()
-      .sink { [weak self] _ in
-        guard let self else { return }
-        self.updateDownloadState()
+    // Poll for download state changes using Task-based timer
+    downloadTimerTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(500))
+        guard !Task.isCancelled else { break }
+        self?.updateDownloadState()
       }
+    }
   }
 
   private func observePlaybackState() {
     // Cancel any existing playback timer first
-    playbackTimerCancellable?.cancel()
+    playbackTimerTask?.cancel()
 
-    // Poll for playback state changes (duration, progress, completion)
-    playbackTimerCancellable = Timer.publish(every: 2.0, on: .main, in: .common)
-      .autoconnect()
-      .sink { [weak self] _ in
-        guard let self else { return }
-        self.refreshEpisodeModel()
+    // Poll for playback state changes using Task-based timer
+    playbackTimerTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(2))
+        guard !Task.isCancelled else { break }
+        self?.refreshEpisodeModel()
       }
+    }
   }
 
   private func refreshEpisodeModel() {
@@ -639,7 +636,7 @@ final class EpisodeDetailViewModel {
     guard let context = modelContext else { return "en" }
 
     let descriptor = FetchDescriptor<PodcastInfoModel>(
-      predicate: #Predicate { $0.podcastInfo.title == podcastTitle }
+      predicate: #Predicate { $0.title == podcastTitle }
     )
 
     do {
@@ -1667,22 +1664,18 @@ final class EpisodeDetailViewModel {
     shareTask?.cancel()
     shareTask = nil
 
-    // Explicitly cancel timers (critical for preventing memory leaks on macOS)
-    downloadTimerCancellable?.cancel()
-    downloadTimerCancellable = nil
+    // Explicitly cancel timer tasks (critical for preventing memory leaks)
+    downloadTimerTask?.cancel()
+    downloadTimerTask = nil
 
-    playbackTimerCancellable?.cancel()
-    playbackTimerCancellable = nil
-
-    // Cancel all other Combine subscriptions
-    cancellables.removeAll()
+    playbackTimerTask?.cancel()
+    playbackTimerTask = nil
   }
 
   deinit {
     // Ensure cleanup even if cleanup() wasn't called (defensive programming)
-    downloadTimerCancellable?.cancel()
-    playbackTimerCancellable?.cancel()
+    downloadTimerTask?.cancel()
+    playbackTimerTask?.cancel()
     shareTask?.cancel()
-    cancellables.removeAll()
   }
 }

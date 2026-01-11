@@ -103,7 +103,7 @@ class PodcastImportManager {
 
     private func processImport(rssURL: String, context: ModelContext) async throws -> ImportOutcome {
         // 1. Check existing URL
-        let urlPredicate = #Predicate<PodcastInfoModel> { $0.podcastInfo.rssUrl == rssURL }
+        let urlPredicate = #Predicate<PodcastInfoModel> { $0.rssUrl == rssURL }
         let existing = try context.fetch(FetchDescriptor<PodcastInfoModel>(predicate: urlPredicate)).first
         
         if let existing {
@@ -115,7 +115,7 @@ class PodcastImportManager {
         // 2. Fetch and check Title (as backup)
         let podcastInfo = try await rssService.fetchPodcast(from: rssURL)
         let title = podcastInfo.title
-        let titlePredicate = #Predicate<PodcastInfoModel> { $0.podcastInfo.title == title }
+        let titlePredicate = #Predicate<PodcastInfoModel> { $0.title == title }
         let existingByTitle = try context.fetch(FetchDescriptor<PodcastInfoModel>(predicate: titlePredicate)).first
 
         if let existingByTitle {

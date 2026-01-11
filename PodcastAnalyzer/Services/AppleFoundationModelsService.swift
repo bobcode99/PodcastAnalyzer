@@ -77,7 +77,7 @@ actor AppleFoundationModelsService {
         podcastTitle: String,
         duration: TimeInterval? = nil,
         releaseDate: Date? = nil,
-        progressCallback: ((String, Double) -> Void)? = nil
+        progressCallback: (@Sendable (String, Double) -> Void)? = nil
     ) async throws -> EpisodeQuickTags {
         logger.info("Generating quick tags for: \(title)")
 
@@ -133,7 +133,7 @@ actor AppleFoundationModelsService {
     func generateBriefSummary(
         title: String,
         description: String,
-        progressCallback: ((String, Double) -> Void)? = nil
+        progressCallback: (@Sendable (String, Double) -> Void)? = nil
     ) async throws -> String {
         logger.info("Generating brief summary for: \(title)")
 

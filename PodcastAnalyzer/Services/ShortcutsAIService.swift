@@ -204,11 +204,58 @@ class ShortcutsAIService {
         PlatformClipboard.string = input
         logger.info("Running shortcut via CLI: \(self.shortcutName)")
 
-        return try await withCheckedThrowingContinuation { continuation in
-            var hasResumed = false
+        // Capture values for sendable closure
+        let shortcutNameCopy = shortcutName
+        let inputCopy = input
 
-            // Run shortcuts CLI in background
-            Task.detached { [shortcutName, input] in
+        defer { isProcessing = false }
+
+        // Use task group for timeout handling
+        return try await withThrowingTaskGroup(of: ShortcutCLIResult.self) { group in
+            // Process execution task
+            group.addTask {
+                try await Self.executeShortcutProcess(shortcutName: shortcutNameCopy, input: inputCopy)
+            }
+
+            // Timeout task
+            group.addTask {
+                try await Task.sleep(for: .seconds(timeout))
+                throw ShortcutsError.timeout
+            }
+
+            // Wait for first result
+            guard let result = try await group.next() else {
+                throw ShortcutsError.noResult
+            }
+            group.cancelAll()
+
+            // Process the result
+            if let error = result.error {
+                self.lastError = error
+                throw ShortcutsError.shortcutFailed(error)
+            } else if let output = result.output {
+                self.lastResult = output
+                return output
+            } else {
+                throw ShortcutsError.noResult
+            }
+        }
+    }
+
+    /// Sendable result from CLI execution
+    private struct ShortcutCLIResult: Sendable {
+        let output: String?
+        let error: String?
+    }
+
+    /// Nonisolated helper to execute the shortcuts CLI process
+    private nonisolated static func executeShortcutProcess(
+        shortcutName: String,
+        input: String
+    ) async throws -> ShortcutCLIResult {
+        // Run process on background thread
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
                 process.arguments = ["run", shortcutName]
@@ -228,52 +275,26 @@ class ShortcutsAIService {
                     let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
                     let errorOutput = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                    await MainActor.run {
-                        guard !hasResumed else { return }
-                        hasResumed = true
-                        self.isProcessing = false
-                        self.timeoutTask?.cancel()
-
-                        if process.terminationStatus != 0 {
-                            let errorMsg = errorOutput ?? "Shortcut execution failed (exit code: \(process.terminationStatus))"
-                            self.lastError = errorMsg
-                            continuation.resume(throwing: ShortcutsError.shortcutFailed(errorMsg))
-                        } else if let output = output, !output.isEmpty {
-                            // Got output directly from shortcut
-                            self.lastResult = output
-                            continuation.resume(returning: output)
-                        } else {
-                            // Fallback: check clipboard for result
-                            // (shortcut should copy result to clipboard)
+                    if process.terminationStatus != 0 {
+                        let errorMsg = errorOutput ?? "Shortcut execution failed (exit code: \(process.terminationStatus))"
+                        continuation.resume(returning: ShortcutCLIResult(output: nil, error: errorMsg))
+                    } else if let output = output, !output.isEmpty {
+                        continuation.resume(returning: ShortcutCLIResult(output: output, error: nil))
+                    } else {
+                        // Check clipboard for result (on main queue)
+                        DispatchQueue.main.async {
                             if let clipboardResult = PlatformClipboard.string,
                                !clipboardResult.isEmpty,
                                clipboardResult != input {
-                                self.lastResult = clipboardResult
-                                continuation.resume(returning: clipboardResult)
+                                continuation.resume(returning: ShortcutCLIResult(output: clipboardResult, error: nil))
                             } else {
-                                continuation.resume(throwing: ShortcutsError.noResult)
+                                continuation.resume(returning: ShortcutCLIResult(output: nil, error: nil))
                             }
                         }
                     }
                 } catch {
-                    await MainActor.run {
-                        guard !hasResumed else { return }
-                        hasResumed = true
-                        self.isProcessing = false
-                        self.timeoutTask?.cancel()
-                        self.lastError = error.localizedDescription
-                        continuation.resume(throwing: ShortcutsError.shortcutFailed(error.localizedDescription))
-                    }
+                    continuation.resume(throwing: error)
                 }
-            }
-
-            // Set timeout
-            self.timeoutTask = Task {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                guard !hasResumed else { return }
-                hasResumed = true
-                self.isProcessing = false
-                continuation.resume(throwing: ShortcutsError.timeout)
             }
         }
     }

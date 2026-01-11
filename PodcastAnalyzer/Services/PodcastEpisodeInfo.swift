@@ -8,7 +8,7 @@
 import FeedKit
 import Foundation
 
-public struct PodcastEpisodeInfo: Sendable, Codable, Identifiable {
+public struct PodcastEpisodeInfo: Sendable, Identifiable {
   public let title: String
   public let podcastEpisodeDescription: String?
   public let pubDate: Date?
@@ -45,5 +45,34 @@ public struct PodcastEpisodeInfo: Sendable, Codable, Identifiable {
     } else {
       return "\(seconds)s"
     }
+  }
+}
+
+// Explicit Codable conformance to avoid MainActor isolation issues with SwiftData
+extension PodcastEpisodeInfo: Codable {
+  private enum CodingKeys: String, CodingKey {
+    case title, podcastEpisodeDescription, pubDate, audioURL, imageURL, duration, guid
+  }
+
+  public nonisolated init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.title = try container.decode(String.self, forKey: .title)
+    self.podcastEpisodeDescription = try container.decodeIfPresent(String.self, forKey: .podcastEpisodeDescription)
+    self.pubDate = try container.decodeIfPresent(Date.self, forKey: .pubDate)
+    self.audioURL = try container.decodeIfPresent(String.self, forKey: .audioURL)
+    self.imageURL = try container.decodeIfPresent(String.self, forKey: .imageURL)
+    self.duration = try container.decodeIfPresent(Int.self, forKey: .duration)
+    self.guid = try container.decodeIfPresent(String.self, forKey: .guid)
+  }
+
+  public nonisolated func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(title, forKey: .title)
+    try container.encodeIfPresent(podcastEpisodeDescription, forKey: .podcastEpisodeDescription)
+    try container.encodeIfPresent(pubDate, forKey: .pubDate)
+    try container.encodeIfPresent(audioURL, forKey: .audioURL)
+    try container.encodeIfPresent(imageURL, forKey: .imageURL)
+    try container.encodeIfPresent(duration, forKey: .duration)
+    try container.encodeIfPresent(guid, forKey: .guid)
   }
 }

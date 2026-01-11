@@ -57,7 +57,7 @@ struct EpisodeDetailView: View {
         // Try to find the podcast model in SwiftData
         let title = viewModel.podcastTitle
         let descriptor = FetchDescriptor<PodcastInfoModel>(
-            predicate: #Predicate { $0.podcastInfo.title == title }
+            predicate: #Predicate { $0.title == title }
         )
         if let podcastModel = try? modelContext.fetch(descriptor).first {
             EpisodeListView(podcastModel: podcastModel)

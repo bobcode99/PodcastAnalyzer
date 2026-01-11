@@ -468,11 +468,17 @@ struct StorageSettingsTab: View {
   }
 
   private func calculateImageCacheSize() async -> Int64 {
-    let fileManager = FileManager.default
-    let cachesDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-    let cacheDir = cachesDir.appendingPathComponent("ImageCache")
+    // FileManager enumeration must be done synchronously in Swift 6
+    // Use nonisolated helper to avoid async context restrictions
+    Self.enumerateDirectorySize(at: "ImageCache", in: .cachesDirectory)
+  }
 
-    guard let enumerator = fileManager.enumerator(at: cacheDir, includingPropertiesForKeys: [.fileSizeKey])
+  private nonisolated static func enumerateDirectorySize(at subpath: String, in searchPath: FileManager.SearchPathDirectory) -> Int64 {
+    let fileManager = FileManager.default
+    let baseDir = fileManager.urls(for: searchPath, in: .userDomainMask)[0]
+    let targetDir = baseDir.appendingPathComponent(subpath)
+
+    guard let enumerator = fileManager.enumerator(at: targetDir, includingPropertiesForKeys: [.fileSizeKey])
     else { return 0 }
 
     var totalSize: Int64 = 0
@@ -489,20 +495,8 @@ struct StorageSettingsTab: View {
   }
 
   private func calculateTranscriptsSize() async -> Int64 {
-    let fileManager = FileManager.default
-    let documentsDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    let captionsDir = documentsDir.appendingPathComponent("Captions")
-
-    guard let enumerator = fileManager.enumerator(at: captionsDir, includingPropertiesForKeys: [.fileSizeKey])
-    else { return 0 }
-
-    var totalSize: Int64 = 0
-    for case let fileURL as URL in enumerator {
-      if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-        totalSize += Int64(size)
-      }
-    }
-    return totalSize
+    // Reuse the same nonisolated helper for Captions directory
+    Self.enumerateDirectorySize(at: "Captions", in: .documentDirectory)
   }
 
   private func countAIAnalyses() -> Int {
@@ -523,12 +517,10 @@ struct StorageSettingsTab: View {
     clearingMessage = "cache"
 
     Task {
-      await ImageCacheManager.shared.clearAllCache()
-      await MainActor.run {
-        isClearingData = false
-        clearingMessage = ""
-        imageCacheSize = "0 bytes"
-      }
+      ImageCacheManager.shared.clearAllCache()
+      isClearingData = false
+      clearingMessage = ""
+      imageCacheSize = "0 bytes"
     }
   }
 
