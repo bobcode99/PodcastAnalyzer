@@ -126,38 +126,56 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
     _ session: URLSession, downloadTask: URLSessionDownloadTask,
     didFinishDownloadingTo location: URL
   ) {
+    // CRITICAL: URLSession deletes the temp file as soon as this method returns!
+    // We MUST copy the file SYNCHRONOUSLY here, before any async work.
+
+    // Get file extension from URL
+    let originalURL = downloadTask.originalRequest?.url
+    var fileExtension = originalURL?.pathExtension.lowercased() ?? "mp3"
+    let validExtensions = ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"]
+    if fileExtension.isEmpty || !validExtensions.contains(fileExtension) {
+      fileExtension = "mp3"
+    }
+
+    // Create our own temp file and copy SYNCHRONOUSLY
+    let tempDirectory = FileManager.default.temporaryDirectory
+    let ourTempFile = tempDirectory.appendingPathComponent(UUID().uuidString + ".\(fileExtension)")
+
+    do {
+      try FileManager.default.copyItem(at: location, to: ourTempFile)
+      logger.info("Copied download to temp location: \(ourTempFile.lastPathComponent)")
+    } catch {
+      logger.error("Failed to copy temp file: \(error.localizedDescription)")
+      // Update state asynchronously
+      Task {
+        if let episodeKey = await downloadTracker.getDownloadKey(for: downloadTask) {
+          await downloadTracker.removeDownload(for: episodeKey)
+          await MainActor.run {
+            DownloadManager.shared.downloadStates[episodeKey] = .failed(error: "Failed to save download: \(error.localizedDescription)")
+          }
+        }
+      }
+      return
+    }
+
+    // Now do the rest asynchronously - the file is safely copied
     Task {
       guard let episodeKey = await downloadTracker.getDownloadKey(for: downloadTask) else {
         logger.warning("Download finished but no matching episode key found")
+        try? FileManager.default.removeItem(at: ourTempFile)
         return
       }
 
       guard let (podcastTitle, episodeTitle) = parseEpisodeKey(episodeKey) else {
         logger.error("Invalid episode key format: \(episodeKey)")
+        try? FileManager.default.removeItem(at: ourTempFile)
         return
       }
 
-      logger.info("Download finished for: \(episodeTitle), starting file processing...")
-
-      // Get the original URL for proper file extension
-      let originalURL = await downloadTracker.getOriginalURL(for: episodeKey) ?? downloadTask.originalRequest?.url
-      var fileExtension = originalURL?.pathExtension.lowercased() ?? "mp3"
-
-      // Validate file extension
-      let validExtensions = ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"]
-      if fileExtension.isEmpty || !validExtensions.contains(fileExtension) {
-        fileExtension = "mp3"
-      }
-
-      // CRITICAL: URLSession will delete the temp file as soon as this method returns!
-      // We must copy it synchronously to our own location first
-      let tempDirectory = FileManager.default.temporaryDirectory
-      let ourTempFile = tempDirectory.appendingPathComponent(UUID().uuidString + ".\(fileExtension)")
+      logger.info("Download finished for: \(episodeTitle), processing file...")
 
       do {
-        // Copy the file synchronously before delegate returns
-        try FileManager.default.copyItem(at: location, to: ourTempFile)
-        logger.info("Copied download to temp location: \(ourTempFile.lastPathComponent)")
+        logger.info("Processing downloaded file for: \(episodeTitle)")
 
         // Set finishing state on main thread
         await MainActor.run {
