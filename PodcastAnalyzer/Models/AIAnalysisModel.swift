@@ -107,7 +107,8 @@ final class EpisodeAIAnalysis {
 }
 
 // Helper for Q&A serialization - includes all fields from CloudQAResult
-struct QAEntry: Codable {
+// Marked as Sendable for Swift 6 concurrency safety
+struct QAEntry: Codable, Sendable {
     let question: String
     let answer: String
     let confidence: String
@@ -118,7 +119,7 @@ struct QAEntry: Codable {
     let timestamp: Date
     let jsonParseWarning: String?
 
-    init(from result: CloudQAResult) {
+    nonisolated init(from result: CloudQAResult) {
         self.question = result.question
         self.answer = result.answer
         self.confidence = result.confidence
@@ -130,8 +131,8 @@ struct QAEntry: Codable {
         self.jsonParseWarning = result.jsonParseWarning
     }
 
-    /// Convert back to CloudQAResult
-    func toCloudQAResult() -> CloudQAResult {
+    /// Convert back to CloudQAResult - nonisolated for use from any context
+    nonisolated func toCloudQAResult() -> CloudQAResult {
         let provider = CloudAIProvider(rawValue: providerRawValue) ?? .gemini
         return CloudQAResult(
             question: question,

@@ -54,7 +54,7 @@ class TranscriptGenerationViewModel {
     guard let context = modelContext else { return "en" }
 
     let descriptor = FetchDescriptor<PodcastInfoModel>(
-      predicate: #Predicate { $0.podcastInfo.title == podcastTitle }
+      predicate: #Predicate { $0.title == podcastTitle }
     )
 
     do {

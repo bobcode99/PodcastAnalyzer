@@ -5,7 +5,6 @@
 //  ViewModel for Library tab - manages subscribed podcasts, saved, downloaded, and latest episodes
 //
 
-import Combine
 import Foundation
 import SwiftData
 import SwiftUI
@@ -300,6 +299,10 @@ final class LibraryViewModel {
   private func loadDownloadedEpisodes() async {
     guard let context = modelContext else { return }
 
+    // First, sync SwiftData with actual files on disk
+    // This handles cases where downloads completed while no observer was listening
+    await syncDownloadedFilesWithSwiftData()
+
     // Fetch ALL EpisodeDownloadModel and filter in memory
     // This avoids potential SwiftData predicate issues with Unicode strings
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
@@ -325,6 +328,70 @@ final class LibraryViewModel {
       logger.info("Loaded \(self.downloadedEpisodes.count) downloaded episodes")
     } catch {
       logger.error("Download fetch failed: \(error)")
+    }
+  }
+
+  /// Syncs SwiftData with actual downloaded files on disk
+  /// This handles cases where downloads completed but the notification was missed
+  private func syncDownloadedFilesWithSwiftData() async {
+    guard let context = modelContext else { return }
+
+    var syncedCount = 0
+
+    // Check each episode from all podcasts
+    for podcast in allPodcasts {
+      let podcastInfo = podcast.podcastInfo
+
+      for episode in podcastInfo.episodes {
+        // Ask DownloadManager if this episode has a file on disk
+        let state = downloadManager.getDownloadState(
+          episodeTitle: episode.title,
+          podcastTitle: podcastInfo.title
+        )
+
+        // If downloaded on disk, ensure SwiftData is synced
+        if case .downloaded(let localPath) = state {
+          let episodeKey = "\(podcastInfo.title)\(Self.episodeKeyDelimiter)\(episode.title)"
+
+          // Check if SwiftData entry exists and has correct path
+          let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+            predicate: #Predicate { $0.id == episodeKey }
+          )
+
+          do {
+            if let existingModel = try context.fetch(descriptor).first {
+              // Update if localAudioPath is missing or different
+              if existingModel.localAudioPath != localPath {
+                existingModel.localAudioPath = localPath
+                existingModel.downloadedDate = existingModel.downloadedDate ?? Date()
+                syncedCount += 1
+              }
+            } else {
+              // Create new SwiftData entry for this downloaded file
+              guard let audioURL = episode.audioURL else { continue }
+
+              let model = EpisodeDownloadModel(
+                episodeTitle: episode.title,
+                podcastTitle: podcastInfo.title,
+                audioURL: audioURL,
+                localAudioPath: localPath,
+                downloadedDate: Date(),
+                imageURL: episode.imageURL ?? podcastInfo.imageURL,
+                pubDate: episode.pubDate
+              )
+              context.insert(model)
+              syncedCount += 1
+            }
+          } catch {
+            logger.error("Failed to sync episode \(episode.title): \(error.localizedDescription)")
+          }
+        }
+      }
+    }
+
+    if syncedCount > 0 {
+      try? context.save()
+      logger.info("Synced \(syncedCount) downloaded episodes from disk to SwiftData")
     }
   }
 

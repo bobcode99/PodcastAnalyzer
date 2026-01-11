@@ -158,7 +158,7 @@ final class ExpandedPlayerViewModel {
 
     let podcastName = podcastTitle
     let descriptor = FetchDescriptor<PodcastInfoModel>(
-      predicate: #Predicate { $0.podcastInfo.title == podcastName }
+      predicate: #Predicate { $0.title == podcastName }
     )
 
     do {

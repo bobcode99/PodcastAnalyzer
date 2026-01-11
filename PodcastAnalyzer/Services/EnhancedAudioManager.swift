@@ -13,7 +13,6 @@
 //
 
 import AVFoundation
-import Combine
 import Foundation
 import MediaPlayer
 import os.log
@@ -29,7 +28,7 @@ extension Notification.Name {
   static let playbackPositionDidUpdate = Notification.Name("playbackPositionDidUpdate")
 }
 
-struct PlaybackPositionUpdate {
+struct PlaybackPositionUpdate: Sendable {
   let episodeTitle: String
   let podcastTitle: String
   let position: TimeInterval
@@ -63,8 +62,10 @@ class EnhancedAudioManager: NSObject {
   private var wasPlayingBeforeInterruption: Bool = false
 
   private var timeObserver: Any?
-  private var cancellables = Set<AnyCancellable>()
-  private var interruptionCancellable: AnyCancellable?  // Kept separate so cleanup() doesn't remove it
+  // Task-based observers for Swift 6 concurrency
+  private var interruptionTask: Task<Void, Never>?
+  private var playerEndedTask: Task<Void, Never>?
+  private var playerStalledTask: Task<Void, Never>?
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "AudioManager")
 
   // Use Unit Separator (U+001F) as delimiter - same as EpisodeDownloadModel
@@ -112,11 +113,12 @@ class EnhancedAudioManager: NSObject {
 
   private func setupInterruptionObserver() {
     #if os(iOS)
-    // Store in separate property so cleanup() doesn't remove it
-    interruptionCancellable = NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)
-      .sink { [weak self] notification in
+    // Use Task-based async sequence for Swift 6 concurrency
+    interruptionTask = Task { @MainActor [weak self] in
+      for await notification in NotificationCenter.default.notifications(named: AVAudioSession.interruptionNotification) {
         self?.handleAudioInterruption(notification)
       }
+    }
     logger.info("Audio interruption observer configured")
     #endif
   }
@@ -323,9 +325,12 @@ private func handleAudioInterruption(_ notification: Notification) {
   func seek(to time: TimeInterval) {
     let cmTime = CMTime(seconds: time, preferredTimescale: 600)
     player?.seek(to: cmTime) { [weak self] _ in
-      self?.updateNowPlayingCurrentTime()
-      self?.savePlaybackState()
-      self?.postPlaybackPositionUpdate()
+      // Dispatch to main actor since completion handler runs on arbitrary queue
+      Task { @MainActor in
+        self?.updateNowPlayingCurrentTime()
+        self?.savePlaybackState()
+        self?.postPlaybackPositionUpdate()
+      }
     }
   }
 
@@ -777,37 +782,40 @@ private func handleAudioInterruption(_ notification: Notification) {
     let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
     timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) {
       [weak self] time in
-      guard let self = self else { return }
+      // Since we're on .main queue, we can safely assume MainActor isolation
+      MainActor.assumeIsolated {
+        guard let self = self else { return }
 
-      self.currentTime = time.seconds
+        self.currentTime = time.seconds
 
-      // Track if duration was previously unknown
-      let previousDuration = self.duration
+        // Track if duration was previously unknown
+        let previousDuration = self.duration
 
-      if let newDuration = self.player?.currentItem?.duration.seconds,
-        newDuration.isFinite
-      {
-        self.duration = newDuration
+        if let newDuration = self.player?.currentItem?.duration.seconds,
+          newDuration.isFinite
+        {
+          self.duration = newDuration
 
-        // Update Now Playing duration when it first becomes available
-        // (transition from 0 or invalid to valid duration)
-        if previousDuration <= 0 && newDuration > 0 {
-          self.updateNowPlayingDuration()
+          // Update Now Playing duration when it first becomes available
+          // (transition from 0 or invalid to valid duration)
+          if previousDuration <= 0 && newDuration > 0 {
+            self.updateNowPlayingDuration()
+          }
         }
-      }
 
-      // Update current caption
-      self.updateCurrentCaption()
+        // Update current caption
+        self.updateCurrentCaption()
 
-      // Update Now Playing time every second
-      if Int(self.currentTime * 10) % 10 == 0 {
-        self.updateNowPlayingCurrentTime()
-      }
+        // Update Now Playing time every second
+        if Int(self.currentTime * 10) % 10 == 0 {
+          self.updateNowPlayingCurrentTime()
+        }
 
-      // Auto-save every 5 seconds and post notification for SwiftData persistence
-      if Int(self.currentTime) % 5 == 0 {
-        self.savePlaybackState()
-        self.postPlaybackPositionUpdate()
+        // Auto-save every 5 seconds and post notification for SwiftData persistence
+        if Int(self.currentTime) % 5 == 0 {
+          self.savePlaybackState()
+          self.postPlaybackPositionUpdate()
+        }
       }
     }
   }
@@ -815,19 +823,23 @@ private func handleAudioInterruption(_ notification: Notification) {
   // MARK: - Player Observers
 
   private func setupPlayerObservers(playerItem: AVPlayerItem) {
-    // Observe playback end
-    NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime, object: playerItem)
-      .sink { [weak self] _ in
+    // Cancel any existing player observer tasks
+    playerEndedTask?.cancel()
+    playerStalledTask?.cancel()
+
+    // Observe playback end using Task-based async sequence
+    playerEndedTask = Task { @MainActor [weak self] in
+      for await _ in NotificationCenter.default.notifications(named: .AVPlayerItemDidPlayToEndTime, object: playerItem) {
         self?.handlePlaybackEnded()
       }
-      .store(in: &cancellables)
+    }
 
-    // Observe playback stall
-    NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled, object: playerItem)
-      .sink { [weak self] _ in
+    // Observe playback stall using Task-based async sequence
+    playerStalledTask = Task { [weak self] in
+      for await _ in NotificationCenter.default.notifications(named: .AVPlayerItemPlaybackStalled, object: playerItem) {
         self?.logger.warning("Playback stalled")
       }
-      .store(in: &cancellables)
+    }
   }
 
   private func handlePlaybackEnded() {
@@ -873,19 +885,23 @@ private func handleAudioInterruption(_ notification: Notification) {
       timeObserver = nil
     }
 
+    // Cancel Task-based observers
+    playerEndedTask?.cancel()
+    playerEndedTask = nil
+    playerStalledTask?.cancel()
+    playerStalledTask = nil
+
     player?.pause()
     player = nil
-    cancellables.removeAll()
   }
 
-  deinit {
-    cleanup()
-  }
+  // Note: This is a singleton designed to live for the app's lifetime.
+  // No deinit needed - the singleton is never deallocated.
 }
 
 // MARK: - Supporting Models
 
-struct PlaybackEpisode: Identifiable, Codable {
+struct PlaybackEpisode: Identifiable, Codable, Sendable {
   let id: String
   let title: String
   let podcastTitle: String
@@ -897,7 +913,7 @@ struct PlaybackEpisode: Identifiable, Codable {
   var guid: String?
 }
 
-struct CaptionSegment: Identifiable {
+struct CaptionSegment: Identifiable, Sendable {
   let id = UUID()
   let startTime: TimeInterval
   let endTime: TimeInterval

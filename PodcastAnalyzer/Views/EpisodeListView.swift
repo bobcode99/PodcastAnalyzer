@@ -294,7 +294,7 @@ struct EpisodeListView: View {
 
   private func findExistingPodcast(podcastName: String) -> PodcastInfoModel? {
     let descriptor = FetchDescriptor<PodcastInfoModel>(
-      predicate: #Predicate { $0.podcastInfo.title == podcastName }
+      predicate: #Predicate { $0.title == podcastName }
     )
     return try? modelContext.fetch(descriptor).first
   }

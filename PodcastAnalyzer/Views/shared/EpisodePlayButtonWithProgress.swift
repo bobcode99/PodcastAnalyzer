@@ -5,7 +5,6 @@
 //  Created by Bob on 2026/1/4.
 //
 
-import Combine
 import Foundation
 import SwiftData
 import SwiftUI
@@ -131,8 +130,7 @@ struct ReactiveEpisodePlayButton: View {
   // Observe audioManager to trigger re-renders on playback state changes
   private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
 
-  // Timer for periodic updates during playback
-  private static let playbackTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+  // State for triggering periodic refreshes during playback
   @State private var refreshTrigger = false
 
   init(episode: LibraryEpisode, action: @escaping () -> Void) {
@@ -173,9 +171,12 @@ struct ReactiveEpisodePlayButton: View {
       isDisabled: episode.episodeInfo.audioURL == nil,
       action: action
     )
-    .onReceive(Self.playbackTimer) { _ in
-      // Force refresh during playback
-      if isPlayingThisEpisode {
+    .task(id: isPlayingThisEpisode) {
+      // Task-based timer for periodic updates during playback
+      guard isPlayingThisEpisode else { return }
+      while !Task.isCancelled && isPlayingThisEpisode {
+        try? await Task.sleep(for: .milliseconds(500))
+        guard !Task.isCancelled else { break }
         refreshTrigger.toggle()
       }
     }

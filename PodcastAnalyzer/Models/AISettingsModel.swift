@@ -54,7 +54,7 @@ enum AnalysisLanguage: String, CaseIterable, Codable {
 
 // MARK: - Cloud AI Provider
 
-enum CloudAIProvider: String, CaseIterable, Codable {
+enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
     case applePCC = "Apple PCC"  // Apple Private Cloud Compute via Shortcuts
     case openai = "OpenAI"
     case claude = "Claude"

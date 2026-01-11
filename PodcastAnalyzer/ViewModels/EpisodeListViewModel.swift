@@ -5,7 +5,6 @@
 //  ViewModel for EpisodeListView - handles filtering, sorting, and episode operations
 //
 
-import Combine
 import SwiftData
 import SwiftUI
 import ZMarkupParser
@@ -16,10 +15,18 @@ import UIKit
 import AppKit
 #endif
 
+import os.log
+
+private let viewModelLogger = Logger(subsystem: "com.podcast.analyzer", category: "ViewModelLifecycle")
+
 @MainActor
 @Observable
 final class EpisodeListViewModel {
   var episodeModels: [String: EpisodeDownloadModel] = [:]
+
+  #if DEBUG
+  private let instanceId = UUID()
+  #endif
   var selectedFilter: EpisodeFilter = .all
   var sortOldestFirst: Bool = false
   var searchText: String = ""
@@ -111,6 +118,9 @@ final class EpisodeListViewModel {
   init(podcastModel: PodcastInfoModel) {
     self.podcastModel = podcastModel
     parseDescription()
+    #if DEBUG
+    viewModelLogger.info("📦 EpisodeListViewModel INIT: \(self.instanceId) for \(podcastModel.podcastInfo.title)")
+    #endif
   }
 
   func setModelContext(_ context: ModelContext) {
@@ -370,11 +380,13 @@ final class EpisodeListViewModel {
 
   /// Clean up all resources to prevent memory leaks
   func cleanup() {
+    #if DEBUG
+    viewModelLogger.info("🗑️ EpisodeListViewModel CLEANUP: \(self.instanceId)")
+    #endif
     stopRefreshTimer()
     if let observer = downloadCompletionObserver {
       NotificationCenter.default.removeObserver(observer)
       downloadCompletionObserver = nil
     }
   }
-
 }

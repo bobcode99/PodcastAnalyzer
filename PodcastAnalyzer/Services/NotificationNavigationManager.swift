@@ -52,7 +52,7 @@ class NotificationNavigationManager {
         guard let context = modelContext else { return nil }
         
         let descriptor = FetchDescriptor<PodcastInfoModel>(
-            predicate: #Predicate { $0.podcastInfo.title == podcastTitle }
+            predicate: #Predicate { $0.title == podcastTitle }
         )
         
         guard let podcast = try? context.fetch(descriptor).first,

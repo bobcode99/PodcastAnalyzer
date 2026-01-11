@@ -5,7 +5,6 @@
 //  Coordinates playback position updates between EnhancedAudioManager and SwiftData
 //
 
-import Combine
 import Foundation
 import SwiftData
 import os.log
@@ -19,10 +18,10 @@ class PlaybackStateCoordinator {
   private static let episodeKeyDelimiter = "\u{1F}"
 
   private var modelContext: ModelContext?
-  private var cancellables = Set<AnyCancellable>()
+  private var notificationTask: Task<Void, Never>?
   private let logger = Logger(
     subsystem: "com.podcast.analyzer", category: "PlaybackStateCoordinator")
-  
+
   // Helper to create episode ID matching episode key format
   private func makeEpisodeId(podcastTitle: String, episodeTitle: String) -> String {
     return "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episodeTitle)"
@@ -35,15 +34,19 @@ class PlaybackStateCoordinator {
   }
 
   private func setupNotificationObserver() {
-    NotificationCenter.default.publisher(for: .playbackPositionDidUpdate)
-      .compactMap { $0.userInfo?["update"] as? PlaybackPositionUpdate }
-      .sink { [weak self] update in
-        self?.savePlaybackPosition(update: update)
+    notificationTask = Task { [weak self] in
+      for await notification in NotificationCenter.default.notifications(named: .playbackPositionDidUpdate) {
+        guard let update = notification.userInfo?["update"] as? PlaybackPositionUpdate else { continue }
+        await MainActor.run {
+          self?.savePlaybackPosition(update: update)
+        }
       }
-      .store(in: &cancellables)
+    }
 
     logger.info("Playback state coordinator initialized")
   }
+
+  // Note: No deinit needed - task uses [weak self] and will stop when coordinator is deallocated
 
   private func savePlaybackPosition(update: PlaybackPositionUpdate) {
     guard let context = modelContext else { return }

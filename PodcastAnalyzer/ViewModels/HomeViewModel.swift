@@ -317,7 +317,7 @@ final class HomeViewModel {
         // Check if already subscribed
         let title = podcastInfo.title
         let existingDescriptor = FetchDescriptor<PodcastInfoModel>(
-          predicate: #Predicate { $0.podcastInfo.title == title }
+          predicate: #Predicate { $0.title == title }
         )
 
         if (try? context.fetch(existingDescriptor).first) != nil {

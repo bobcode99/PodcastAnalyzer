@@ -856,7 +856,7 @@ struct LibraryEpisodeContextMenu: View {
   private var goToShowButton: some View {
     let title = episode.podcastTitle
     let descriptor = FetchDescriptor<PodcastInfoModel>(
-      predicate: #Predicate { $0.podcastInfo.title == title }
+      predicate: #Predicate { $0.title == title }
     )
     if let podcastModel = try? modelContext.fetch(descriptor).first {
       NavigationLink(destination: EpisodeListView(podcastModel: podcastModel)) {
