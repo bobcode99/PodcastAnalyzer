@@ -1,25 +1,16 @@
 import SwiftData
 import SwiftUI
+import UserNotifications
+
+#if os(iOS)
+import UIKit
+#endif
 
 struct SettingsView: View {
-  @StateObject private var viewModel = SettingsViewModel()
-  @StateObject private var syncManager = BackgroundSyncManager.shared
+  @State private var viewModel = SettingsViewModel()
+  @State private var syncManager = BackgroundSyncManager.shared
   @Environment(\.modelContext) var modelContext
   @State private var showAddFeedSheet = false
-
-  // Data management state
-  @State private var showClearCacheConfirmation = false
-  @State private var showClearDownloadsConfirmation = false
-  @State private var showClearTranscriptsConfirmation = false
-  @State private var showClearAIAnalysisConfirmation = false
-  @State private var isClearingData = false
-  @State private var clearingMessage = ""
-
-  // Storage info
-  @State private var imageCacheSize: String = "Calculating..."
-  @State private var downloadedAudioSize: String = "Calculating..."
-  @State private var transcriptsSize: String = "Calculating..."
-  @State private var aiAnalysisCount: Int = 0
 
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
@@ -28,7 +19,7 @@ struct SettingsView: View {
       List {
         // MARK: - Sync & Notifications Section
         Section {
-          Toggle(isOn: $syncManager.isBackgroundSyncEnabled) {
+          Toggle(isOn: Binding(get: { syncManager.isBackgroundSyncEnabled }, set: { syncManager.isBackgroundSyncEnabled = $0 })) {
             HStack {
               Image(systemName: "arrow.triangle.2.circlepath")
                 .foregroundColor(.blue)
@@ -44,7 +35,7 @@ struct SettingsView: View {
             }
           }
 
-          Toggle(isOn: $syncManager.isNotificationsEnabled) {
+          Toggle(isOn: Binding(get: { syncManager.isNotificationsEnabled }, set: { syncManager.isNotificationsEnabled = $0 })) {
             HStack {
               Image(systemName: "bell.badge")
                 .foregroundColor(.orange)
@@ -81,6 +72,25 @@ struct SettingsView: View {
           Text("Sync & Notifications")
         } footer: {
           Text("Automatically check for new episodes every 5 minutes")
+        }
+
+        // MARK: - Appearance Section
+        Section {
+          Toggle(isOn: Binding(
+            get: { viewModel.showEpisodeArtwork },
+            set: { viewModel.setShowEpisodeArtwork($0) }
+          )) {
+            HStack {
+              Image(systemName: "photo")
+                .foregroundColor(.blue)
+                .frame(width: 24)
+              Text("Show Episode Artwork")
+            }
+          }
+        } header: {
+          Text("Appearance")
+        } footer: {
+          Text("Hide artwork in episode lists to reduce memory usage")
         }
 
         // MARK: - Subscriptions Section
@@ -123,10 +133,45 @@ struct SettingsView: View {
           .onChange(of: viewModel.defaultPlaybackSpeed) { _, newValue in
             viewModel.setDefaultPlaybackSpeed(newValue)
           }
+
+          Toggle(isOn: Binding(
+            get: { viewModel.autoPlayNextEpisode },
+            set: { viewModel.setAutoPlayNextEpisode($0) }
+          )) {
+            HStack {
+              Image(systemName: "shuffle")
+                .foregroundColor(.purple)
+                .frame(width: 24)
+              Text("Auto-Play Random Episode")
+            }
+          }
         } header: {
           Text("Playback")
         } footer: {
-          Text("New episodes will start at this speed")
+          Text("When enabled, a random unplayed episode will play when the queue is empty")
+        }
+
+        // MARK: - Region Section
+        Section {
+          Picker(selection: $viewModel.selectedRegion) {
+            ForEach(Constants.podcastRegions, id: \.code) { region in
+              Text(region.name).tag(region.code)
+            }
+          } label: {
+            HStack {
+              Image(systemName: "globe")
+                .foregroundColor(.blue)
+                .frame(width: 24)
+              Text("Default Region")
+            }
+          }
+          .onChange(of: viewModel.selectedRegion) { _, newValue in
+            viewModel.setSelectedRegion(newValue)
+          }
+        } header: {
+          Text("Discovery")
+        } footer: {
+          Text("Region for browsing top podcasts on Home")
         }
 
         // MARK: - Transcript Section
@@ -201,117 +246,20 @@ struct SettingsView: View {
 
         // MARK: - Data Management Section
         Section {
-          // Clear Image Cache
-          Button(action: {
-            showClearCacheConfirmation = true
-          }) {
+          NavigationLink {
+            DataManagementView()
+          } label: {
             HStack {
-              Image(systemName: "photo.on.rectangle")
-                .foregroundColor(.orange)
+              Image(systemName: "externaldrive")
+                .foregroundColor(.gray)
                 .frame(width: 24)
-              VStack(alignment: .leading, spacing: 2) {
-                Text("Image Cache")
-                Text(imageCacheSize)
-                  .font(.caption)
-                  .foregroundColor(.secondary)
-              }
-              Spacer()
-              if isClearingData && clearingMessage == "cache" {
-                ProgressView()
-                  .scaleEffect(0.8)
-              } else {
-                Text("Clear")
-                  .font(.subheadline)
-                  .foregroundColor(.blue)
-              }
+              Text("Data Management")
             }
           }
-          .disabled(isClearingData)
-
-          // Clear All Downloads
-          Button(action: {
-            showClearDownloadsConfirmation = true
-          }) {
-            HStack {
-              Image(systemName: "arrow.down.circle.fill")
-                .foregroundColor(.green)
-                .frame(width: 24)
-              VStack(alignment: .leading, spacing: 2) {
-                Text("Downloaded Episodes")
-                Text(downloadedAudioSize)
-                  .font(.caption)
-                  .foregroundColor(.secondary)
-              }
-              Spacer()
-              if isClearingData && clearingMessage == "downloads" {
-                ProgressView()
-                  .scaleEffect(0.8)
-              } else {
-                Text("Remove All")
-                  .font(.subheadline)
-                  .foregroundColor(.red)
-              }
-            }
-          }
-          .disabled(isClearingData)
-
-          // Clear All Transcripts
-          Button(action: {
-            showClearTranscriptsConfirmation = true
-          }) {
-            HStack {
-              Image(systemName: "text.bubble")
-                .foregroundColor(.blue)
-                .frame(width: 24)
-              VStack(alignment: .leading, spacing: 2) {
-                Text("Transcripts")
-                Text(transcriptsSize)
-                  .font(.caption)
-                  .foregroundColor(.secondary)
-              }
-              Spacer()
-              if isClearingData && clearingMessage == "transcripts" {
-                ProgressView()
-                  .scaleEffect(0.8)
-              } else {
-                Text("Remove All")
-                  .font(.subheadline)
-                  .foregroundColor(.red)
-              }
-            }
-          }
-          .disabled(isClearingData)
-
-          // Clear All AI Analysis
-          Button(action: {
-            showClearAIAnalysisConfirmation = true
-          }) {
-            HStack {
-              Image(systemName: "sparkles")
-                .foregroundColor(.purple)
-                .frame(width: 24)
-              VStack(alignment: .leading, spacing: 2) {
-                Text("AI Analysis Data")
-                Text("\(aiAnalysisCount) analyses")
-                  .font(.caption)
-                  .foregroundColor(.secondary)
-              }
-              Spacer()
-              if isClearingData && clearingMessage == "ai" {
-                ProgressView()
-                  .scaleEffect(0.8)
-              } else {
-                Text("Remove All")
-                  .font(.subheadline)
-                  .foregroundColor(.red)
-              }
-            }
-          }
-          .disabled(isClearingData)
         } header: {
-          Text("Data Management")
+          Text("Storage")
         } footer: {
-          Text("Clearing downloads and transcripts will free up storage space but won't affect your subscriptions")
+          Text("Manage cached images, downloads, transcripts, and AI analysis data")
         }
 
         // MARK: - About Section
@@ -329,9 +277,13 @@ struct SettingsView: View {
           Text("About")
         }
       }
+      #if os(iOS)
       .listStyle(.insetGrouped)
+      #else
+      .listStyle(.sidebar)
+      #endif
       .navigationTitle("Settings")
-      .toolbarTitleDisplayMode(.inlineLarge)
+      .platformToolbarTitleDisplayMode()
       .sheet(isPresented: $showAddFeedSheet) {
         AddFeedView(viewModel: viewModel, modelContext: modelContext) {
           showAddFeedSheet = false
@@ -340,251 +292,6 @@ struct SettingsView: View {
       .onAppear {
         viewModel.loadFeeds(modelContext: modelContext)
         viewModel.checkTranscriptModelStatus()
-        calculateStorageInfo()
-      }
-      // Clear cache confirmation
-      .confirmationDialog(
-        "Clear Image Cache",
-        isPresented: $showClearCacheConfirmation,
-        titleVisibility: .visible
-      ) {
-        Button("Clear Cache", role: .destructive) {
-          clearImageCache()
-        }
-        Button("Cancel", role: .cancel) {}
-      } message: {
-        Text("This will remove all cached images. They will be re-downloaded when needed.")
-      }
-      // Clear downloads confirmation
-      .confirmationDialog(
-        "Remove All Downloads",
-        isPresented: $showClearDownloadsConfirmation,
-        titleVisibility: .visible
-      ) {
-        Button("Remove All Downloads", role: .destructive) {
-          clearAllDownloads()
-        }
-        Button("Cancel", role: .cancel) {}
-      } message: {
-        Text("This will delete all downloaded episodes. You can re-download them later.")
-      }
-      // Clear transcripts confirmation
-      .confirmationDialog(
-        "Remove All Transcripts",
-        isPresented: $showClearTranscriptsConfirmation,
-        titleVisibility: .visible
-      ) {
-        Button("Remove All Transcripts", role: .destructive) {
-          clearAllTranscripts()
-        }
-        Button("Cancel", role: .cancel) {}
-      } message: {
-        Text("This will delete all generated transcripts. You can regenerate them later.")
-      }
-      // Clear AI analysis confirmation
-      .confirmationDialog(
-        "Remove All AI Analysis",
-        isPresented: $showClearAIAnalysisConfirmation,
-        titleVisibility: .visible
-      ) {
-        Button("Remove All AI Analysis", role: .destructive) {
-          clearAllAIAnalysis()
-        }
-        Button("Cancel", role: .cancel) {}
-      } message: {
-        Text("This will delete all AI-generated summaries, entities, highlights, and Q&A history.")
-      }
-    }
-  }
-
-  // MARK: - Storage Calculation
-
-  private func calculateStorageInfo() {
-    Task {
-      // Calculate image cache size
-      let cacheSize = await calculateImageCacheSize()
-      await MainActor.run {
-        imageCacheSize = formatBytes(cacheSize)
-      }
-
-      // Calculate downloaded audio size
-      let audioSize = await calculateDownloadedAudioSize()
-      await MainActor.run {
-        downloadedAudioSize = formatBytes(audioSize)
-      }
-
-      // Calculate transcripts size
-      let captionsSize = await calculateTranscriptsSize()
-      await MainActor.run {
-        transcriptsSize = formatBytes(captionsSize)
-      }
-
-      // Count AI analyses
-      let analysisCount = countAIAnalyses()
-      await MainActor.run {
-        aiAnalysisCount = analysisCount
-      }
-    }
-  }
-
-  private func calculateImageCacheSize() async -> Int64 {
-    let fileManager = FileManager.default
-    let cachesDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-    let cacheDir = cachesDir.appendingPathComponent("ImageCache")
-
-    guard let enumerator = fileManager.enumerator(
-      at: cacheDir,
-      includingPropertiesForKeys: [.fileSizeKey]
-    ) else { return 0 }
-
-    var totalSize: Int64 = 0
-    for case let fileURL as URL in enumerator {
-      if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-        totalSize += Int64(size)
-      }
-    }
-    return totalSize
-  }
-
-  private func calculateDownloadedAudioSize() async -> Int64 {
-    await FileStorageManager.shared.calculateTotalAudioSize()
-  }
-
-  private func calculateTranscriptsSize() async -> Int64 {
-    let fileManager = FileManager.default
-    let documentsDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    let captionsDir = documentsDir.appendingPathComponent("Captions")
-
-    guard let enumerator = fileManager.enumerator(
-      at: captionsDir,
-      includingPropertiesForKeys: [.fileSizeKey]
-    ) else { return 0 }
-
-    var totalSize: Int64 = 0
-    for case let fileURL as URL in enumerator {
-      if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-        totalSize += Int64(size)
-      }
-    }
-    return totalSize
-  }
-
-  private func countAIAnalyses() -> Int {
-    let descriptor = FetchDescriptor<EpisodeAIAnalysis>()
-    return (try? modelContext.fetchCount(descriptor)) ?? 0
-  }
-
-  private func formatBytes(_ bytes: Int64) -> String {
-    let formatter = ByteCountFormatter()
-    formatter.countStyle = .file
-    return formatter.string(fromByteCount: bytes)
-  }
-
-  // MARK: - Clear Data Actions
-
-  private func clearImageCache() {
-    isClearingData = true
-    clearingMessage = "cache"
-
-    Task {
-      await ImageCacheManager.shared.clearAllCache()
-
-      await MainActor.run {
-        isClearingData = false
-        clearingMessage = ""
-        imageCacheSize = "0 bytes"
-      }
-    }
-  }
-
-  private func clearAllDownloads() {
-    isClearingData = true
-    clearingMessage = "downloads"
-
-    Task {
-      // Get all downloaded episodes and delete their files
-      let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-        predicate: #Predicate { $0.localAudioPath != nil }
-      )
-
-      if let downloadedEpisodes = try? modelContext.fetch(descriptor) {
-        for episode in downloadedEpisodes {
-          if let localPath = episode.localAudioPath {
-            try? FileManager.default.removeItem(atPath: localPath)
-          }
-          episode.localAudioPath = nil
-          episode.downloadedDate = nil
-          episode.fileSize = 0
-        }
-        try? modelContext.save()
-      }
-
-      // Also clear via FileStorageManager
-      await FileStorageManager.shared.clearAllAudioFiles()
-
-      await MainActor.run {
-        isClearingData = false
-        clearingMessage = ""
-        downloadedAudioSize = "0 bytes"
-      }
-    }
-  }
-
-  private func clearAllTranscripts() {
-    isClearingData = true
-    clearingMessage = "transcripts"
-
-    Task {
-      // Update models to remove caption paths
-      let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-        predicate: #Predicate { $0.captionPath != nil }
-      )
-
-      if let episodesWithCaptions = try? modelContext.fetch(descriptor) {
-        for episode in episodesWithCaptions {
-          episode.captionPath = nil
-        }
-        try? modelContext.save()
-      }
-
-      // Clear captions directory
-      await FileStorageManager.shared.clearAllCaptionFiles()
-
-      await MainActor.run {
-        isClearingData = false
-        clearingMessage = ""
-        transcriptsSize = "0 bytes"
-      }
-    }
-  }
-
-  private func clearAllAIAnalysis() {
-    isClearingData = true
-    clearingMessage = "ai"
-
-    Task {
-      // Delete all AI analysis records
-      let descriptor = FetchDescriptor<EpisodeAIAnalysis>()
-      if let analyses = try? modelContext.fetch(descriptor) {
-        for analysis in analyses {
-          modelContext.delete(analysis)
-        }
-        try? modelContext.save()
-      }
-
-      // Also delete quick tags
-      let tagsDescriptor = FetchDescriptor<EpisodeQuickTagsModel>()
-      if let tags = try? modelContext.fetch(tagsDescriptor) {
-        for tag in tags {
-          modelContext.delete(tag)
-        }
-        try? modelContext.save()
-      }
-
-      await MainActor.run {
-        isClearingData = false
-        clearingMessage = ""
-        aiAnalysisCount = 0
       }
     }
   }
@@ -743,7 +450,7 @@ struct FeedRowView: View {
 
 // MARK: - Add Feed Sheet View
 struct AddFeedView: View {
-  @ObservedObject var viewModel: SettingsViewModel
+  @Bindable var viewModel: SettingsViewModel
   var modelContext: ModelContext
   var onDismiss: () -> Void
 
@@ -775,11 +482,13 @@ struct AddFeedView: View {
           TextField("https://example.com/feed.xml", text: $viewModel.rssUrlInput)
             .textFieldStyle(.plain)
             .padding(16)
-            .background(Color(.systemGray6))
+            .background(Color.platformSystemGray6)
             .cornerRadius(12)
             .autocorrectionDisabled()
+            #if os(iOS)
             .textInputAutocapitalization(.never)
             .keyboardType(.URL)
+            #endif
             .disabled(viewModel.isValidating)
             .focused($isTextFieldFocused)
 
@@ -850,9 +559,11 @@ struct AddFeedView: View {
         .padding(.horizontal, 24)
         .padding(.bottom, 24)
       }
+      #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)
+      #endif
       .toolbar {
-        ToolbarItem(placement: .navigationBarLeading) {
+        ToolbarItem(placement: .cancellationAction) {
           Button("Cancel") {
             viewModel.clearMessages()
             onDismiss()

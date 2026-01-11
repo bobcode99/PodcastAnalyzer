@@ -6,10 +6,17 @@
 //
 
 import Combine
+import Observation
 import SwiftData
 import SwiftUI
 import ZMarkupParser
 import os.log
+
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "EpisodeDetailViewModel")
 
@@ -42,12 +49,20 @@ final class EpisodeDetailViewModel {
     Text("Loading...").foregroundColor(.secondary)
   )
 
+  @ObservationIgnored
   let episode: PodcastEpisodeInfo
+
+  @ObservationIgnored
   let podcastTitle: String
+
+  @ObservationIgnored
   private let fallbackImageURL: String?
 
   // Reference singletons
+  @ObservationIgnored
   let audioManager = EnhancedAudioManager.shared
+
+  @ObservationIgnored
   private let downloadManager = DownloadManager.shared
 
   // Download state
@@ -57,6 +72,8 @@ final class EpisodeDetailViewModel {
   var transcriptState: TranscriptState = .idle
   var transcriptText: String = ""
   var isModelReady: Bool = false
+
+  @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
 
   // Parsed transcript segments for live captions
@@ -64,11 +81,26 @@ final class EpisodeDetailViewModel {
   var transcriptSearchQuery: String = ""
 
   // Playback state from SwiftData
+  @ObservationIgnored
   private var episodeModel: EpisodeDownloadModel?
+
+  @ObservationIgnored
   private var modelContext: ModelContext?
 
-  // Cancellables for observation
+  // Timer cancellables - stored separately for explicit cleanup
+  @ObservationIgnored
+  private var downloadTimerCancellable: AnyCancellable?
+
+  @ObservationIgnored
+  private var playbackTimerCancellable: AnyCancellable?
+
+  // Cancellables for observation (still used for other Combine publishers)
+  @ObservationIgnored
   private var cancellables = Set<AnyCancellable>()
+
+  // Flag to track transcript manager observation
+  @ObservationIgnored
+  private var isObservingTranscriptManager = false
 
   // Podcast language for transcription
   var podcastLanguage: String = "en"
@@ -93,12 +125,14 @@ final class EpisodeDetailViewModel {
     checkAndObserveTranscriptJob()
   }
 
+  /// Episode key using centralized utility
+  private var episodeKey: String {
+    EpisodeKeyUtils.makeKey(podcastTitle: podcastTitle, episodeTitle: episode.title)
+  }
+
   /// Checks if there's an active transcript job and starts observing
   private func checkAndObserveTranscriptJob() {
-    // Use Unit Separator (U+001F) as delimiter - same as TranscriptManager
-    let delimiter = "\u{1F}"
-    let jobId = "\(podcastTitle)\(delimiter)\(episode.title)"
-    if TranscriptManager.shared.activeJobs[jobId] != nil {
+    if TranscriptManager.shared.activeJobs[episodeKey] != nil {
       observeTranscriptManager()
     }
   }
@@ -186,6 +220,14 @@ final class EpisodeDetailViewModel {
     episodeModel?.duration ?? 0
   }
 
+  var lastPlaybackPosition: TimeInterval {
+    episodeModel?.lastPlaybackPosition ?? 0
+  }
+
+  var formattedDuration: String? {
+    episode.formattedDuration
+  }
+
   var playbackProgress: Double {
     episodeModel?.progress ?? 0
   }
@@ -208,7 +250,7 @@ final class EpisodeDetailViewModel {
     }
 
     let playbackEpisode = PlaybackEpisode(
-      id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)",
+      id: episodeKey,
       title: episode.title,
       podcastTitle: podcastTitle,
       audioURL: playbackURL,
@@ -219,8 +261,20 @@ final class EpisodeDetailViewModel {
       guid: episode.guid
     )
 
-    // Resume from saved position if available
-    let startTime = episodeModel?.lastPlaybackPosition ?? 0
+    // Resume from saved position, but reset to 0 if episode was marked as completed
+    // This allows users to replay completed episodes from the beginning
+    var startTime: TimeInterval = 0
+    if let model = episodeModel {
+      if model.isCompleted {
+        // Reset position for completed episodes (user wants to replay)
+        model.lastPlaybackPosition = 0
+        model.isCompleted = false
+        try? modelContext?.save()
+        startTime = 0
+      } else {
+        startTime = model.lastPlaybackPosition
+      }
+    }
 
     // Use default speed from settings only for fresh plays (not resuming)
     let useDefaultSpeed = startTime == 0
@@ -277,29 +331,35 @@ final class EpisodeDetailViewModel {
   }
 
   private func observeDownloadState() {
-    // Poll for download state changes
-    Timer.publish(every: 0.5, on: .main, in: .common)
+    // Cancel any existing download timer first
+    downloadTimerCancellable?.cancel()
+
+    // Poll for download state changes - use instance variable for explicit cleanup
+    downloadTimerCancellable = Timer.publish(every: 0.5, on: .main, in: .common)
       .autoconnect()
       .sink { [weak self] _ in
-        self?.updateDownloadState()
+        guard let self else { return }
+        self.updateDownloadState()
       }
-      .store(in: &cancellables)
   }
 
   private func observePlaybackState() {
+    // Cancel any existing playback timer first
+    playbackTimerCancellable?.cancel()
+
     // Poll for playback state changes (duration, progress, completion)
-    Timer.publish(every: 2.0, on: .main, in: .common)
+    playbackTimerCancellable = Timer.publish(every: 2.0, on: .main, in: .common)
       .autoconnect()
       .sink { [weak self] _ in
-        self?.refreshEpisodeModel()
+        guard let self else { return }
+        self.refreshEpisodeModel()
       }
-      .store(in: &cancellables)
   }
 
   private func refreshEpisodeModel() {
     guard let context = modelContext else { return }
 
-    let id = "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
+    let id = episodeKey
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
       predicate: #Predicate { $0.id == id }
     )
@@ -314,15 +374,12 @@ final class EpisodeDetailViewModel {
     }
   }
 
-  // Use Unit Separator (U+001F) as delimiter - same as EpisodeDownloadModel
-  private static let episodeKeyDelimiter = "\u{1F}"
-
   // MARK: - SwiftData Persistence
 
   private func loadEpisodeModel() {
     guard let context = modelContext else { return }
 
-    let id = "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
+    let id = episodeKey
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
       predicate: #Predicate { $0.id == id }
     )
@@ -415,9 +472,15 @@ final class EpisodeDetailViewModel {
       return
     }
 
+    #if os(iOS)
+    let labelColor = UIColor.label
+    #else
+    let labelColor = NSColor.labelColor
+    #endif
+
     let rootStyle = MarkupStyle(
       font: MarkupStyleFont(size: 16),
-      foregroundColor: MarkupStyleColor(color: UIColor.label)
+      foregroundColor: MarkupStyleColor(color: labelColor)
     )
 
     let parser = ZHTMLParserBuilder.initWithDefault()
@@ -439,30 +502,52 @@ final class EpisodeDetailViewModel {
 
   // MARK: - Action Methods
 
+  @ObservationIgnored
   private let applePodcastService = ApplePodcastService()
-  private var shareCancellable: AnyCancellable?
+
+  @ObservationIgnored
+  private var shareTask: Task<Void, Never>?
 
   func shareEpisode() {
     logger.debug("Share episode: \(self.episode.title)")
 
-    // Try to find Apple Podcast URL first
-    shareCancellable = applePodcastService.getAppleEpisodeLink(
-      episodeTitle: episode.title,
-      episodeGuid: episode.guid
-    )
-    .timeout(.seconds(5), scheduler: DispatchQueue.main)
-    .sink(
-      receiveCompletion: { [weak self] completion in
-        if case .failure = completion {
-          // On error, fall back to audio URL
-          self?.shareWithURL(self?.episode.audioURL)
+    // Cancel previous share task
+    shareTask?.cancel()
+
+    // Try to find Apple Podcast URL first with timeout
+    shareTask = Task {
+      do {
+        let appleUrl = try await withTimeout(seconds: 5) {
+          try await self.applePodcastService.getAppleEpisodeLink(
+            episodeTitle: self.episode.title,
+            episodeGuid: self.episode.guid
+          )
         }
-      },
-      receiveValue: { [weak self] appleUrl in
-        // Use Apple URL if found, otherwise fall back to audio URL
-        self?.shareWithURL(appleUrl ?? self?.episode.audioURL)
+        if !Task.isCancelled {
+          shareWithURL(appleUrl ?? episode.audioURL)
+        }
+      } catch {
+        if !Task.isCancelled {
+          // On error, fall back to audio URL
+          shareWithURL(episode.audioURL)
+        }
       }
-    )
+    }
+  }
+
+  private func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+      group.addTask {
+        try await operation()
+      }
+      group.addTask {
+        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        throw CancellationError()
+      }
+      let result = try await group.next()!
+      group.cancelAll()
+      return result
+    }
   }
 
   private func shareWithURL(_ urlString: String?) {
@@ -471,12 +556,7 @@ final class EpisodeDetailViewModel {
       return
     }
 
-    let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-       let rootVC = windowScene.windows.first?.rootViewController
-    {
-      rootVC.present(activityVC, animated: true)
-    }
+    PlatformShareSheet.share(url: url)
   }
 
   func translateDescription() {
@@ -525,11 +605,6 @@ final class EpisodeDetailViewModel {
     }
   }
 
-  func addToList() {
-    // TODO: Implement add to list functionality
-    logger.debug("Add to list: \(self.episode.title)")
-  }
-
   func addToPlayNext() {
     guard let audioURLString = episode.audioURL else {
       logger.warning("Cannot add to play next: no audio URL")
@@ -537,7 +612,7 @@ final class EpisodeDetailViewModel {
     }
 
     let playbackEpisode = PlaybackEpisode(
-      id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)",
+      id: episodeKey,
       title: episode.title,
       podcastTitle: podcastTitle,
       audioURL: audioURLString,
@@ -550,10 +625,6 @@ final class EpisodeDetailViewModel {
 
     audioManager.playNext(playbackEpisode)
     logger.info("Added to play next: \(self.episode.title)")
-  }
-
-  func downloadAudio() {
-    startDownload()
   }
 
   func reportIssue() {
@@ -624,38 +695,54 @@ final class EpisodeDetailViewModel {
 
   /// Observes TranscriptManager for job status updates
   private func observeTranscriptManager() {
-    TranscriptManager.shared.$activeJobs
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self] jobs in
-        guard let self = self else { return }
-        // Use Unit Separator (U+001F) as delimiter - same as TranscriptManager
-        let delimiter = "\u{1F}"
-        let jobId = "\(self.podcastTitle)\(delimiter)\(self.episode.title)"
+    guard !isObservingTranscriptManager else { return }
+    isObservingTranscriptManager = true
+    startTranscriptObservation()
+  }
 
-        if let job = jobs[jobId] {
-          // Update local state based on job status
-          switch job.status {
-          case .queued:
-            self.transcriptState = .transcribing(progress: 0)
-          case .downloadingModel(let progress):
-            self.transcriptState = .downloadingModel(progress: progress)
-          case .transcribing(let progress):
-            self.transcriptState = .transcribing(progress: progress)
-          case .completed:
-            // Load the transcript from disk
-            Task {
-              await self.loadExistingTranscript()
-            }
-          case .failed(let error):
-            self.transcriptState = .error(error)
-          }
-        }
+  private func startTranscriptObservation() {
+    // Don't start if we've stopped observing
+    guard isObservingTranscriptManager else { return }
+
+    withObservationTracking {
+      // Access the property to register observation
+      _ = TranscriptManager.shared.activeJobs
+    } onChange: {
+      Task { @MainActor [weak self] in
+        guard let self, self.isObservingTranscriptManager else { return }
+        self.handleTranscriptJobUpdate()
+        self.startTranscriptObservation()
       }
-      .store(in: &cancellables)
+    }
+  }
+
+  private func handleTranscriptJobUpdate() {
+    // Use Unit Separator (U+001F) as delimiter - same as TranscriptManager
+    let delimiter = "\u{1F}"
+    let jobId = "\(podcastTitle)\(delimiter)\(episode.title)"
+
+    if let job = TranscriptManager.shared.activeJobs[jobId] {
+      // Update local state based on job status
+      switch job.status {
+      case .queued:
+        transcriptState = .transcribing(progress: 0)
+      case .downloadingModel(let progress):
+        transcriptState = .downloadingModel(progress: progress)
+      case .transcribing(let progress):
+        transcriptState = .transcribing(progress: progress)
+      case .completed:
+        // Load the transcript from disk
+        Task {
+          await loadExistingTranscript()
+        }
+      case .failed(let error):
+        transcriptState = .error(error)
+      }
+    }
   }
 
   func copyTranscriptToClipboard() {
-    UIPasteboard.general.string = transcriptText
+    PlatformClipboard.string = transcriptText
   }
 
   private func loadExistingTranscript() async {
@@ -1567,5 +1654,35 @@ final class EpisodeDetailViewModel {
       logger.debug("Failed to parse full analysis JSON: \(error.localizedDescription)")
       return nil
     }
+  }
+
+  // MARK: - Cleanup
+
+  /// Cancel all active subscriptions to prevent memory leaks
+  func cleanup() {
+    // Stop transcript observation
+    isObservingTranscriptManager = false
+
+    // Cancel share task
+    shareTask?.cancel()
+    shareTask = nil
+
+    // Explicitly cancel timers (critical for preventing memory leaks on macOS)
+    downloadTimerCancellable?.cancel()
+    downloadTimerCancellable = nil
+
+    playbackTimerCancellable?.cancel()
+    playbackTimerCancellable = nil
+
+    // Cancel all other Combine subscriptions
+    cancellables.removeAll()
+  }
+
+  deinit {
+    // Ensure cleanup even if cleanup() wasn't called (defensive programming)
+    downloadTimerCancellable?.cancel()
+    playbackTimerCancellable?.cancel()
+    shareTask?.cancel()
+    cancellables.removeAll()
   }
 }

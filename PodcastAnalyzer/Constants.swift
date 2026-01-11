@@ -1,11 +1,13 @@
 import Foundation
 
+// MARK: - Notification Names
+
+extension Notification.Name {
+  static let podcastRegionChanged = Notification.Name("podcastRegionChanged")
+  static let episodeDownloadCompleted = Notification.Name("episodeDownloadCompleted")
+}
+
 struct Constants {
-  static let apiBaseURL = "https://api.podcastanalyzer.com"
-  static let defaultTimeoutInterval: TimeInterval = 30.0
-  static let maxConcurrentDownloads = 4
-  static let supportedAudioFormats = ["mp3", "aac", "wav", "flac"]
-  static let userAgent = "PodcastAnalyzer/1.0 (iOS)"
 
   static let homeString = "Home"
   static let libraryString = "Library"

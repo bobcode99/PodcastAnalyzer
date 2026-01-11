@@ -5,57 +5,86 @@
 //  Created by Bob on 2025/12/23.
 //
 
-
-import Combine  // For the service publishers
+import Observation
 import SwiftUI
 
 @MainActor
-class PodcastSearchViewModel: ObservableObject {
-    @Published var searchText = ""
-    @Published var podcasts: [Podcast] = []
-    @Published var isLoading = false
+@Observable
+final class PodcastSearchViewModel {
+  var searchText = ""
+  var podcasts: [Podcast] = []
+  var isLoading = false
 
-    @Published var selectedPodcastId: Int? = nil
-    @Published var episodesForSelectedPodcast: [Episode]? = nil
-    @Published var isLoadingEpisodes = false
+  var selectedPodcastId: Int? = nil
+  var episodesForSelectedPodcast: [Episode]? = nil
+  var isLoadingEpisodes = false
 
-    private let service = ApplePodcastService()
-    private var cancellables = Set<AnyCancellable>()
+  @ObservationIgnored
+  private let service = ApplePodcastService()
 
-    func performSearch() {
-        guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
-            podcasts = []
-            return
+  @ObservationIgnored
+  private var searchTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var episodeTask: Task<Void, Never>?
+
+  func performSearch() {
+    guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
+      podcasts = []
+      return
+    }
+
+    // Cancel previous search
+    searchTask?.cancel()
+
+    isLoading = true
+    podcasts = []
+
+    searchTask = Task {
+      do {
+        let results = try await service.searchPodcasts(term: searchText, limit: 20)
+        if !Task.isCancelled {
+          podcasts = results
         }
-
-        isLoading = true
-        podcasts = []
-
-        service.searchPodcasts(term: searchText, limit: 20)
-            .sink { completion in
-                self.isLoading = false
-                if case .failure(let error) = completion {
-                    print("Search error: \(error)")
-                }
-            } receiveValue: { results in
-                self.podcasts = results
-            }
-            .store(in: &cancellables)
+      } catch {
+        if !Task.isCancelled {
+          print("Search error: \(error)")
+        }
+      }
+      if !Task.isCancelled {
+        isLoading = false
+      }
     }
+  }
 
-    func loadEpisodes(from feedUrl: String) {
-        isLoadingEpisodes = true
-        episodesForSelectedPodcast = nil
+  func loadEpisodes(from feedUrl: String) {
+    // Cancel previous episode load
+    episodeTask?.cancel()
 
-        service.fetchEpisodesFromRSS(feedUrl: feedUrl, limit: 20)
-            .sink { completion in
-                self.isLoadingEpisodes = false
-                if case .failure(let error) = completion {
-                    print("RSS error: \(error)")
-                }
-            } receiveValue: { episodes in
-                self.episodesForSelectedPodcast = episodes
-            }
-            .store(in: &cancellables)
+    isLoadingEpisodes = true
+    episodesForSelectedPodcast = nil
+
+    episodeTask = Task {
+      do {
+        let episodes = try await service.fetchEpisodesFromRSS(feedUrl: feedUrl, limit: 20)
+        if !Task.isCancelled {
+          episodesForSelectedPodcast = episodes
+        }
+      } catch {
+        if !Task.isCancelled {
+          print("RSS error: \(error)")
+        }
+      }
+      if !Task.isCancelled {
+        isLoadingEpisodes = false
+      }
     }
+  }
+
+  func cleanup() {
+    searchTask?.cancel()
+    searchTask = nil
+    episodeTask?.cancel()
+    episodeTask = nil
+  }
 }

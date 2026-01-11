@@ -90,18 +90,19 @@ class EpisodeDownloadModel {
     return min(lastPlaybackPosition / duration, 1.0)
   }
 
-  /// Formatted remaining time
+  /// Formatted remaining time (always shows seconds)
   var remainingTimeString: String? {
     guard duration > 0 else { return nil }
     let remaining = duration - lastPlaybackPosition
     if remaining <= 0 { return nil }
 
-    let minutes = Int(remaining) / 60
-    let seconds = Int(remaining) % 60
-    if minutes >= 60 {
-      let hours = minutes / 60
-      let mins = minutes % 60
-      return "\(hours)h \(mins)m left"
+    let totalSeconds = Int(remaining)
+    let hours = totalSeconds / 3600
+    let minutes = (totalSeconds % 3600) / 60
+    let seconds = totalSeconds % 60
+
+    if hours > 0 {
+      return "\(hours)h \(minutes)m \(seconds)s left"
     }
     return "\(minutes)m \(seconds)s left"
   }

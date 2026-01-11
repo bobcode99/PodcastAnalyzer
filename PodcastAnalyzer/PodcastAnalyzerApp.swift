@@ -111,6 +111,14 @@ struct PodcastAnalyzerApp: App {
         break
       }
     }
+
+    // macOS Settings window (Cmd+,)
+    #if os(macOS)
+    Settings {
+      MacSettingsView()
+    }
+    .modelContainer(sharedModelContainer)
+    #endif
   }
 
   private func handleIncomingURL(_ url: URL) {

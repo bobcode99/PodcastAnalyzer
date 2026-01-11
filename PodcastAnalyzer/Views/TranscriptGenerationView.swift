@@ -8,14 +8,18 @@
 import SwiftData
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#endif
+
 struct TranscriptGenerationView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.modelContext) private var modelContext
-  @StateObject private var viewModel: TranscriptGenerationViewModel
+  @State private var viewModel: TranscriptGenerationViewModel
 
   init(episode: PodcastEpisodeInfo, podcastTitle: String, localAudioPath: String?) {
-    _viewModel = StateObject(
-      wrappedValue: TranscriptGenerationViewModel(
+    _viewModel = State(
+      initialValue: TranscriptGenerationViewModel(
         episode: episode,
         podcastTitle: podcastTitle,
         localAudioPath: localAudioPath
@@ -23,6 +27,7 @@ struct TranscriptGenerationView: View {
   }
 
   var body: some View {
+    @Bindable var viewModel = viewModel
     NavigationStack {
       ScrollView {
         VStack(spacing: 20) {
@@ -35,7 +40,9 @@ struct TranscriptGenerationView: View {
         .padding()
       }
       .navigationTitle("Transcript")
+      #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)
+      #endif
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Close") { dismiss() }
@@ -47,8 +54,8 @@ struct TranscriptGenerationView: View {
         Text("Transcript copied to clipboard")
       }
       .onAppear {
-        viewModel.setModelContext(modelContext)
-        viewModel.checkTranscriptStatus()
+        self.viewModel.setModelContext(modelContext)
+        self.viewModel.checkTranscriptStatus()
       }
     }
   }
@@ -62,7 +69,7 @@ struct TranscriptGenerationView: View {
         Spacer()
 
         Button(action: {
-          UIPasteboard.general.string = viewModel.transcriptText
+          PlatformClipboard.string = viewModel.transcriptText
           viewModel.showCopySuccess = true
         }) {
           Label("Copy", systemImage: "doc.on.doc")

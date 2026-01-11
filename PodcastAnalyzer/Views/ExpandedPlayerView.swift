@@ -8,16 +8,24 @@
 import SwiftData
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#endif
+
 struct ExpandedPlayerView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.modelContext) private var modelContext
-  @StateObject private var viewModel = ExpandedPlayerViewModel()
+  @State private var viewModel = ExpandedPlayerViewModel()
   @State private var showEpisodeDetail = false
   @State private var showPodcastEpisodeList = false
   @State private var showSpeedPicker = false
   @State private var showQueue = false
   @State private var showEllipsisMenu = false
   @State private var showFullTranscript = false
+
+  // Scrubbing state for smooth slider interaction
+  @State private var isScrubbing = false
+  @State private var scrubbingProgress: Double = 0
 
   // Speed options matching Apple Podcasts
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -26,45 +34,54 @@ struct ExpandedPlayerView: View {
   var body: some View {
     NavigationStack {
       ZStack {
-        // Background gradient based on artwork (simulated)
+        // Background gradient
         LinearGradient(
-          colors: [Color.gray.opacity(0.3), Color(.systemBackground)],
-          startPoint: .top,
-          endPoint: .center
+            colors: [Color.gray.opacity(0.3), Color.platformBackground],
+            startPoint: .top,
+            endPoint: .center
         )
         .ignoresSafeArea()
 
-        ScrollView {
-          VStack(spacing: 0) {
-            // Large artwork
-            artworkSection
-              .padding(.top, 20)
+        GeometryReader { geometry in
+            ScrollView {
+                // This container ensures content spans at least the full screen height
+                VStack(spacing: 0) {
+                    
+                    // 1. Artwork & Info Group
+                    VStack(spacing: 0) {
+                        artworkSection
+                            .padding(.top, geometry.size.height * 0.02)
+                        
+                        episodeInfoSection
+                            .padding(.top, 24)
+                    }
+                    
+                    Spacer(minLength: 20) // Flexible space
 
-            // Episode info
-            episodeInfoSection
-              .padding(.top, 24)
+                    // 2. Playback Group (Progress + Controls)
+                    VStack(spacing: 24) {
+                        progressSection
+                            .padding(.horizontal, 24)
+                        
+                        controlsSection
+                    }
 
-            // Progress bar
-            progressSection
-              .padding(.horizontal, 24)
-              .padding(.top, 32)
+                    Spacer(minLength: 20) // Flexible space
 
-            // Playback controls
-            controlsSection
-              .padding(.top, 24)
+                    // 3. Bottom Actions
+                    bottomActionsSection
+                        .padding(.bottom, (viewModel.hasTranscript && !viewModel.transcriptSegments.isEmpty) ? 20 : 40)
 
-            // Bottom actions
-            bottomActionsSection
-              .padding(.top, 24)
-
-            // Transcript preview section (if available)
-            if viewModel.hasTranscript {
-              transcriptPreviewSection
-                .padding(.top, 24)
+                    // 4. Transcript - ONLY renders if data exists
+                    if viewModel.hasTranscript && !viewModel.transcriptSegments.isEmpty {
+                        transcriptPreviewSection
+                            .padding(.top, 10)
+                            .padding(.bottom, 40)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .frame(minHeight: geometry.size.height) // Forces the Spacers to work
             }
-
-            Spacer(minLength: 40)
-          }
         }
         .blur(radius: showSpeedPicker || showQueue ? 3 : 0)
 
@@ -134,6 +151,9 @@ struct ExpandedPlayerView: View {
       }
       .onAppear {
         viewModel.setModelContext(modelContext)
+      }
+      .onDisappear {
+        viewModel.cleanup()
       }
       .sheet(isPresented: $showFullTranscript) {
         TranscriptFullScreenView(viewModel: viewModel)
@@ -209,7 +229,7 @@ struct ExpandedPlayerView: View {
           .buttonStyle(.plain)
         }
       }
-      .background(Color(.systemGray6))
+      .background(Color.platformSystemGray6)
       .cornerRadius(12)
       .padding(.horizontal, 16)
     }
@@ -373,7 +393,12 @@ struct ExpandedPlayerView: View {
   }
   // MARK: - Progress Section
   private var progressSection: some View {
-    VStack(spacing: 8) {
+    // Use scrubbing progress when user is dragging, otherwise use actual progress
+    let displayProgress = isScrubbing ? scrubbingProgress : viewModel.progress
+    let displayCurrentTime = isScrubbing ? scrubbingProgress * viewModel.duration : viewModel.currentTime
+    let displayRemainingTime = viewModel.duration - displayCurrentTime
+
+    return VStack(spacing: 8) {
       // Seek slider
       GeometryReader { geometry in
         ZStack(alignment: .leading) {
@@ -386,45 +411,77 @@ struct ExpandedPlayerView: View {
           Capsule()
             .fill(Color.primary)
             .frame(
-              width: geometry.size.width * CGFloat(viewModel.progress),
+              width: geometry.size.width * CGFloat(displayProgress),
               height: 6
             )
 
-          // Thumb (optional, for visual feedback)
+          // Thumb - slightly larger when scrubbing for better feedback
           Circle()
             .fill(Color.primary)
-            .frame(width: 14, height: 14)
+            .frame(width: isScrubbing ? 18 : 14, height: isScrubbing ? 18 : 14)
             .offset(
               x: max(
                 0,
-                min(geometry.size.width * CGFloat(viewModel.progress) - 7, geometry.size.width - 14)
+                min(geometry.size.width * CGFloat(displayProgress) - (isScrubbing ? 9 : 7), geometry.size.width - (isScrubbing ? 18 : 14))
               )
             )
+            .animation(.easeOut(duration: 0.1), value: isScrubbing)
         }
         .gesture(
           DragGesture(minimumDistance: 0)
             .onChanged { value in
+              // Only allow scrubbing if duration is available
+              guard !viewModel.isDurationLoading else { return }
+              // Start scrubbing - only update visual progress, don't seek yet
+              if !isScrubbing {
+                isScrubbing = true
+                scrubbingProgress = viewModel.progress
+              }
               let progress = value.location.x / geometry.size.width
-              viewModel.seekToProgress(min(max(0, progress), 1))
+              scrubbingProgress = min(max(0, progress), 1)
+            }
+            .onEnded { value in
+              // Only seek if duration is available
+              guard !viewModel.isDurationLoading else { return }
+              // End scrubbing - now perform the actual seek
+              let progress = value.location.x / geometry.size.width
+              let finalProgress = min(max(0, progress), 1)
+              viewModel.seekToProgress(finalProgress)
+              isScrubbing = false
             }
         )
+        .opacity(viewModel.isDurationLoading ? 0.5 : 1.0)
       }
-      .frame(height: 14)
+      .frame(height: 18) // Slightly taller for better touch target
 
-      // Time labels
+      // Time labels - show scrubbing time when dragging
       HStack {
-        Text(viewModel.currentTimeString)
+        Text(formatTime(displayCurrentTime))
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundColor(isScrubbing ? .primary : .secondary)
           .monospacedDigit()
 
         Spacer()
 
-        Text(viewModel.remainingTimeString)
+        Text("-" + formatTime(displayRemainingTime))
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundColor(isScrubbing ? .primary : .secondary)
           .monospacedDigit()
       }
+    }
+  }
+
+  private func formatTime(_ time: TimeInterval) -> String {
+    guard time.isFinite && time >= 0 else { return "0:00" }
+
+    let hours = Int(time) / 3600
+    let minutes = Int(time) / 60 % 60
+    let seconds = Int(time) % 60
+
+    if hours > 0 {
+      return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+      return String(format: "%d:%02d", minutes, seconds)
     }
   }
 
@@ -490,11 +547,8 @@ struct ExpandedPlayerView: View {
   private var bottomActionsSection: some View {
     HStack {
       // AirPlay button (placeholder)
-      Button(action: {}) {
-        Image(systemName: "airplayaudio")
-          .font(.title3)
-          .foregroundColor(.secondary)
-      }
+      AirPlayButton()
+        .frame(width: 44, height: 44)
 
       Spacer()
 
@@ -624,13 +678,15 @@ struct QueueOverlay: View {
             .onMove(perform: onMoveItems)
           }
           .listStyle(.plain)
+          #if os(iOS)
           .environment(\.editMode, .constant(.active))
+          #endif
         }
       }
       .frame(maxHeight: 400)
       .background(
         RoundedRectangle(cornerRadius: 16)
-          .fill(Color(.systemBackground))
+          .fill(Color.platformBackground)
           .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
       )
       .padding(.horizontal, 16)
@@ -811,7 +867,7 @@ struct SpeedPickerOverlay: View {
       }
       .background(
         RoundedRectangle(cornerRadius: 16)
-          .fill(Color(.systemBackground))
+          .fill(Color.platformBackground)
           .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
       )
       .padding(.horizontal, 24)
@@ -829,8 +885,11 @@ struct SpeedPickerOverlay: View {
   }
 
   private func triggerHaptic() {
+    #if os(iOS)
     let generator = UIImpactFeedbackGenerator(style: .light)
     generator.impactOccurred()
+    #endif
+    // macOS doesn't have haptic feedback on most devices
   }
 }
 
@@ -851,7 +910,7 @@ struct SpeedButton: View {
         .padding(.horizontal, 12)
         .background(
           Capsule()
-            .fill(isSelected ? Color.blue : Color(.systemGray5))
+            .fill(isSelected ? Color.blue : Color.platformSystemGray5)
         )
     }
     .buttonStyle(.plain)
@@ -872,7 +931,15 @@ struct SpeedButton: View {
 
 struct TranscriptFullScreenView: View {
   @Environment(\.dismiss) private var dismiss
-  @ObservedObject var viewModel: ExpandedPlayerViewModel
+  @Bindable var viewModel: ExpandedPlayerViewModel
+
+  private var toolbarPlacement: ToolbarItemPlacement {
+    #if os(iOS)
+    return .topBarTrailing
+    #else
+    return .confirmationAction
+    #endif
+  }
 
   var body: some View {
     NavigationStack {
@@ -898,7 +965,7 @@ struct TranscriptFullScreenView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color(.systemGray6))
+        .background(Color.platformSystemGray6)
         .cornerRadius(10)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -937,9 +1004,11 @@ struct TranscriptFullScreenView: View {
         }
       }
       .navigationTitle("Transcript")
+      #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)
+      #endif
       .toolbar {
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItem(placement: toolbarPlacement) {
           Button("Done") {
             dismiss()
           }
@@ -999,7 +1068,7 @@ struct TranscriptFullScreenView: View {
       }
     }
     .padding(12)
-    .background(Color(.systemGray6))
+    .background(Color.platformSystemGray6)
     .cornerRadius(12)
   }
 }

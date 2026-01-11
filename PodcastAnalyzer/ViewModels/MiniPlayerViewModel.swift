@@ -5,17 +5,18 @@
 //  Created by Bob on 2025/12/17.
 //
 
-import Combine
 import SwiftUI
 
-class MiniPlayerViewModel: ObservableObject {
-  @Published var isVisible: Bool = false
-  @Published var isPlaying: Bool = false
-  @Published var episodeTitle: String = ""
-  @Published var podcastTitle: String = ""
-  @Published var imageURL: URL?
-  @Published var progress: Double = 0
-  @Published var currentEpisode: PlaybackEpisode?
+@MainActor
+@Observable
+final class MiniPlayerViewModel {
+  var isVisible: Bool = false
+  var isPlaying: Bool = false
+  var episodeTitle: String = ""
+  var podcastTitle: String = ""
+  var imageURL: URL?
+  var progress: Double = 0
+  var currentEpisode: PlaybackEpisode?
 
   private let audioManager = EnhancedAudioManager.shared
   private var updateTimer: Timer?
@@ -26,7 +27,10 @@ class MiniPlayerViewModel: ObservableObject {
 
   private func setupUpdateTimer() {
     updateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-      self?.updateState()
+      guard let self else { return }
+      Task { @MainActor [weak self] in
+        self?.updateState()
+      }
     }
   }
 
@@ -59,7 +63,9 @@ class MiniPlayerViewModel: ObservableObject {
     }
   }
 
-  deinit {
+  /// Clean up resources. Call this from onDisappear.
+  func cleanup() {
     updateTimer?.invalidate()
+    updateTimer = nil
   }
 }

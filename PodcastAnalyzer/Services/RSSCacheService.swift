@@ -13,9 +13,11 @@ actor RSSCacheService {
     private let rssService = PodcastRssService()
     private let cacheDirectory: URL
     private let cacheExpiration: TimeInterval = 60 * 30 // 30 minutes
+    private let maxMemoryCacheSize = 20 // Max number of podcasts in memory
 
-    // In-memory cache for quick access
+    // In-memory cache for quick access (LRU-like with size limit)
     private var memoryCache: [String: CachedPodcast] = [:]
+    private var cacheAccessOrder: [String] = [] // Track access order for LRU eviction
 
     private struct CachedPodcast {
         let podcastInfo: PodcastInfo
@@ -59,6 +61,7 @@ actor RSSCacheService {
     func clearCache(for rssUrl: String) {
         let cacheKey = makeCacheKey(from: rssUrl)
         memoryCache.removeValue(forKey: cacheKey)
+        cacheAccessOrder.removeAll { $0 == cacheKey }
 
         let fileURL = cacheDirectory.appendingPathComponent("\(cacheKey).json")
         try? FileManager.default.removeItem(at: fileURL)
@@ -67,6 +70,7 @@ actor RSSCacheService {
     /// Clears all cached RSS feeds
     func clearAllCache() {
         memoryCache.removeAll()
+        cacheAccessOrder.removeAll()
         try? FileManager.default.removeItem(at: cacheDirectory)
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
     }
@@ -111,6 +115,18 @@ actor RSSCacheService {
     }
 
     private func saveToCache(podcastInfo: PodcastInfo, cacheKey: String) {
+        // Update access order (move to end if exists, or add)
+        cacheAccessOrder.removeAll { $0 == cacheKey }
+        cacheAccessOrder.append(cacheKey)
+
+        // Evict oldest entries if over size limit
+        while cacheAccessOrder.count > maxMemoryCacheSize {
+            if let oldestKey = cacheAccessOrder.first {
+                cacheAccessOrder.removeFirst()
+                memoryCache.removeValue(forKey: oldestKey)
+            }
+        }
+
         // Save to memory
         memoryCache[cacheKey] = CachedPodcast(podcastInfo: podcastInfo, timestamp: Date())
 

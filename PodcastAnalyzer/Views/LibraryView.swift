@@ -10,10 +10,14 @@ import SwiftData
 import SwiftUI
 import ZMarkupParser
 
+#if os(iOS)
+import UIKit
+#endif
+
 // MARK: - Library View
 
 struct LibraryView: View {
-  @StateObject private var viewModel: LibraryViewModel
+  @State private var viewModel = LibraryViewModel(modelContext: nil)
   @Environment(\.modelContext) private var modelContext
 
   // Grid layout: 2 columns
@@ -26,24 +30,29 @@ struct LibraryView: View {
   @State private var podcastToUnsubscribe: PodcastInfoModel?
   @State private var showUnsubscribeConfirmation = false
 
-  init() {
-    _viewModel = StateObject(wrappedValue: LibraryViewModel(modelContext: nil))
-  }
-
   var body: some View {
     NavigationStack {
-      ScrollView {
-        VStack(spacing: 24) {
-          // Quick access cards
-          quickAccessSection
-            .padding(.horizontal, 16)
+      ZStack {
+        ScrollView {
+          VStack(spacing: 24) {
+            // Quick access cards
+            quickAccessSection
+              .padding(.horizontal, 16)
 
-          // Subscribed Podcasts Grid
-          podcastsGridSection
-            .padding(.horizontal, 16)
+            // Subscribed Podcasts Grid
+            podcastsGridSection
+              .padding(.horizontal, 16)
+          }
+          .padding(.top, 8)
+          .padding(.bottom, 40)
         }
-        .padding(.top, 8)
-        .padding(.bottom, 40)
+
+        if viewModel.isLoading && viewModel.podcastInfoModelList.isEmpty {
+          ProgressView("Loading Library...")
+            .scaleEffect(1.5)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.platformBackground)
+        }
       }
       .navigationTitle(Constants.libraryString)
       .toolbar {
@@ -58,21 +67,17 @@ struct LibraryView: View {
           .disabled(viewModel.isLoading)
         }
       }
-      .toolbarTitleDisplayMode(.inlineLarge)
+      .platformToolbarTitleDisplayMode()
       .refreshable {
         await viewModel.refreshAllPodcasts()
       }
-      .overlay {
-        if viewModel.isLoading {
-          ProgressView()
-            .scaleEffect(1.5)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemBackground).opacity(0.5))
-        }
-      }
     }
     .onAppear {
+      // This is the key: set the context once
       viewModel.setModelContext(modelContext)
+    }
+    .onDisappear {
+      viewModel.cleanup()
     }
     .confirmationDialog(
       "Unsubscribe from Podcast",
@@ -151,7 +156,7 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color(.systemGray6))
+        .background(Color.platformSystemGray6)
         .cornerRadius(12)
       }
       .buttonStyle(.plain)
@@ -202,7 +207,7 @@ struct LibraryView: View {
 
               // Copy RSS URL
               Button {
-                UIPasteboard.general.string = podcast.podcastInfo.rssUrl
+                PlatformClipboard.string = podcast.podcastInfo.rssUrl
               } label: {
                 Label("Copy RSS URL", systemImage: "doc.on.doc")
               }
@@ -303,7 +308,7 @@ struct QuickAccessCard: View {
     }
     .padding(12)
     .frame(maxWidth: .infinity, minHeight: 90)
-    .background(Color(.systemGray6))
+    .background(Color.platformSystemGray6)
     .cornerRadius(12)
   }
 }
@@ -356,30 +361,63 @@ struct PodcastGridCell: View {
 // MARK: - Saved Episodes View (Sub-page)
 
 struct SavedEpisodesView: View {
-  @ObservedObject var viewModel: LibraryViewModel
+  @Bindable var viewModel: LibraryViewModel
+  @Environment(\.modelContext) private var modelContext
+  @State private var settingsViewModel = SettingsViewModel()
+  @State private var episodeToDelete: LibraryEpisode?
+  @State private var showDeleteConfirmation = false
 
   var body: some View {
     Group {
       if viewModel.savedEpisodes.isEmpty {
         emptyStateView
       } else {
-        List(viewModel.savedEpisodes) { episode in
-          NavigationLink(
-            destination: EpisodeDetailView(
-              episode: episode.episodeInfo,
-              podcastTitle: episode.podcastTitle,
-              fallbackImageURL: episode.imageURL,
-              podcastLanguage: episode.language
-            )
-          ) {
-            LibraryEpisodeRowView(episode: episode)
-          }
+        List(viewModel.filteredSavedEpisodes) { episode in
+          EpisodeRowView(
+            libraryEpisode: episode,
+            episodeModel: fetchEpisodeModel(for: episode),
+            showArtwork: settingsViewModel.showEpisodeArtwork,
+            onToggleStar: { toggleStar(episode) },
+            onDownload: { downloadEpisode(episode) },
+            onDeleteRequested: {
+              episodeToDelete = episode
+              showDeleteConfirmation = true
+            },
+            onTogglePlayed: { togglePlayed(episode) }
+          )
+          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         }
         .listStyle(.plain)
+        .refreshable {
+          viewModel.setModelContext(modelContext)
+        }
       }
     }
     .navigationTitle("Saved")
+    .searchable(text: $viewModel.savedSearchText, prompt: "Search saved episodes")
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
+    .onAppear {
+      viewModel.setModelContext(modelContext)
+    }
+    .confirmationDialog(
+      "Delete Download",
+      isPresented: $showDeleteConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Delete", role: .destructive) {
+        if let episode = episodeToDelete {
+          deleteDownload(episode)
+        }
+        episodeToDelete = nil
+      }
+      Button("Cancel", role: .cancel) {
+        episodeToDelete = nil
+      }
+    } message: {
+      Text("Are you sure you want to delete this downloaded episode?")
+    }
   }
 
   private var emptyStateView: some View {
@@ -397,35 +435,113 @@ struct SavedEpisodesView: View {
     .padding()
     .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
+
+  // MARK: - Helper Methods
+
+  private func fetchEpisodeModel(for episode: LibraryEpisode) -> EpisodeDownloadModel? {
+    let episodeId = episode.id
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.id == episodeId }
+    )
+    return try? modelContext.fetch(descriptor).first
+  }
+
+  private func toggleStar(_ episode: LibraryEpisode) {
+    if let model = fetchEpisodeModel(for: episode) {
+      model.isStarred.toggle()
+      try? modelContext.save()
+      viewModel.setModelContext(modelContext)
+    }
+  }
+
+  private func togglePlayed(_ episode: LibraryEpisode) {
+    if let model = fetchEpisodeModel(for: episode) {
+      model.isCompleted.toggle()
+      if !model.isCompleted {
+        model.lastPlaybackPosition = 0
+      }
+      try? modelContext.save()
+      viewModel.setModelContext(modelContext)
+    }
+  }
+
+  private func downloadEpisode(_ episode: LibraryEpisode) {
+    DownloadManager.shared.downloadEpisode(
+      episode: episode.episodeInfo,
+      podcastTitle: episode.podcastTitle,
+      language: episode.language
+    )
+  }
+
+  private func deleteDownload(_ episode: LibraryEpisode) {
+    DownloadManager.shared.deleteDownload(
+      episodeTitle: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle
+    )
+    viewModel.setModelContext(modelContext)
+  }
 }
 
 // MARK: - Downloaded Episodes View (Sub-page)
 
 struct DownloadedEpisodesView: View {
-  @ObservedObject var viewModel: LibraryViewModel
+  @Bindable var viewModel: LibraryViewModel
+  @Environment(\.modelContext) private var modelContext
+  @State private var settingsViewModel = SettingsViewModel()
+  @State private var episodeToDelete: LibraryEpisode?
+  @State private var showDeleteConfirmation = false
 
   var body: some View {
     Group {
       if viewModel.downloadedEpisodes.isEmpty {
         emptyStateView
       } else {
-        List(viewModel.downloadedEpisodes) { episode in
-          NavigationLink(
-            destination: EpisodeDetailView(
-              episode: episode.episodeInfo,
-              podcastTitle: episode.podcastTitle,
-              fallbackImageURL: episode.imageURL,
-              podcastLanguage: episode.language
-            )
-          ) {
-            LibraryEpisodeRowView(episode: episode)
-          }
+        List(viewModel.filteredDownloadedEpisodes) { episode in
+          EpisodeRowView(
+            libraryEpisode: episode,
+            episodeModel: fetchEpisodeModel(for: episode),
+            showArtwork: settingsViewModel.showEpisodeArtwork,
+            onToggleStar: { toggleStar(episode) },
+            onDownload: { downloadEpisode(episode) },
+            onDeleteRequested: {
+              episodeToDelete = episode
+              showDeleteConfirmation = true
+            },
+            onTogglePlayed: { togglePlayed(episode) }
+          )
+          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         }
         .listStyle(.plain)
+        .refreshable {
+          viewModel.setModelContext(modelContext)
+        }
       }
     }
     .navigationTitle("Downloaded")
+    .searchable(text: $viewModel.downloadedSearchText, prompt: "Search downloaded episodes")
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
+    .onAppear {
+      viewModel.setModelContext(modelContext)
+    }
+    .confirmationDialog(
+      "Delete Download",
+      isPresented: $showDeleteConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Delete", role: .destructive) {
+        if let episode = episodeToDelete {
+          deleteDownload(episode)
+        }
+        episodeToDelete = nil
+      }
+      Button("Cancel", role: .cancel) {
+        episodeToDelete = nil
+      }
+    } message: {
+      Text("Are you sure you want to delete this downloaded episode?")
+    }
   }
 
   private var emptyStateView: some View {
@@ -443,35 +559,113 @@ struct DownloadedEpisodesView: View {
     .padding()
     .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
+
+  // MARK: - Helper Methods
+
+  private func fetchEpisodeModel(for episode: LibraryEpisode) -> EpisodeDownloadModel? {
+    let episodeId = episode.id
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.id == episodeId }
+    )
+    return try? modelContext.fetch(descriptor).first
+  }
+
+  private func toggleStar(_ episode: LibraryEpisode) {
+    if let model = fetchEpisodeModel(for: episode) {
+      model.isStarred.toggle()
+      try? modelContext.save()
+      viewModel.setModelContext(modelContext)
+    }
+  }
+
+  private func togglePlayed(_ episode: LibraryEpisode) {
+    if let model = fetchEpisodeModel(for: episode) {
+      model.isCompleted.toggle()
+      if !model.isCompleted {
+        model.lastPlaybackPosition = 0
+      }
+      try? modelContext.save()
+      viewModel.setModelContext(modelContext)
+    }
+  }
+
+  private func downloadEpisode(_ episode: LibraryEpisode) {
+    DownloadManager.shared.downloadEpisode(
+      episode: episode.episodeInfo,
+      podcastTitle: episode.podcastTitle,
+      language: episode.language
+    )
+  }
+
+  private func deleteDownload(_ episode: LibraryEpisode) {
+    DownloadManager.shared.deleteDownload(
+      episodeTitle: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle
+    )
+    viewModel.setModelContext(modelContext)
+  }
 }
 
 // MARK: - Latest Episodes View (Sub-page)
 
 struct LatestEpisodesView: View {
-  @ObservedObject var viewModel: LibraryViewModel
+  @Bindable var viewModel: LibraryViewModel
+  @Environment(\.modelContext) private var modelContext
+  @State private var settingsViewModel = SettingsViewModel()
+  @State private var episodeToDelete: LibraryEpisode?
+  @State private var showDeleteConfirmation = false
 
   var body: some View {
     Group {
       if viewModel.latestEpisodes.isEmpty {
         emptyStateView
       } else {
-        List(viewModel.latestEpisodes) { episode in
-          NavigationLink(
-            destination: EpisodeDetailView(
-              episode: episode.episodeInfo,
-              podcastTitle: episode.podcastTitle,
-              fallbackImageURL: episode.imageURL,
-              podcastLanguage: episode.language
-            )
-          ) {
-            LibraryEpisodeRowView(episode: episode)
-          }
+        List(viewModel.filteredLatestEpisodes) { episode in
+          EpisodeRowView(
+            libraryEpisode: episode,
+            episodeModel: fetchEpisodeModel(for: episode),
+            showArtwork: settingsViewModel.showEpisodeArtwork,
+            onToggleStar: { toggleStar(episode) },
+            onDownload: { downloadEpisode(episode) },
+            onDeleteRequested: {
+              episodeToDelete = episode
+              showDeleteConfirmation = true
+            },
+            onTogglePlayed: { togglePlayed(episode) }
+          )
+          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         }
         .listStyle(.plain)
+        .refreshable {
+          viewModel.setModelContext(modelContext)
+        }
       }
     }
     .navigationTitle("Latest Episodes")
+    .searchable(text: $viewModel.latestSearchText, prompt: "Search latest episodes")
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
+    .onAppear {
+      viewModel.setModelContext(modelContext)
+    }
+    .confirmationDialog(
+      "Delete Download",
+      isPresented: $showDeleteConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Delete", role: .destructive) {
+        if let episode = episodeToDelete {
+          deleteDownload(episode)
+        }
+        episodeToDelete = nil
+      }
+      Button("Cancel", role: .cancel) {
+        episodeToDelete = nil
+      }
+    } message: {
+      Text("Are you sure you want to delete this downloaded episode?")
+    }
   }
 
   private var emptyStateView: some View {
@@ -489,97 +683,315 @@ struct LatestEpisodesView: View {
     .padding()
     .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
+
+  // MARK: - Helper Methods
+
+  private func fetchEpisodeModel(for episode: LibraryEpisode) -> EpisodeDownloadModel? {
+    let episodeId = episode.id
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.id == episodeId }
+    )
+    return try? modelContext.fetch(descriptor).first
+  }
+
+  private func toggleStar(_ episode: LibraryEpisode) {
+    if let model = fetchEpisodeModel(for: episode) {
+      model.isStarred.toggle()
+      try? modelContext.save()
+      viewModel.setModelContext(modelContext)
+    } else if let audioURL = episode.episodeInfo.audioURL {
+      // Create model if it doesn't exist
+      let model = EpisodeDownloadModel(
+        episodeTitle: episode.episodeInfo.title,
+        podcastTitle: episode.podcastTitle,
+        audioURL: audioURL,
+        imageURL: episode.imageURL ?? "",
+        pubDate: episode.episodeInfo.pubDate
+      )
+      model.isStarred = true
+      modelContext.insert(model)
+      try? modelContext.save()
+      viewModel.setModelContext(modelContext)
+    }
+  }
+
+  private func togglePlayed(_ episode: LibraryEpisode) {
+    if let model = fetchEpisodeModel(for: episode) {
+      model.isCompleted.toggle()
+      if !model.isCompleted {
+        model.lastPlaybackPosition = 0
+      }
+      try? modelContext.save()
+      viewModel.setModelContext(modelContext)
+    } else if let audioURL = episode.episodeInfo.audioURL {
+      // Create model if it doesn't exist
+      let model = EpisodeDownloadModel(
+        episodeTitle: episode.episodeInfo.title,
+        podcastTitle: episode.podcastTitle,
+        audioURL: audioURL,
+        imageURL: episode.imageURL ?? "",
+        pubDate: episode.episodeInfo.pubDate
+      )
+      model.isCompleted = true
+      modelContext.insert(model)
+      try? modelContext.save()
+      viewModel.setModelContext(modelContext)
+    }
+  }
+
+  private func downloadEpisode(_ episode: LibraryEpisode) {
+    DownloadManager.shared.downloadEpisode(
+      episode: episode.episodeInfo,
+      podcastTitle: episode.podcastTitle,
+      language: episode.language
+    )
+  }
+
+  private func deleteDownload(_ episode: LibraryEpisode) {
+    DownloadManager.shared.deleteDownload(
+      episodeTitle: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle
+    )
+    viewModel.setModelContext(modelContext)
+  }
 }
 
-// MARK: - Library Episode Row View
+// MARK: - Library Episode Context Menu
 
-struct LibraryEpisodeRowView: View {
+struct LibraryEpisodeContextMenu: View {
   let episode: LibraryEpisode
-  @Environment(\.modelContext) private var modelContext
-  @State private var hasAIAnalysis: Bool = false
+  let modelContext: ModelContext
+  let onRefresh: () -> Void
 
-  private var plainDescription: String? {
-    guard let desc = episode.episodeInfo.podcastEpisodeDescription else { return nil }
-    let stripped = desc.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-      .replacingOccurrences(of: "&nbsp;", with: " ")
-      .replacingOccurrences(of: "&amp;", with: "&")
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    return stripped.isEmpty ? nil : stripped
+  private let downloadManager = DownloadManager.shared
+  private let audioManager = EnhancedAudioManager.shared
+
+  private var statusChecker: EpisodeStatusChecker {
+    EpisodeStatusChecker(episode: episode)
   }
 
-  private func checkAIAnalysis() {
-    guard let audioURL = episode.episodeInfo.audioURL else { return }
-    let descriptor = FetchDescriptor<EpisodeAIAnalysis>(
-      predicate: #Predicate { $0.episodeAudioURL == audioURL }
-    )
-    if let model = try? modelContext.fetch(descriptor).first {
-      hasAIAnalysis =
-        model.hasFullAnalysis || model.hasSummary || model.hasEntities
-        || model.hasHighlights
-        || (model.qaHistoryJSON != nil && !model.qaHistoryJSON!.isEmpty)
-    }
-  }
+  private var downloadState: DownloadState { statusChecker.downloadState }
+
+  private var isDownloaded: Bool { statusChecker.isDownloaded }
+  private var playbackURL: String { statusChecker.playbackURL }
 
   var body: some View {
-    HStack(spacing: 12) {
-      // Episode artwork - using CachedAsyncImage for better performance
-      CachedArtworkImage(urlString: episode.imageURL, size: 60, cornerRadius: 8)
+    // Go to Show
+    goToShowButton
 
-      VStack(alignment: .leading, spacing: 4) {
-        // Podcast title
-        Text(episode.podcastTitle)
-          .font(.caption)
-          .foregroundColor(.secondary)
+    Divider()
 
-        // Episode title
-        Text(episode.episodeInfo.title)
-          .font(.subheadline)
-          .fontWeight(.medium)
-          .lineLimit(2)
+    // Play episode
+    Button {
+      playEpisode()
+    } label: {
+      Label("Play Episode", systemImage: "play.fill")
+    }
+    .disabled(episode.episodeInfo.audioURL == nil)
 
-        // Date, duration, and status indicators
-        HStack(spacing: 6) {
-          if let date = episode.episodeInfo.pubDate {
-            Text(date.formatted(date: .abbreviated, time: .omitted))
-              .font(.caption2)
-              .foregroundColor(.secondary)
-          }
+    // Play Next
+    Button {
+      addToPlayNext()
+    } label: {
+      Label("Play Next", systemImage: "text.insert")
+    }
+    .disabled(episode.episodeInfo.audioURL == nil)
 
-          if let duration = episode.episodeInfo.formattedDuration {
-            Text(duration)
-              .font(.caption2)
-              .foregroundColor(.secondary)
-          }
+    Divider()
 
-          // Status indicators
-          if episode.isDownloaded {
-            Image(systemName: "arrow.down.circle.fill")
-              .font(.system(size: 10))
-              .foregroundColor(.green)
-          }
+    // Star/Unstar
+    Button {
+      toggleStar()
+    } label: {
+      Label(
+        episode.isStarred ? "Remove from Saved" : "Save Episode",
+        systemImage: episode.isStarred ? "star.slash" : "star"
+      )
+    }
 
-          if episode.isStarred {
-            Image(systemName: "star.fill")
-              .font(.system(size: 10))
-              .foregroundColor(.yellow)
-          }
+    // Mark as Played/Unplayed
+    Button {
+      togglePlayed()
+    } label: {
+      Label(
+        episode.isCompleted ? "Mark as Unplayed" : "Mark as Played",
+        systemImage: episode.isCompleted ? "arrow.counterclockwise" : "checkmark.circle"
+      )
+    }
 
-          if hasAIAnalysis {
-            Image(systemName: "sparkles")
-              .font(.system(size: 10))
-              .foregroundColor(.orange)
-          }
+    Divider()
 
-          if episode.isCompleted {
-            Image(systemName: "checkmark.circle.fill")
-              .font(.system(size: 10))
-              .foregroundColor(.green)
-          }
-        }
+    // Download/Delete download
+    if isDownloaded {
+      Button(role: .destructive) {
+        deleteDownload()
+      } label: {
+        Label("Delete Download", systemImage: "trash")
+      }
+    } else if case .downloading = downloadState {
+      Button {
+        cancelDownload()
+      } label: {
+        Label("Cancel Download", systemImage: "xmark.circle")
+      }
+    } else if episode.episodeInfo.audioURL != nil {
+      Button {
+        startDownload()
+      } label: {
+        Label("Download", systemImage: "arrow.down.circle")
       }
     }
-    .padding(.vertical, 4)
-    .onAppear { checkAIAnalysis() }
+
+    Divider()
+
+    // Share
+    Button {
+      shareEpisode()
+    } label: {
+      Label("Share", systemImage: "square.and.arrow.up")
+    }
+  }
+
+  @ViewBuilder
+  private var goToShowButton: some View {
+    let title = episode.podcastTitle
+    let descriptor = FetchDescriptor<PodcastInfoModel>(
+      predicate: #Predicate { $0.podcastInfo.title == title }
+    )
+    if let podcastModel = try? modelContext.fetch(descriptor).first {
+      NavigationLink(destination: EpisodeListView(podcastModel: podcastModel)) {
+        Label("Go to Show", systemImage: "square.stack")
+      }
+    } else {
+      Button {
+        // Can't navigate without podcast model
+      } label: {
+        Label("Go to Show", systemImage: "square.stack")
+      }
+      .disabled(true)
+    }
+  }
+
+  private func playEpisode() {
+    guard episode.episodeInfo.audioURL != nil else { return }
+
+    let playbackEpisode = PlaybackEpisode(
+      id: statusChecker.episodeKey,
+      title: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle,
+      audioURL: playbackURL,
+      imageURL: episode.imageURL,
+      episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+      pubDate: episode.episodeInfo.pubDate,
+      duration: episode.episodeInfo.duration,
+      guid: episode.episodeInfo.guid
+    )
+
+    audioManager.play(
+      episode: playbackEpisode,
+      audioURL: playbackURL,
+      startTime: episode.lastPlaybackPosition,
+      imageURL: episode.imageURL ?? "",
+      useDefaultSpeed: episode.lastPlaybackPosition == 0
+    )
+  }
+
+  private func addToPlayNext() {
+    guard episode.episodeInfo.audioURL != nil else { return }
+
+    let playbackEpisode = PlaybackEpisode(
+      id: statusChecker.episodeKey,
+      title: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle,
+      audioURL: playbackURL,
+      imageURL: episode.imageURL,
+      episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+      pubDate: episode.episodeInfo.pubDate,
+      duration: episode.episodeInfo.duration,
+      guid: episode.episodeInfo.guid
+    )
+
+    audioManager.playNext(playbackEpisode)
+  }
+
+  private func toggleStar() {
+    let episodeKey = statusChecker.episodeKey
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.id == episodeKey }
+    )
+
+    if let model = try? modelContext.fetch(descriptor).first {
+      model.isStarred.toggle()
+      try? modelContext.save()
+    } else if let audioURL = episode.episodeInfo.audioURL {
+      let model = EpisodeDownloadModel(
+        episodeTitle: episode.episodeInfo.title,
+        podcastTitle: episode.podcastTitle,
+        audioURL: audioURL,
+        imageURL: episode.imageURL ?? "",
+        pubDate: episode.episodeInfo.pubDate
+      )
+      model.isStarred = true
+      modelContext.insert(model)
+      try? modelContext.save()
+    }
+    onRefresh()
+  }
+
+  private func togglePlayed() {
+    let episodeKey = statusChecker.episodeKey
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.id == episodeKey }
+    )
+
+    if let model = try? modelContext.fetch(descriptor).first {
+      model.isCompleted.toggle()
+      if !model.isCompleted {
+        model.lastPlaybackPosition = 0
+      }
+      try? modelContext.save()
+    } else if let audioURL = episode.episodeInfo.audioURL {
+      let model = EpisodeDownloadModel(
+        episodeTitle: episode.episodeInfo.title,
+        podcastTitle: episode.podcastTitle,
+        audioURL: audioURL,
+        imageURL: episode.imageURL ?? "",
+        pubDate: episode.episodeInfo.pubDate
+      )
+      model.isCompleted = true
+      modelContext.insert(model)
+      try? modelContext.save()
+    }
+    onRefresh()
+  }
+
+  private func startDownload() {
+    downloadManager.downloadEpisode(
+      episode: episode.episodeInfo,
+      podcastTitle: episode.podcastTitle,
+      language: episode.language
+    )
+  }
+
+  private func cancelDownload() {
+    downloadManager.cancelDownload(
+      episodeTitle: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle
+    )
+  }
+
+  private func deleteDownload() {
+    downloadManager.deleteDownload(
+      episodeTitle: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle
+    )
+    onRefresh()
+  }
+
+  private func shareEpisode() {
+    if let audioURL = episode.episodeInfo.audioURL, let url = URL(string: audioURL) {
+      PlatformShareSheet.share(url: url)
+    }
   }
 }
 

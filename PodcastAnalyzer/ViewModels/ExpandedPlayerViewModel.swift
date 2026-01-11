@@ -5,41 +5,63 @@
 //  ViewModel for expanded player view - supports Apple Podcasts style UI
 //
 
-import Combine
+import Observation
 import SwiftData
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
+
 @MainActor
-class ExpandedPlayerViewModel: ObservableObject {
-  @Published var isPlaying: Bool = false
-  @Published var episodeTitle: String = ""
-  @Published var podcastTitle: String = ""
-  @Published var imageURL: URL?
-  @Published var progress: Double = 0
-  @Published var currentTime: TimeInterval = 0
-  @Published var duration: TimeInterval = 1
-  @Published var playbackSpeed: Float = 1.0
-  @Published var currentEpisode: PlaybackEpisode?
-  @Published var episodeDate: Date?
-  @Published var isStarred: Bool = false
-  @Published var isCompleted: Bool = false
-  @Published var queue: [PlaybackEpisode] = []
-  @Published var episodeDescription: String?
-  @Published var downloadState: DownloadState = .notDownloaded
-  @Published var podcastModel: PodcastInfoModel?
+@Observable
+final class ExpandedPlayerViewModel {
+  var isPlaying: Bool = false
+  var episodeTitle: String = ""
+  var podcastTitle: String = ""
+  var imageURL: URL?
+  var progress: Double = 0
+  var currentTime: TimeInterval = 0
+  var duration: TimeInterval = 1
+  var playbackSpeed: Float = 1.0
+  var currentEpisode: PlaybackEpisode?
+  var episodeDate: Date?
+  var isStarred: Bool = false
+  var isCompleted: Bool = false
+  var queue: [PlaybackEpisode] = []
+  var episodeDescription: String?
+  var downloadState: DownloadState = .notDownloaded
+  var podcastModel: PodcastInfoModel?
 
   // Transcript properties
-  @Published var hasTranscript: Bool = false
-  @Published var transcriptSegments: [TranscriptSegment] = []
-  @Published var transcriptSearchQuery: String = ""
+  var hasTranscript: Bool = false
+  var transcriptSegments: [TranscriptSegment] = []
+  var transcriptSearchQuery: String = ""
 
+  @ObservationIgnored
   private let audioManager = EnhancedAudioManager.shared
+
+  @ObservationIgnored
   private let downloadManager = DownloadManager.shared
+
+  @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
+
+  @ObservationIgnored
   private var updateTimer: Timer?
+
+  @ObservationIgnored
   private let applePodcastService = ApplePodcastService()
-  private var shareCancellable: AnyCancellable?
+
+  @ObservationIgnored
+  private var shareTask: Task<Void, Never>?
+
+  @ObservationIgnored
   private var modelContext: ModelContext?
+
+  @ObservationIgnored
   private var lastLoadedEpisodeId: String?
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
@@ -179,13 +201,24 @@ class ExpandedPlayerViewModel: ObservableObject {
 
   // MARK: - Computed Properties
 
+  /// Whether duration is still loading (not yet available from player)
+  var isDurationLoading: Bool {
+    duration <= 0
+  }
+
   var currentTimeString: String {
     formatTime(currentTime)
   }
 
   var remainingTimeString: String {
+    guard duration > 0 else { return "--:--" }
     let remaining = duration - currentTime
     return "-" + formatTime(remaining)
+  }
+
+  var durationString: String {
+    guard duration > 0 else { return "--:--" }
+    return formatTime(duration)
   }
 
   // MARK: - Playback Actions
@@ -241,35 +274,48 @@ class ExpandedPlayerViewModel: ObservableObject {
   func shareEpisode() {
     guard let episode = currentEpisode else { return }
 
-    // Try to find Apple Podcast URL first
-    shareCancellable = applePodcastService.getAppleEpisodeLink(
-      episodeTitle: episode.title,
-      episodeGuid: episode.guid
-    )
-    .timeout(.seconds(5), scheduler: DispatchQueue.main)
-    .sink(
-      receiveCompletion: { [weak self] completion in
-        if case .failure = completion {
-          // On error, fall back to audio URL
-          self?.shareWithURL(episode.audioURL)
+    // Cancel previous share task
+    shareTask?.cancel()
+
+    // Try to find Apple Podcast URL first with timeout
+    shareTask = Task {
+      do {
+        let appleUrl = try await withTimeout(seconds: 5) {
+          try await self.applePodcastService.getAppleEpisodeLink(
+            episodeTitle: episode.title,
+            episodeGuid: episode.guid
+          )
         }
-      },
-      receiveValue: { [weak self] appleUrl in
-        // Use Apple URL if found, otherwise fall back to audio URL
-        self?.shareWithURL(appleUrl ?? episode.audioURL)
+        if !Task.isCancelled {
+          shareWithURL(appleUrl ?? episode.audioURL)
+        }
+      } catch {
+        if !Task.isCancelled {
+          // On error, fall back to audio URL
+          shareWithURL(episode.audioURL)
+        }
       }
-    )
+    }
+  }
+
+  private func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+      group.addTask {
+        try await operation()
+      }
+      group.addTask {
+        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        throw CancellationError()
+      }
+      let result = try await group.next()!
+      group.cancelAll()
+      return result
+    }
   }
 
   private func shareWithURL(_ urlString: String?) {
     guard let urlString = urlString, let url = URL(string: urlString) else { return }
-
-    let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-      let rootVC = windowScene.windows.first?.rootViewController
-    {
-      rootVC.present(activityVC, animated: true)
-    }
+    PlatformShareSheet.share(url: url)
   }
 
   func playNextCurrentEpisode() {
@@ -327,7 +373,11 @@ class ExpandedPlayerViewModel: ObservableObject {
     // Open a report URL or show an alert
     // For now, this can be a placeholder that opens Apple's podcast report page
     guard let url = URL(string: "https://www.apple.com/feedback/podcasts.html") else { return }
+    #if os(iOS)
     UIApplication.shared.open(url)
+    #else
+    NSWorkspace.shared.open(url)
+    #endif
   }
 
   // MARK: - Queue Actions
@@ -523,7 +573,9 @@ class ExpandedPlayerViewModel: ObservableObject {
     }
   }
 
-  deinit {
+  /// Clean up resources. Call this from onDisappear.
+  func cleanup() {
     updateTimer?.invalidate()
+    updateTimer = nil
   }
 }

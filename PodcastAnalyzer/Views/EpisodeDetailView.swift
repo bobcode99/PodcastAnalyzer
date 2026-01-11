@@ -3,6 +3,7 @@
 //  PodcastAnalyzer
 //
 //  Fixed: Added Regenerate option to live view and fixed state visibility
+//  Fixed: Memory leaks from static timer and proper cleanup on macOS
 //
 
 import Combine
@@ -10,7 +11,20 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
+
 struct EpisodeDetailView: View {
+    private var toolbarPlacement: ToolbarItemPlacement {
+        #if os(iOS)
+        return .topBarTrailing
+        #else
+        return .primaryAction
+        #endif
+    }
     @State private var viewModel: EpisodeDetailViewModel
     @Environment(\.modelContext) private var modelContext
 
@@ -18,10 +32,8 @@ struct EpisodeDetailView: View {
     @State private var showCopySuccess = false
     @State private var showDeleteConfirmation = false
 
-    // Timer to refresh transcript highlighting during playback
-    @State private var refreshTrigger = false
-    let playbackTimer = Timer.publish(every: 0.5, on: .main, in: .common)
-        .autoconnect()
+    // Timer subscription for transcript highlighting during playback
+    @State private var playbackTimerCancellable: AnyCancellable?
 
     init(
         episode: PodcastEpisodeInfo,
@@ -39,6 +51,26 @@ struct EpisodeDetailView: View {
         )
     }
 
+    /// Destination view for navigating to the podcast's episode list
+    @ViewBuilder
+    private var podcastDestination: some View {
+        // Try to find the podcast model in SwiftData
+        let title = viewModel.podcastTitle
+        let descriptor = FetchDescriptor<PodcastInfoModel>(
+            predicate: #Predicate { $0.podcastInfo.title == title }
+        )
+        if let podcastModel = try? modelContext.fetch(descriptor).first {
+            EpisodeListView(podcastModel: podcastModel)
+        } else {
+            // Fallback: show an error or navigate with browse mode
+            ContentUnavailableView(
+                "Podcast Not Found",
+                systemImage: "exclamationmark.triangle",
+                description: Text("This podcast is not in your library")
+            )
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             headerSection
@@ -46,19 +78,33 @@ struct EpisodeDetailView: View {
             tabSelector
             Divider()
 
+            #if os(iOS)
             TabView(selection: $selectedTab) {
                 summaryTab.tag(0)
                 transcriptTab.tag(1)
                 keywordsTab.tag(2)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            #else
+            // macOS: Use simple view switching to avoid default tab bar
+            Group {
+                switch selectedTab {
+                case 0: summaryTab
+                case 1: transcriptTab
+                case 2: keywordsTab
+                default: summaryTab
+                }
+            }
+            #endif
         }
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: toolbarPlacement) {
                 HStack(spacing: 16) {
                     Button(action: { viewModel.translateDescription() }) {
-                        Image(systemName: "character.bubble")
+                        Image(systemName: "translate")
                     }
                     Menu {
                         EpisodeMenuActions(
@@ -113,6 +159,11 @@ struct EpisodeDetailView: View {
             viewModel.setModelContext(modelContext)
             viewModel.checkTranscriptStatus()
         }
+        .onDisappear {
+            // Clean up timer and subscriptions to prevent memory leaks
+            stopPlaybackTimer()
+            viewModel.cleanup()
+        }
     }
 
     // MARK: - Header Section (Updated)
@@ -146,12 +197,18 @@ struct EpisodeDetailView: View {
                         .textSelection(.enabled)  // Can select and copy
                         .fixedSize(horizontal: false, vertical: true)  // Allows wrapping
 
-                    HStack(spacing: 4) {
-                        Text(viewModel.podcastTitle)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    // Tappable podcast title - navigates to show
+                    NavigationLink(destination: podcastDestination) {
+                        HStack(spacing: 4) {
+                            Text(viewModel.podcastTitle)
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 8))
+                                .foregroundColor(.blue)
+                        }
                     }
-                    .textSelection(.enabled)
+                    .buttonStyle(.plain)
 
                     // Date and status icons row
                     HStack(spacing: 8) {
@@ -228,27 +285,19 @@ struct EpisodeDetailView: View {
 
             // Play + Download + AI Analysis buttons
             HStack(spacing: 8) {
-                Button(action: { viewModel.playAction() }) {
-                    HStack(spacing: 4) {
-                        Image(
-                            systemName: viewModel.isPlayingThisEpisode
-                                && viewModel.audioManager.isPlaying
-                                ? "pause.fill" : "play.fill"
-                        )
-                        .font(.system(size: 12))
-                        Text(
-                            viewModel.isPlayingThisEpisode
-                                && viewModel.audioManager.isPlaying
-                                ? "Pause" : "Play"
-                        )
-                        .font(.caption)
-                        .fontWeight(.medium)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isPlayDisabled)
+                // Play button with progress (using reusable component)
+                EpisodePlayButton(
+                    isPlaying: viewModel.audioManager.isPlaying,
+                    isPlayingThisEpisode: viewModel.isPlayingThisEpisode,
+                    isCompleted: viewModel.isCompleted,
+                    playbackProgress: viewModel.playbackProgress,
+                    duration: viewModel.savedDuration,
+                    lastPlaybackPosition: viewModel.lastPlaybackPosition,
+                    formattedDuration: viewModel.formattedDuration,
+                    isDisabled: viewModel.isPlayDisabled,
+                    style: .standard,
+                    action: { viewModel.playAction() }
+                )
 
                 downloadButton
 
@@ -364,7 +413,7 @@ struct EpisodeDetailView: View {
                 withAnimation { selectedTab = 2 }
             }
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(Color.platformBackground)
     }
 
     // MARK: - Summary Tab
@@ -382,23 +431,44 @@ struct EpisodeDetailView: View {
     // MARK: - Transcript Tab (FIXED)
     private var transcriptTab: some View {
         VStack(spacing: 0) {
-            if viewModel.isTranscriptProcessing {
-                // Case 1: Active Processing (Always show this if happening)
-                transcriptStatusSection
-            } else if viewModel.hasTranscript {
-                // Case 2: Transcript exists and we are idle
+            if viewModel.hasTranscript && !viewModel.isTranscriptProcessing {
+                // Case 1: Transcript exists and we are idle - show live captions
                 liveCaptionsView
             } else {
-                // Case 3: No transcript, idle or error
+                // Case 2: Processing or no transcript - wrap in ScrollView for consistent layout
                 ScrollView {
                     transcriptStatusSection
                         .padding(.vertical)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
-        .onReceive(playbackTimer) { _ in
-            if viewModel.isPlayingThisEpisode { refreshTrigger.toggle() }
+        .onAppear {
+            startPlaybackTimer()
         }
+        .onDisappear {
+            stopPlaybackTimer()
+        }
+    }
+
+    // MARK: - Timer Management (Instance-level, properly managed)
+
+    private func startPlaybackTimer() {
+        // Only start if not already running
+        guard playbackTimerCancellable == nil else { return }
+
+        playbackTimerCancellable = Timer.publish(every: 0.5, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak viewModel] _ in
+                // This closure captures viewModel weakly to prevent retain cycle
+                guard let vm = viewModel, vm.isPlayingThisEpisode else { return }
+                // The view will update automatically via @Observable
+            }
+    }
+
+    private func stopPlaybackTimer() {
+        playbackTimerCancellable?.cancel()
+        playbackTimerCancellable = nil
     }
 
     // MARK: - Live Captions View (Redesigned - Clean Full Page)
@@ -427,7 +497,7 @@ struct EpisodeDetailView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Color(.systemGray6))
+                .background(Color.platformSystemGray6)
                 .cornerRadius(10)
 
                 // Options menu
@@ -738,7 +808,7 @@ struct EpisodeDetailView: View {
                 .buttonStyle(.bordered)
             }
             .padding()
-            .background(Color(.systemGray6))
+            .background(Color.platformSystemGray6)
             .cornerRadius(12)
         } else {
             // Generate button

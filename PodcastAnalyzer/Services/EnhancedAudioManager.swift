@@ -18,6 +18,12 @@ import Foundation
 import MediaPlayer
 import os.log
 
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
+
 // MARK: - Playback State Notification
 extension Notification.Name {
   static let playbackPositionDidUpdate = Notification.Name("playbackPositionDidUpdate")
@@ -48,9 +54,17 @@ class EnhancedAudioManager: NSObject {
   // Queue management
   var queue: [PlaybackEpisode] = []
   var hasRestoredLastEpisode: Bool = false
+  private let maxQueueSize = 50
+
+  // Auto-play candidates (unplayed episodes that can be randomly selected)
+  var autoPlayCandidates: [PlaybackEpisode] = []
+
+  // Audio interruption handling - track if we should resume after interruption ends
+  private var wasPlayingBeforeInterruption: Bool = false
 
   private var timeObserver: Any?
   private var cancellables = Set<AnyCancellable>()
+  private var interruptionCancellable: AnyCancellable?  // Kept separate so cleanup() doesn't remove it
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "AudioManager")
 
   // Use Unit Separator (U+001F) as delimiter - same as EpisodeDownloadModel
@@ -60,22 +74,28 @@ class EnhancedAudioManager: NSObject {
     static let lastEpisodeTitle = "lastEpisodeTitle"
     static let lastPodcastTitle = "lastPodcastTitle"
     static let lastPlaybackTime = "lastPlaybackTime"
+    static let lastDuration = "lastDuration"
     static let lastAudioURL = "lastAudioURL"
     static let playbackRate = "playbackRate"
     static let lastImageURL = "lastImageURL"
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
+    static let autoPlayNextEpisode = "autoPlayNextEpisode"
   }
 
   override private init() {
     super.init()
     setupAudioSession()
     setupRemoteControls()
-    // Critical for remote commands!
+    setupInterruptionObserver()
+    #if os(iOS)
+    // Critical for remote commands on iOS!
     UIApplication.shared.beginReceivingRemoteControlEvents()
+    #endif
     loadPlaybackRate()
   }
 
   private func setupAudioSession() {
+    #if os(iOS)
     do {
       let session = AVAudioSession.sharedInstance()
       try session.setCategory(.playback, mode: .spokenAudio, options: [])
@@ -84,7 +104,86 @@ class EnhancedAudioManager: NSObject {
     } catch {
       logger.error("Audio session failed: \(error.localizedDescription)")
     }
+    #else
+    // macOS doesn't require AVAudioSession configuration
+    logger.info("Audio manager initialized for macOS")
+    #endif
   }
+
+  private func setupInterruptionObserver() {
+    #if os(iOS)
+    // Store in separate property so cleanup() doesn't remove it
+    interruptionCancellable = NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)
+      .sink { [weak self] notification in
+        self?.handleAudioInterruption(notification)
+      }
+    logger.info("Audio interruption observer configured")
+    #endif
+  }
+
+private func handleAudioInterruption(_ notification: Notification) {
+    #if os(iOS)
+    guard let userInfo = notification.userInfo,
+          let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+          let type = AVAudioSession.InterruptionType(rawValue: typeValue)
+    else { return }
+
+    logger.info("Handling audio interruption: type=\(type.rawValue, privacy: .public)")
+
+
+    switch type {
+    case .began:
+        // 1. Mark our state BEFORE we call pause()
+        wasPlayingBeforeInterruption = isPlaying
+        
+        if isPlaying {
+            // We use a local pause here to stop the player
+            // but we don't necessarily want to treat this as a "user-stop"
+            player?.pause()
+            isPlaying = false
+            updateNowPlayingPlaybackRate()
+            logger.info("Interruption began: Audio paused")
+        }
+
+    case .ended:
+        // 2. Determine if we SHOULD resume
+        // We check the system hint AND our manual flag
+        var shouldResume = false
+        if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+            if options.contains(.shouldResume) {
+                shouldResume = true
+            }
+        }
+        
+        // If system says yes OR our manual state says we were playing
+        let finalDecisionToResume = shouldResume || wasPlayingBeforeInterruption
+        
+        if finalDecisionToResume {
+            // 3. Mandatory Session Reactivation
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+                
+                // 4. Delayed Resume
+                // Audio hardware needs a moment to switch back from the other app
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    guard let self = self else { return }
+                    self.resume()
+                    self.wasPlayingBeforeInterruption = false
+                    self.logger.info("Interruption ended: Audio resumed")
+                }
+            } catch {
+                logger.error("Failed to reactivate session after interruption: \(error.localizedDescription)")
+            }
+        } else {
+            wasPlayingBeforeInterruption = false
+        }
+
+    @unknown default:
+        break
+    }
+    #endif
+}
 
   private func setupRemoteControls() {
     let commandCenter = MPRemoteCommandCenter.shared()
@@ -140,10 +239,14 @@ class EnhancedAudioManager: NSObject {
 
     cleanup()
 
-    // IMPORTANT: Reset duration and currentTime for new episode
-    // This prevents showing old duration in Now Playing
-    duration = 0
-    currentTime = 0
+    // Use cached duration from episode metadata if available
+    // This provides immediate feedback instead of showing 0:00
+    if let episodeDuration = episode.duration, episodeDuration > 0 {
+      duration = TimeInterval(episodeDuration)
+    } else {
+      duration = 0
+    }
+    currentTime = startTime > 0 ? startTime : 0
 
     // Apply default speed from settings for new episodes
     if useDefaultSpeed {
@@ -158,7 +261,7 @@ class EnhancedAudioManager: NSObject {
     player = AVPlayer(playerItem: playerItem)
     currentEpisode = episode
 
-    // Update Now Playing info (duration will be 0 initially, updated when available)
+    // Update Now Playing info with cached duration (will be refined when AVPlayer reports actual duration)
     updateNowPlayingInfo(imageURL: imageURL ?? episode.imageURL)
 
     if startTime > 0 {
@@ -255,12 +358,19 @@ class EnhancedAudioManager: NSObject {
       logger.info("Episode already in queue or currently playing")
       return
     }
+    // Enforce queue size limit
+    guard queue.count < maxQueueSize else {
+      logger.info("Queue is full (max \(self.maxQueueSize) episodes)")
+      return
+    }
     queue.append(episode)
-    logger.info("Added to queue: \(episode.title)")
+    logger.info("Added to queue: \(episode.title) (\(self.queue.count)/\(self.maxQueueSize))")
   }
 
   /// Add an episode to play next (first position in queue)
   func playNext(_ episode: PlaybackEpisode) {
+    // Check if already in queue (will be moved, not added)
+    let wasInQueue = queue.contains(where: { $0.id == episode.id })
     // Remove if already in queue
     queue.removeAll { $0.id == episode.id }
     // Don't add if currently playing
@@ -268,8 +378,13 @@ class EnhancedAudioManager: NSObject {
       logger.info("Episode is currently playing")
       return
     }
+    // Enforce queue size limit (only if adding new, not moving existing)
+    if !wasInQueue && queue.count >= maxQueueSize {
+      logger.info("Queue is full (max \(self.maxQueueSize) episodes)")
+      return
+    }
     queue.insert(episode, at: 0)
-    logger.info("Play next: \(episode.title)")
+    logger.info("Play next: \(episode.title) (\(self.queue.count)/\(self.maxQueueSize))")
   }
 
   /// Remove an episode from the queue
@@ -312,6 +427,25 @@ class EnhancedAudioManager: NSObject {
   func clearQueue() {
     queue.removeAll()
     logger.info("Queue cleared")
+  }
+
+  /// Update the list of auto-play candidates (unplayed episodes)
+  func updateAutoPlayCandidates(_ episodes: [PlaybackEpisode]) {
+    autoPlayCandidates = episodes
+    logger.info("Updated auto-play candidates: \(episodes.count) episodes")
+  }
+
+  /// Add episodes to auto-play candidates (avoids duplicates)
+  func addToAutoPlayCandidates(_ episodes: [PlaybackEpisode]) {
+    let existingIds = Set(autoPlayCandidates.map { $0.id })
+    let newEpisodes = episodes.filter { !existingIds.contains($0.id) }
+    autoPlayCandidates.append(contentsOf: newEpisodes)
+    logger.info("Added \(newEpisodes.count) to auto-play candidates (total: \(self.autoPlayCandidates.count))")
+  }
+
+  /// Remove an episode from auto-play candidates (e.g., after fully played)
+  func removeFromAutoPlayCandidates(_ episodeId: String) {
+    autoPlayCandidates.removeAll { $0.id == episodeId }
   }
 
   /// Play the next episode in queue
@@ -359,9 +493,9 @@ class EnhancedAudioManager: NSObject {
     // Just set the current episode info without playing
     currentEpisode = state.episode
     currentTime = state.time
-    duration = 0  // Will be updated when user plays
+    duration = state.duration  // Restore saved duration for correct progress display
 
-    logger.info("Restored last episode: \(state.episode.title) at \(state.time)s")
+    logger.info("Restored last episode: \(state.episode.title) at \(state.time)s / \(state.duration)s")
   }
 
   // MARK: - Caption Management
@@ -511,6 +645,7 @@ class EnhancedAudioManager: NSObject {
       Task.detached { [weak self] in
         do {
           let (data, _) = try await URLSession.shared.data(from: url)
+          #if os(iOS)
           if let image = UIImage(data: data) {
             let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
             await MainActor.run {
@@ -519,6 +654,22 @@ class EnhancedAudioManager: NSObject {
               MPNowPlayingInfoCenter.default().nowPlayingInfo = info
             }
           }
+          #else
+          if let image = NSImage(data: data) {
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
+              let newImage = NSImage(size: size)
+              newImage.lockFocus()
+              image.draw(in: NSRect(origin: .zero, size: size))
+              newImage.unlockFocus()
+              return newImage
+            }
+            await MainActor.run {
+              var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+              info[MPMediaItemPropertyArtwork] = artwork
+              MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            }
+          }
+          #endif
         } catch {
           self?.logger.error("Failed to load artwork: \(error.localizedDescription)")
         }
@@ -573,15 +724,16 @@ class EnhancedAudioManager: NSObject {
     UserDefaults.standard.set(episode.title, forKey: Keys.lastEpisodeTitle)
     UserDefaults.standard.set(episode.podcastTitle, forKey: Keys.lastPodcastTitle)
     UserDefaults.standard.set(currentTime, forKey: Keys.lastPlaybackTime)
+    UserDefaults.standard.set(duration, forKey: Keys.lastDuration)
     UserDefaults.standard.set(episode.audioURL, forKey: Keys.lastAudioURL)
     if let imageURL = imageURL {
       UserDefaults.standard.set(imageURL, forKey: Keys.lastImageURL)
     }
 
-    logger.debug("Saved playback state: \(episode.title) at \(self.currentTime)s")
+    logger.debug("Saved playback state: \(episode.title) at \(self.currentTime)s / \(self.duration)s")
   }
 
-  func loadLastPlaybackState() -> (episode: PlaybackEpisode, time: TimeInterval, imageURL: String?)?
+  func loadLastPlaybackState() -> (episode: PlaybackEpisode, time: TimeInterval, duration: TimeInterval, imageURL: String?)?
   {
     guard let title = UserDefaults.standard.string(forKey: Keys.lastEpisodeTitle),
       let podcastTitle = UserDefaults.standard.string(forKey: Keys.lastPodcastTitle),
@@ -591,6 +743,7 @@ class EnhancedAudioManager: NSObject {
     }
 
     let time = UserDefaults.standard.double(forKey: Keys.lastPlaybackTime)
+    let savedDuration = UserDefaults.standard.double(forKey: Keys.lastDuration)
     let imageURL = UserDefaults.standard.string(forKey: Keys.lastImageURL)
 
     let episode = PlaybackEpisode(
@@ -601,7 +754,7 @@ class EnhancedAudioManager: NSObject {
       imageURL: imageURL
     )
 
-    return (episode, time, imageURL)
+    return (episode, time, savedDuration, imageURL)
   }
 
   private func loadPlaybackRate() {
@@ -613,6 +766,7 @@ class EnhancedAudioManager: NSObject {
     UserDefaults.standard.removeObject(forKey: Keys.lastEpisodeTitle)
     UserDefaults.standard.removeObject(forKey: Keys.lastPodcastTitle)
     UserDefaults.standard.removeObject(forKey: Keys.lastPlaybackTime)
+    UserDefaults.standard.removeObject(forKey: Keys.lastDuration)
     UserDefaults.standard.removeObject(forKey: Keys.lastAudioURL)
     UserDefaults.standard.removeObject(forKey: Keys.lastImageURL)
   }
@@ -681,12 +835,33 @@ class EnhancedAudioManager: NSObject {
     isPlaying = false
     currentTime = 0
 
+    // Remove current episode from auto-play candidates (it's been fully played)
+    if let currentId = currentEpisode?.id {
+      removeFromAutoPlayCandidates(currentId)
+    }
+
     // Check if there's a next episode in queue
     if !queue.isEmpty {
       logger.info("Playing next episode from queue")
       playNextInQueue()
     } else {
-      clearPlaybackState()
+      // Check auto-play setting and try to play random unplayed episode
+      let autoPlayEnabled = UserDefaults.standard.bool(forKey: Keys.autoPlayNextEpisode)
+      if autoPlayEnabled, !autoPlayCandidates.isEmpty {
+        // Pick a random episode from candidates
+        let randomIndex = Int.random(in: 0..<autoPlayCandidates.count)
+        let nextEpisode = autoPlayCandidates[randomIndex]
+        logger.info("Auto-playing random episode: \(nextEpisode.title)")
+        play(
+          episode: nextEpisode,
+          audioURL: nextEpisode.audioURL,
+          startTime: 0,
+          imageURL: nextEpisode.imageURL,
+          useDefaultSpeed: false
+        )
+      } else {
+        clearPlaybackState()
+      }
     }
   }
 

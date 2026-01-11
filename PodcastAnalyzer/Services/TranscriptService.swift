@@ -129,11 +129,12 @@ public actor TranscriptService {
       attributeOptions: needsAudioTimeRange ? [.audioTimeRange] : []
     )
     self.transcriber = newTranscriber
+      let detector = SpeechDetector()
 
     // Release and reserve locales
     await releaseAndReserveLocales()
 
-    let modules: [any SpeechModule] = [newTranscriber]
+      let modules: [any SpeechModule] = [newTranscriber, detector]
     let installed = await Set(SpeechTranscriber.installedLocales)
     logger.info("Installed locales: \(installed.map { $0.identifier }.joined(separator: ", "))")
 
@@ -322,10 +323,19 @@ public actor TranscriptService {
     TranscriptionProgress, Error
   > {
     return AsyncThrowingStream { continuation in
-      Task {
+      // Use Task.detached to ensure CPU-intensive transcription runs on a background thread
+      // This prevents blocking the actor and allows better parallelization
+      Task.detached(priority: .userInitiated) {
         do {
+          // Access actor-isolated properties - need to await actor access
+          let (transcriber, analyzer, needsAudioTimeRange) = await (
+            self.transcriber,
+            self.analyzer,
+            self.needsAudioTimeRange
+          )
+          
           // Ensure transcriber and analyzer are initialized
-          guard let transcriber = self.transcriber, let analyzer = self.analyzer else {
+          guard let transcriber = transcriber, let analyzer = analyzer else {
             throw NSError(
               domain: "TranscriptService", code: 1,
               userInfo: [
@@ -334,7 +344,7 @@ public actor TranscriptService {
               ])
           }
 
-          guard self.needsAudioTimeRange else {
+          guard needsAudioTimeRange else {
             throw NSError(
               domain: "TranscriptService", code: 2,
               userInfo: [
@@ -349,6 +359,7 @@ public actor TranscriptService {
           let audioFileDuration: TimeInterval =
             Double(audioFile.length) / audioFile.processingFormat.sampleRate
 
+          // Logger is nonisolated, no need to await
           self.logger.info(
             "Audio file duration for SRT with progress: \(audioFileDuration) seconds")
 
@@ -393,8 +404,9 @@ public actor TranscriptService {
             }
           }
 
-          // Convert transcript to SRT format
-          let srtContent = self.transcriptToSRT(transcript: transcript, maxLength: maxLength)
+          // Convert transcript to SRT format (CPU-intensive, runs on background thread)
+          // Call through actor since transcriptToSRT is actor-isolated
+          let srtContent = await self.transcriptToSRT(transcript: transcript, maxLength: maxLength)
 
           // Send final progress with completed content
           continuation.yield(

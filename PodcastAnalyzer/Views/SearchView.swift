@@ -5,9 +5,12 @@
 //  Created by Bob on 2025/11/23.
 //
 
-import Combine
 import SwiftData
 import SwiftUI
+
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - Search Tab Enum
 
@@ -19,7 +22,7 @@ enum SearchTab: String, CaseIterable {
 // MARK: - Main Search View
 
 struct PodcastSearchView: View {
-    @StateObject private var viewModel = PodcastSearchViewModel()
+    @State private var viewModel = PodcastSearchViewModel()
     @Environment(\.modelContext) private var modelContext
     @Query(filter: #Predicate<PodcastInfoModel> { $0.isSubscribed == true })
     private var subscribedPodcasts: [PodcastInfoModel]
@@ -89,14 +92,14 @@ struct PodcastSearchView: View {
                         .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(selectedTab == tab ? Color(.systemGray5) : Color.clear)
+                                .fill(selectedTab == tab ? Color.platformSystemGray5 : Color.clear)
                         )
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(4)
-        .background(Color(.systemGray6))
+        .background(Color.platformSystemGray6)
         .cornerRadius(10)
     }
 

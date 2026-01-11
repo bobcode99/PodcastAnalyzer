@@ -12,8 +12,8 @@
 //  Manages episode downloads with progress tracking
 //
 
-import Combine  // ✅ Add this
 import Foundation
+import Observation
 import os.log
 
 enum DownloadState: Codable, Equatable {
@@ -24,28 +24,31 @@ enum DownloadState: Codable, Equatable {
   case failed(error: String)
 }
 
-class DownloadManager: NSObject, ObservableObject {
+@Observable
+class DownloadManager: NSObject {
   static let shared = DownloadManager()
 
-  // ✅ Use @Published instead
-  @Published var downloadStates: [String: DownloadState] = [:]
+  var downloadStates: [String: DownloadState] = [:]
 
+  @ObservationIgnored
   private var activeDownloads: [String: URLSessionDownloadTask] = [:]
 
   // Store original URLs to get proper file extensions
+  @ObservationIgnored
   private var originalURLs: [String: URL] = [:]
 
   // Store episode info for auto-transcript
+  @ObservationIgnored
   private var episodeLanguages: [String: String] = [:]  // episodeKey -> language
 
   // Auto-transcript setting
-  @Published var autoTranscriptEnabled: Bool {
+  var autoTranscriptEnabled: Bool {
     didSet {
       UserDefaults.standard.set(autoTranscriptEnabled, forKey: "autoTranscriptEnabled")
     }
   }
 
-  // ✅ Make it a lazy stored property
+  @ObservationIgnored
   private lazy var urlSession: URLSession = {
     let config = URLSessionConfiguration.background(
       withIdentifier: "com.podcast.analyzer.downloads")
@@ -54,7 +57,10 @@ class DownloadManager: NSObject, ObservableObject {
     return URLSession(configuration: config, delegate: self, delegateQueue: nil)
   }()
 
+  @ObservationIgnored
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "DownloadManager")
+
+  @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
 
   override private init() {
@@ -72,8 +78,15 @@ class DownloadManager: NSObject, ObservableObject {
     -> String?
   {
     let fm = FileManager.default
+
+    // Must match FileStorageManager's audioDirectory path exactly
+    #if os(macOS)
+    let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    let audioDir = appSupport.appendingPathComponent("PodcastAnalyzer/Audio", isDirectory: true)
+    #else
     let libraryDir = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
     let audioDir = libraryDir.appendingPathComponent("Audio", isDirectory: true)
+    #endif
 
     // Sanitize filename same way as FileStorageManager
     let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
@@ -316,8 +329,9 @@ extension DownloadManager: URLSessionDownloadDelegate {
       try FileManager.default.copyItem(at: location, to: ourTempFile)
       logger.info("Copied download to temp location: \(ourTempFile.lastPathComponent)")
 
-      // Set finishing state SYNCHRONOUSLY on main thread to avoid race conditions
-      DispatchQueue.main.sync {
+      // Set finishing state on main thread
+      // Use async to avoid potential deadlocks
+      DispatchQueue.main.async {
         self.downloadStates[episodeKey] = .finishing
       }
 
@@ -342,6 +356,17 @@ extension DownloadManager: URLSessionDownloadDelegate {
             self.activeDownloads.removeValue(forKey: episodeKey)
             self.originalURLs.removeValue(forKey: episodeKey)
             self.logger.info("Download completed successfully: \(episodeTitle)")
+
+            // Post notification so SwiftData models can be updated
+            NotificationCenter.default.post(
+              name: .episodeDownloadCompleted,
+              object: nil,
+              userInfo: [
+                "episodeTitle": episodeTitle,
+                "podcastTitle": podcastTitle,
+                "localPath": destinationURL.path
+              ]
+            )
 
             // Trigger auto-transcript if enabled
             if self.autoTranscriptEnabled {

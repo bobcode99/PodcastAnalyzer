@@ -7,14 +7,53 @@
 
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
+
+// MARK: - Platform Image Type Alias
+
+#if os(iOS)
+typealias CachedPlatformImage = UIImage
+#else
+typealias CachedPlatformImage = NSImage
+#endif
+
+// MARK: - Download Coordinator (Actor for thread-safe async coordination)
+
+/// Actor that coordinates in-flight downloads to prevent duplicate requests
+private actor DownloadCoordinator {
+  private var inFlightDownloads: [String: Task<CachedPlatformImage?, Never>] = [:]
+
+  func getExistingTask(for key: String) -> Task<CachedPlatformImage?, Never>? {
+    inFlightDownloads[key]
+  }
+
+  func registerTask(_ task: Task<CachedPlatformImage?, Never>, for key: String) {
+    inFlightDownloads[key] = task
+  }
+
+  func removeTask(for key: String) {
+    inFlightDownloads.removeValue(forKey: key)
+  }
+}
+
 // MARK: - Image Cache Manager
 
-actor ImageCacheManager {
+final class ImageCacheManager: @unchecked Sendable {
   static let shared = ImageCacheManager()
 
-  private let memoryCache = NSCache<NSString, UIImage>()
+  private let memoryCache = NSCache<NSString, CachedPlatformImage>()
   private let fileManager = FileManager.default
   private let cacheDirectory: URL
+
+  // Actor for coordinating downloads (replaces NSLock for async contexts)
+  private let downloadCoordinator = DownloadCoordinator()
+
+  // Serial queue for synchronous memory cache access (safer than NSLock)
+  private let memoryCacheQueue = DispatchQueue(label: "com.podcastanalyzer.imagecache.memory")
 
   private init() {
     // Set up memory cache limits
@@ -32,22 +71,32 @@ actor ImageCacheManager {
   // MARK: - Cache Key Generation
 
   private func cacheKey(for url: URL) -> String {
-    // Use URL hash as key to handle special characters
-    let hash = url.absoluteString.hashValue
-    return String(format: "%llx", hash)
+    // Use a stable hash - SHA256-like approach using Data
+    let urlString = url.absoluteString
+    var hash: UInt64 = 5381
+    for char in urlString.utf8 {
+      hash = ((hash << 5) &+ hash) &+ UInt64(char)
+    }
+    return String(format: "%016llx", hash)
   }
 
-  // MARK: - Memory Cache
+  // MARK: - Synchronous Memory Cache (for immediate UI response)
 
-  func getCached(for url: URL) -> UIImage? {
+  /// Synchronous cache lookup - safe to call from any context
+  func getCachedSync(for url: URL) -> CachedPlatformImage? {
     let key = cacheKey(for: url) as NSString
-    return memoryCache.object(forKey: key)
+    // NSCache is thread-safe, but we use queue for consistency
+    return memoryCacheQueue.sync {
+      memoryCache.object(forKey: key)
+    }
   }
 
-  func cacheInMemory(_ image: UIImage, for url: URL) {
+  private func cacheInMemory(_ image: CachedPlatformImage, for url: URL) {
     let key = cacheKey(for: url) as NSString
     let cost = Int(image.size.width * image.size.height * 4)  // Approximate byte size
-    memoryCache.setObject(image, forKey: key, cost: cost)
+    memoryCacheQueue.sync {
+      memoryCache.setObject(image, forKey: key, cost: cost)
+    }
   }
 
   // MARK: - Disk Cache
@@ -57,10 +106,10 @@ actor ImageCacheManager {
     return cacheDirectory.appendingPathComponent(key)
   }
 
-  func getDiskCached(for url: URL) -> UIImage? {
+  private func getDiskCached(for url: URL) -> CachedPlatformImage? {
     let path = diskCachePath(for: url)
     guard let data = try? Data(contentsOf: path),
-          let image = UIImage(data: data) else {
+          let image = CachedPlatformImage(data: data) else {
       return nil
     }
     // Also cache in memory for faster access next time
@@ -68,45 +117,76 @@ actor ImageCacheManager {
     return image
   }
 
-  func cacheToDisk(_ image: UIImage, for url: URL) {
+  private func cacheToDisk(_ image: CachedPlatformImage, for url: URL) {
     let path = diskCachePath(for: url)
+    #if os(iOS)
     if let data = image.jpegData(compressionQuality: 0.8) {
       try? data.write(to: path)
     }
+    #else
+    if let tiffData = image.tiffRepresentation,
+       let bitmap = NSBitmapImageRep(data: tiffData),
+       let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.8]) {
+      try? data.write(to: path)
+    }
+    #endif
   }
 
-  // MARK: - Download and Cache
+  // MARK: - Download and Cache (with deduplication via actor)
 
-  func downloadAndCache(from url: URL) async -> UIImage? {
-    // Check memory cache first
-    if let cached = getCached(for: url) {
+  func downloadAndCache(from url: URL) async -> CachedPlatformImage? {
+    let key = cacheKey(for: url)
+
+    // Check memory cache first (synchronous)
+    if let cached = getCachedSync(for: url) {
       return cached
     }
 
-    // Check disk cache
+    // Check disk cache (synchronous but I/O bound)
     if let diskCached = getDiskCached(for: url) {
       return diskCached
     }
 
-    // Download
-    do {
-      let (data, _) = try await URLSession.shared.data(from: url)
-      guard let image = UIImage(data: data) else { return nil }
-
-      // Cache in memory and disk
-      cacheInMemory(image, for: url)
-      cacheToDisk(image, for: url)
-
-      return image
-    } catch {
-      return nil
+    // Check if already downloading (actor-isolated, safe across await)
+    if let existingTask = await downloadCoordinator.getExistingTask(for: key) {
+      return await existingTask.value
     }
+
+    // Create download task
+    let task = Task<CachedPlatformImage?, Never> { [weak self] in
+      guard let self else { return nil }
+
+      do {
+        let (data, _) = try await URLSession.shared.data(from: url)
+        guard let image = CachedPlatformImage(data: data) else { return nil }
+
+        // Cache in memory and disk
+        self.cacheInMemory(image, for: url)
+        self.cacheToDisk(image, for: url)
+
+        return image
+      } catch {
+        return nil
+      }
+    }
+
+    // Register task with coordinator
+    await downloadCoordinator.registerTask(task, for: key)
+
+    let result = await task.value
+
+    // Remove from coordinator
+    await downloadCoordinator.removeTask(for: key)
+
+    return result
   }
 
   // MARK: - Cache Cleanup
 
   func clearMemoryCache() {
-    memoryCache.removeAllObjects()
+    memoryCacheQueue.sync {
+      memoryCache.removeAllObjects()
+    }
   }
 
   func clearDiskCache() {
@@ -128,8 +208,8 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
   @ViewBuilder let content: (Image) -> Content
   @ViewBuilder let placeholder: () -> Placeholder
 
-  @State private var image: UIImage?
-  @State private var isLoading = false
+  @State private var image: CachedPlatformImage?
+  @State private var loadTask: Task<Void, Never>?
 
   init(
     url: URL?,
@@ -146,25 +226,50 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
   var body: some View {
     Group {
       if let image = image {
+        #if os(iOS)
         content(Image(uiImage: image))
+        #else
+        content(Image(nsImage: image))
+        #endif
       } else {
         placeholder()
-          .task(id: url) {
-            await loadImage()
-          }
       }
+    }
+    .onAppear {
+      loadImageIfNeeded()
+    }
+    .onChange(of: url) { _, newURL in
+      // URL changed, reset and reload
+      image = nil
+      loadTask?.cancel()
+      loadImageIfNeeded()
+    }
+    .onDisappear {
+      // Cancel any pending load when view disappears
+      loadTask?.cancel()
+      loadTask = nil
     }
   }
 
-  private func loadImage() async {
-    guard let url = url, !isLoading else { return }
+  private func loadImageIfNeeded() {
+    guard let url = url else { return }
 
-    isLoading = true
-    defer { isLoading = false }
+    // IMPORTANT: Check memory cache synchronously first!
+    // This prevents creating Tasks for already-cached images
+    if let cached = ImageCacheManager.shared.getCachedSync(for: url) {
+      self.image = cached
+      return
+    }
 
-    if let cachedImage = await ImageCacheManager.shared.downloadAndCache(from: url) {
-      await MainActor.run {
-        self.image = cachedImage
+    // Only create async task if not in memory cache
+    loadTask?.cancel()
+    loadTask = Task {
+      if let cachedImage = await ImageCacheManager.shared.downloadAndCache(from: url) {
+        if !Task.isCancelled {
+          await MainActor.run {
+            self.image = cachedImage
+          }
+        }
       }
     }
   }

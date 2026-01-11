@@ -5,22 +5,25 @@
 //  Manages background sync for podcast episodes with notifications
 //
 
+#if os(iOS)
 import BackgroundTasks
-import Combine
+#endif
 import Foundation
+import Observation
 import SwiftData
 import UserNotifications
 import os.log
 
 @MainActor
-class BackgroundSyncManager: ObservableObject {
+@Observable
+class BackgroundSyncManager {
   static let shared = BackgroundSyncManager()
 
   // Background task identifier
   static let backgroundTaskIdentifier = "com.podcast.analyzer.refresh"
 
   // Settings
-  @Published var isBackgroundSyncEnabled: Bool {
+  var isBackgroundSyncEnabled: Bool {
     didSet {
       UserDefaults.standard.set(isBackgroundSyncEnabled, forKey: Keys.backgroundSyncEnabled)
       if isBackgroundSyncEnabled {
@@ -31,7 +34,7 @@ class BackgroundSyncManager: ObservableObject {
     }
   }
 
-  @Published var isNotificationsEnabled: Bool {
+  var isNotificationsEnabled: Bool {
     didSet {
       UserDefaults.standard.set(isNotificationsEnabled, forKey: Keys.notificationsEnabled)
       if isNotificationsEnabled {
@@ -40,12 +43,17 @@ class BackgroundSyncManager: ObservableObject {
     }
   }
 
-  @Published var notificationPermissionStatus: UNAuthorizationStatus = .notDetermined
-  @Published var lastSyncDate: Date?
-  @Published var isSyncing: Bool = false
+  var notificationPermissionStatus: UNAuthorizationStatus = .notDetermined
+  var lastSyncDate: Date?
+  var isSyncing: Bool = false
 
+  @ObservationIgnored
   private let rssService = PodcastRssService()
+
+  @ObservationIgnored
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "BackgroundSync")
+
+  @ObservationIgnored
   private var modelContainer: ModelContainer?
 
   private enum Keys {
@@ -74,7 +82,8 @@ class BackgroundSyncManager: ObservableObject {
 
   // MARK: - Background Task Registration
 
-  /// Call this in app's init to register background task
+  #if os(iOS)
+  /// Call this in app's init to register background task (iOS only)
   static func registerBackgroundTask() {
     BGTaskScheduler.shared.register(
       forTaskWithIdentifier: backgroundTaskIdentifier,
@@ -118,6 +127,25 @@ class BackgroundSyncManager: ObservableObject {
     let success = await performSync()
     task.setTaskCompleted(success: success)
   }
+
+  #else
+  /// macOS: No-op for background task registration (use foreground timer instead)
+  static func registerBackgroundTask() {
+    // macOS doesn't support BGTaskScheduler
+    // Use startForegroundSync() instead when app is running
+  }
+
+  func scheduleBackgroundRefresh() {
+    // On macOS, use the foreground timer since apps typically stay running
+    startForegroundSync()
+    logger.info("macOS: Using foreground sync timer instead of background task")
+  }
+
+  func cancelBackgroundRefresh() {
+    stopForegroundSync()
+    logger.info("macOS: Foreground sync stopped")
+  }
+  #endif
 
   // MARK: - Manual Sync (for foreground use)
 
@@ -286,6 +314,7 @@ class BackgroundSyncManager: ObservableObject {
 
   // MARK: - Foreground Timer (Optional: for when app is active)
 
+  @ObservationIgnored
   private var foregroundTimer: Timer?
 
   func startForegroundSync() {

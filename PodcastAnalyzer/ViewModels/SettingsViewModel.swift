@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 import SwiftData
 import SwiftUI
@@ -33,31 +32,95 @@ enum TranscriptModelStatus: Equatable {
 }
 
 @MainActor
-class SettingsViewModel: ObservableObject {
-  @Published var rssUrlInput: String = ""
-  @Published var successMessage: String = ""
-  @Published var errorMessage: String = ""
-  @Published var podcastInfoModelList: [PodcastInfoModel] = []
-  @Published var isValidating: Bool = false
-  @Published var defaultPlaybackSpeed: Float = 1.0
+@Observable
+final class SettingsViewModel {
+  var rssUrlInput: String = ""
+  var successMessage: String = ""
+  var errorMessage: String = ""
+  var podcastInfoModelList: [PodcastInfoModel] = []
+  var isValidating: Bool = false
+  var defaultPlaybackSpeed: Float = 1.0
 
   // Transcript model status and locale
-  @Published var transcriptModelStatus: TranscriptModelStatus = .checking
-  @Published var selectedTranscriptLocale: String = "zh-tw"
+  var transcriptModelStatus: TranscriptModelStatus = .checking
+  var selectedTranscriptLocale: String = "zh-tw"
 
   private var successMessageTask: Task<Void, Never>?
   private var transcriptDownloadTask: Task<Void, Never>?
   private let service = PodcastRssService()
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "SettingsViewModel")
 
+  // Default region for top podcasts
+  var selectedRegion: String = "us"
+
+  // Appearance settings
+  var showEpisodeArtwork: Bool = true
+
+  // Playback settings
+  var autoPlayNextEpisode: Bool = false
+
   private enum Keys {
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
     static let selectedTranscriptLocale = "selectedTranscriptLocale"
+    static let selectedPodcastRegion = "selectedPodcastRegion"
+    static let showEpisodeArtwork = "showEpisodeArtwork"
+    static let autoPlayNextEpisode = "autoPlayNextEpisode"
   }
 
   init() {
     loadDefaultPlaybackSpeed()
     loadSelectedTranscriptLocale()
+    loadSelectedRegion()
+    loadShowEpisodeArtwork()
+    loadAutoPlayNextEpisode()
+  }
+
+  // MARK: - Region Settings
+
+  func setSelectedRegion(_ region: String) {
+    selectedRegion = region
+    UserDefaults.standard.set(region, forKey: Keys.selectedPodcastRegion)
+    logger.info("Selected region set to \(region)")
+    // Post notification so HomeViewModel can update
+    NotificationCenter.default.post(name: .podcastRegionChanged, object: region)
+  }
+
+  private func loadSelectedRegion() {
+    if let saved = UserDefaults.standard.string(forKey: Keys.selectedPodcastRegion) {
+      selectedRegion = saved
+    } else {
+      selectedRegion = "us"
+    }
+  }
+
+  // MARK: - Appearance Settings
+
+  func setShowEpisodeArtwork(_ show: Bool) {
+    showEpisodeArtwork = show
+    UserDefaults.standard.set(show, forKey: Keys.showEpisodeArtwork)
+    logger.info("Show episode artwork set to \(show)")
+  }
+
+  private func loadShowEpisodeArtwork() {
+    // Default to true if not set
+    if UserDefaults.standard.object(forKey: Keys.showEpisodeArtwork) == nil {
+      showEpisodeArtwork = true
+    } else {
+      showEpisodeArtwork = UserDefaults.standard.bool(forKey: Keys.showEpisodeArtwork)
+    }
+  }
+
+  // MARK: - Playback Settings
+
+  func setAutoPlayNextEpisode(_ enabled: Bool) {
+    autoPlayNextEpisode = enabled
+    UserDefaults.standard.set(enabled, forKey: Keys.autoPlayNextEpisode)
+    logger.info("Auto-play next episode set to \(enabled)")
+  }
+
+  private func loadAutoPlayNextEpisode() {
+    // Default to false if not set
+    autoPlayNextEpisode = UserDefaults.standard.bool(forKey: Keys.autoPlayNextEpisode)
   }
 
   // MARK: - Transcript Locale Settings
@@ -239,7 +302,6 @@ class SettingsViewModel: ObservableObject {
         await MainActor.run {
           if isReady {
             transcriptModelStatus = .ready
-            logger.info("Transcript model is ready")
           } else {
             transcriptModelStatus = .notDownloaded
             logger.info("Transcript model not downloaded")
