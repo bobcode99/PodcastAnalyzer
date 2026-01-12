@@ -351,6 +351,161 @@ actor FileStorageManager {
     }
   }
 
+  // MARK: - Translated Caption File Management
+
+  /// Generates filename for translated captions
+  /// Format: {podcast}_{episode}_{langCode}.srt
+  func translatedCaptionFileName(
+    for episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) -> String {
+    let sanitized = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
+    let langCode = targetLanguage.replacingOccurrences(of: "-", with: "_")
+    return "\(sanitized)_\(langCode).srt"
+  }
+
+  /// Gets the full path for a translated caption file
+  func translatedCaptionFilePath(
+    for episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) -> URL {
+    captionsDirectory.appendingPathComponent(
+      translatedCaptionFileName(
+        for: episodeTitle,
+        podcastTitle: podcastTitle,
+        targetLanguage: targetLanguage
+      )
+    )
+  }
+
+  /// Checks if translated caption file exists
+  func translatedCaptionFileExists(
+    for episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) -> Bool {
+    let path = translatedCaptionFilePath(
+      for: episodeTitle,
+      podcastTitle: podcastTitle,
+      targetLanguage: targetLanguage
+    )
+    return fileManager.fileExists(atPath: path.path)
+  }
+
+  /// Saves translated caption/SRT file (bilingual format)
+  func saveTranslatedCaptionFile(
+    content: String,
+    episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) throws -> URL {
+    // Ensure captions directory exists
+    if !fileManager.fileExists(atPath: self.captionsDirectory.path) {
+      do {
+        try fileManager.createDirectory(
+          at: self.captionsDirectory, withIntermediateDirectories: true)
+        logger.info("Created captions directory: \(self.captionsDirectory.path)")
+      } catch {
+        logger.error("Failed to create captions directory: \(error.localizedDescription)")
+        throw FileStorageError.directoryCreationFailed(error)
+      }
+    }
+
+    let destinationURL = translatedCaptionFilePath(
+      for: episodeTitle,
+      podcastTitle: podcastTitle,
+      targetLanguage: targetLanguage
+    )
+
+    do {
+      try content.write(to: destinationURL, atomically: true, encoding: .utf8)
+      logger.info("Saved translated caption file: \(destinationURL.lastPathComponent)")
+      return destinationURL
+    } catch {
+      logger.error("Failed to save translated caption: \(error.localizedDescription)")
+      throw FileStorageError.saveFailed(error)
+    }
+  }
+
+  /// Loads translated caption file content
+  func loadTranslatedCaptionFile(
+    for episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) throws -> String {
+    let path = translatedCaptionFilePath(
+      for: episodeTitle,
+      podcastTitle: podcastTitle,
+      targetLanguage: targetLanguage
+    )
+
+    guard fileManager.fileExists(atPath: path.path) else {
+      throw FileStorageError.fileNotFound
+    }
+
+    do {
+      return try String(contentsOf: path, encoding: .utf8)
+    } catch {
+      logger.error("Failed to load translated caption: \(error.localizedDescription)")
+      throw error
+    }
+  }
+
+  /// Deletes translated caption file
+  func deleteTranslatedCaptionFile(
+    for episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) throws {
+    let path = translatedCaptionFilePath(
+      for: episodeTitle,
+      podcastTitle: podcastTitle,
+      targetLanguage: targetLanguage
+    )
+
+    guard fileManager.fileExists(atPath: path.path) else {
+      throw FileStorageError.fileNotFound
+    }
+
+    do {
+      try fileManager.removeItem(at: path)
+      logger.info("Deleted translated caption file: \(path.lastPathComponent)")
+    } catch {
+      logger.error("Failed to delete translated caption: \(error.localizedDescription)")
+      throw FileStorageError.deleteFailed(error)
+    }
+  }
+
+  /// Gets the creation/modification date of a translated caption file
+  func getTranslatedCaptionFileDate(
+    for episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) -> Date? {
+    let path = translatedCaptionFilePath(
+      for: episodeTitle,
+      podcastTitle: podcastTitle,
+      targetLanguage: targetLanguage
+    )
+
+    guard fileManager.fileExists(atPath: path.path) else {
+      return nil
+    }
+
+    do {
+      let attributes = try fileManager.attributesOfItem(atPath: path.path)
+      if let modDate = attributes[.modificationDate] as? Date {
+        return modDate
+      }
+      return attributes[.creationDate] as? Date
+    } catch {
+      logger.error("Failed to get translated caption file date: \(error.localizedDescription)")
+      return nil
+    }
+  }
+
   // MARK: - Storage Info
 
   /// Gets total size of stored audio files
