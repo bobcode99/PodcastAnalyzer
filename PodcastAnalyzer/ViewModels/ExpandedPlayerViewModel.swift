@@ -39,6 +39,7 @@ final class ExpandedPlayerViewModel {
   var hasTranscript: Bool = false
   var transcriptSegments: [TranscriptSegment] = []
   var transcriptSearchQuery: String = ""
+  var displayMode: SubtitleDisplayMode = .originalOnly
 
   @ObservationIgnored
   private let audioManager = EnhancedAudioManager.shared
@@ -48,6 +49,9 @@ final class ExpandedPlayerViewModel {
 
   @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
+
+  @ObservationIgnored
+  private let subtitleSettings = SubtitleSettingsManager.shared
 
   @ObservationIgnored
   private var updateTimer: Timer?
@@ -119,6 +123,9 @@ final class ExpandedPlayerViewModel {
         episodeTitle: episode.title,
         podcastTitle: episode.podcastTitle
       )
+
+      // Sync display mode from settings
+      displayMode = subtitleSettings.displayMode
 
       // Reload episode state when episode changes
       if previousEpisodeId != episode.id {

@@ -9,9 +9,6 @@
 import Foundation
 import os.log
 
-private nonisolated(unsafe) let logger = Logger(
-  subsystem: "com.podcast.analyzer", category: "PodcastNamespaceParser")
-
 /// Information about a podcast transcript from RSS
 public struct TranscriptInfo: Sendable, Equatable {
   /// URL to the transcript file
@@ -31,12 +28,13 @@ public struct TranscriptInfo: Sendable, Equatable {
 /// Extracts podcast:transcript tags from RSS feeds
 public struct PodcastNamespaceParser: Sendable {
 
-  public nonisolated init() {}
+  public init() {}
 
   /// Parse RSS data to extract transcript information for each episode
   /// - Parameter data: Raw RSS XML data
   /// - Returns: Dictionary mapping episode GUIDs to their transcript info
-  public nonisolated func parseTranscripts(from data: Data) -> [String: TranscriptInfo] {
+  @MainActor
+  public func parseTranscripts(from data: Data) -> [String: TranscriptInfo] {
     let parser = TranscriptXMLParser(data: data)
     return parser.parse()
   }
@@ -45,28 +43,30 @@ public struct PodcastNamespaceParser: Sendable {
 // MARK: - XML Parser Implementation
 
 /// Internal XML parser delegate for extracting transcript tags
-/// Uses nonisolated(unsafe) for mutable state to allow synchronous parsing from nonisolated context
-private final class TranscriptXMLParser: NSObject, @unchecked Sendable, XMLParserDelegate {
+/// XMLParser calls delegate methods synchronously on the calling thread.
+@MainActor
+private final class TranscriptXMLParser: NSObject, XMLParserDelegate {
 
   private let data: Data
+  private let logger = Logger(subsystem: "com.podcast.analyzer", category: "PodcastNamespaceParser")
 
-  // Current parsing state - uses nonisolated(unsafe) for synchronous parsing
-  private nonisolated(unsafe) var currentGuid = ""
-  private nonisolated(unsafe) var currentItemGuid = ""
-  private nonisolated(unsafe) var insideItem = false
+  // Current parsing state
+  private var currentGuid = ""
+  private var currentItemGuid = ""
+  private var insideItem = false
 
   // Results
-  private nonisolated(unsafe) var transcripts: [String: TranscriptInfo] = [:]
+  private var transcripts: [String: TranscriptInfo] = [:]
 
   // Temporary storage for current item's transcript
-  private nonisolated(unsafe) var currentItemTranscript: TranscriptInfo?
+  private var currentItemTranscript: TranscriptInfo?
 
-  nonisolated init(data: Data) {
+  init(data: Data) {
     self.data = data
     super.init()
   }
 
-  nonisolated func parse() -> [String: TranscriptInfo] {
+  func parse() -> [String: TranscriptInfo] {
     let parser = XMLParser(data: data)
     parser.delegate = self
     parser.shouldProcessNamespaces = true
@@ -82,7 +82,7 @@ private final class TranscriptXMLParser: NSObject, @unchecked Sendable, XMLParse
 
   // MARK: - XMLParserDelegate
 
-  nonisolated func parser(
+  func parser(
     _ parser: XMLParser,
     didStartElement elementName: String,
     namespaceURI: String?,
@@ -134,14 +134,14 @@ private final class TranscriptXMLParser: NSObject, @unchecked Sendable, XMLParse
     }
   }
 
-  nonisolated func parser(_ parser: XMLParser, foundCharacters string: String) {
+  func parser(_ parser: XMLParser, foundCharacters string: String) {
     let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
     if !trimmed.isEmpty && insideItem {
       currentGuid += trimmed
     }
   }
 
-  nonisolated func parser(
+  func parser(
     _ parser: XMLParser,
     didEndElement elementName: String,
     namespaceURI: String?,
@@ -165,7 +165,7 @@ private final class TranscriptXMLParser: NSObject, @unchecked Sendable, XMLParse
     }
   }
 
-  nonisolated func parserDidEndDocument(_ parser: XMLParser) {
+  func parserDidEndDocument(_ parser: XMLParser) {
     logger.info("Parsed \(self.transcripts.count) transcripts from RSS feed")
   }
 }

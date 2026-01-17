@@ -137,6 +137,11 @@ final class SubtitleSettingsManager {
     didSet { saveSettings() }
   }
 
+  /// Group transcript segments into complete sentences (merge segments that don't end with sentence-ending punctuation)
+  var groupSegmentsIntoSentences: Bool = true {
+    didSet { saveSettings() }
+  }
+
   // MARK: - UserDefaults Keys
 
   private enum Keys {
@@ -144,6 +149,7 @@ final class SubtitleSettingsManager {
     static let targetLanguage = "subtitle_target_language"
     static let autoTranslate = "subtitle_auto_translate"
     static let autoDownloadTranscripts = "subtitle_auto_download_transcripts"
+    static let groupSegmentsIntoSentences = "subtitle_group_segments_into_sentences"
   }
 
   // MARK: - Initialization
@@ -175,6 +181,13 @@ final class SubtitleSettingsManager {
     } else {
       autoDownloadTranscripts = defaults.bool(forKey: Keys.autoDownloadTranscripts)
     }
+
+    // Default to true for sentence grouping if not set
+    if defaults.object(forKey: Keys.groupSegmentsIntoSentences) == nil {
+      groupSegmentsIntoSentences = true
+    } else {
+      groupSegmentsIntoSentences = defaults.bool(forKey: Keys.groupSegmentsIntoSentences)
+    }
   }
 
   private func saveSettings() {
@@ -183,6 +196,7 @@ final class SubtitleSettingsManager {
     defaults.set(targetLanguage.rawValue, forKey: Keys.targetLanguage)
     defaults.set(autoTranslateOnLoad, forKey: Keys.autoTranslate)
     defaults.set(autoDownloadTranscripts, forKey: Keys.autoDownloadTranscripts)
+    defaults.set(groupSegmentsIntoSentences, forKey: Keys.groupSegmentsIntoSentences)
   }
 
   // MARK: - Translation Availability

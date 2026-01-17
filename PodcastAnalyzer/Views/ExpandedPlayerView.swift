@@ -977,27 +977,24 @@ struct TranscriptFullScreenView: View {
 
         Divider()
 
-        // Transcript segments
+        // Transcript segments - using FlowingTranscriptView
         ScrollViewReader { proxy in
           ScrollView {
-            LazyVStack(spacing: 0) {
-              ForEach(viewModel.filteredTranscriptSegments, id: \.id) { segment in
-                TranscriptSegmentRow(
-                  segment: segment,
-                  isCurrentSegment: viewModel.currentSegmentId == segment.id,
-                  searchQuery: viewModel.transcriptSearchQuery,
-                  showTimestamp: true,
-                  onTap: { viewModel.seekToSegment(segment) }
-                )
-                .id(segment.id)
+            FlowingTranscriptView(
+              segments: viewModel.filteredTranscriptSegments,
+              currentTime: viewModel.isPlaying ? viewModel.currentTime : nil,
+              searchQuery: viewModel.transcriptSearchQuery,
+              onSegmentTap: { segment in
+                viewModel.seekToSegment(segment)
               }
-            }
-            .padding(.vertical, 8)
+            )
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
           }
           .onChange(of: viewModel.currentSegmentId) { _, newId in
             if let id = newId, viewModel.transcriptSearchQuery.isEmpty {
               withAnimation(.easeInOut(duration: 0.3)) {
-                proxy.scrollTo(id, anchor: .center)
+                proxy.scrollTo("segment-\(id)", anchor: .center)
               }
             }
           }

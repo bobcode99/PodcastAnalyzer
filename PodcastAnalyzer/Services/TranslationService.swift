@@ -14,9 +14,6 @@ import os.log
 import Translation
 #endif
 
-private nonisolated(unsafe) let logger = Logger(
-  subsystem: "com.podcast.analyzer", category: "TranslationService")
-
 // MARK: - Translation Error
 
 enum TranslationError: LocalizedError {
@@ -88,6 +85,7 @@ actor TranslationService {
   static let shared = TranslationService()
 
   private let fileStorage = FileStorageManager.shared
+  private let logger = Logger(subsystem: "com.podcast.analyzer", category: "TranslationService")
 
   // Track active translations for cancellation
   private var activeTasks: [String: Task<Void, Never>] = [:]
@@ -134,7 +132,7 @@ actor TranslationService {
       targetLanguage: targetLanguage
     )
 
-    logger.info("Saved translated SRT for \(episodeTitle) [\(targetLanguage)]")
+    self.logger.info("Saved translated SRT for \(episodeTitle) [\(targetLanguage)]")
   }
 
   /// Load existing translation and merge with segments
@@ -161,7 +159,7 @@ actor TranslationService {
 
       return parseAndMergeBilingualSRT(content, into: segments)
     } catch {
-      logger.error("Failed to load existing translation: \(error.localizedDescription)")
+      self.logger.error("Failed to load existing translation: \(error.localizedDescription)")
       return nil
     }
   }
@@ -227,7 +225,7 @@ actor TranslationService {
     let taskKey = "\(podcastTitle)_\(episodeTitle)"
     if let task = activeTasks.removeValue(forKey: taskKey) {
       task.cancel()
-      logger.info("Cancelled translation for: \(taskKey)")
+      self.logger.info("Cancelled translation for: \(taskKey)")
     }
   }
 

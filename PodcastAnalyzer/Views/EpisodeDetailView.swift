@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import NaturalLanguage
 import SwiftData
 import SwiftUI
 
@@ -42,6 +43,7 @@ struct EpisodeDetailView: View {
     // Translation configuration for .translationTask
     @State private var transcriptTranslationConfig: TranslationSession.Configuration?
     @State private var descriptionTranslationConfig: TranslationSession.Configuration?
+    @State private var titleTranslationConfig: TranslationSession.Configuration?
 
     init(
         episode: PodcastEpisodeInfo,
@@ -184,11 +186,17 @@ struct EpisodeDetailView: View {
         .onChange(of: viewModel.descriptionTranslationTrigger) { _, _ in
             triggerDescriptionTranslation()
         }
+        .onChange(of: viewModel.episodeTitleTranslationTrigger) { _, _ in
+            triggerTitleTranslation()
+        }
         .translationTask(transcriptTranslationConfig) { session in
             await viewModel.performTranscriptTranslation(using: session)
         }
         .translationTask(descriptionTranslationConfig) { session in
             await viewModel.performDescriptionTranslation(using: session)
+        }
+        .translationTask(titleTranslationConfig) { session in
+            await viewModel.performTitleTranslation(using: session)
         }
     }
 
@@ -211,6 +219,17 @@ struct EpisodeDetailView: View {
 
         let sourceLang = TranslationService.shared.detectSourceLanguage(from: viewModel.podcastLanguage)
         descriptionTranslationConfig = TranslationService.shared.makeConfiguration(
+            sourceLanguage: sourceLang,
+            targetLanguage: targetLang
+        )
+    }
+
+    private func triggerTitleTranslation() {
+        let settings = SubtitleSettingsManager.shared
+        guard let targetLang = settings.targetLanguage.localeLanguage else { return }
+
+        let sourceLang = TranslationService.shared.detectSourceLanguage(from: viewModel.podcastLanguage)
+        titleTranslationConfig = TranslationService.shared.makeConfiguration(
             sourceLanguage: sourceLang,
             targetLanguage: targetLang
         )
@@ -240,12 +259,34 @@ struct EpisodeDetailView: View {
 
                 VStack(alignment: .leading, spacing: 6) {
                     // FULL TITLE – no lineLimit, multiline, selectable
-                    Text(viewModel.title)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .multilineTextAlignment(.leading)
-                        .textSelection(.enabled)  // Can select and copy
-                        .fixedSize(horizontal: false, vertical: true)  // Allows wrapping
+                    // Show translated title if available, with disclosure for original
+                    if let translatedTitle = viewModel.translatedEpisodeTitle {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(translatedTitle)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .multilineTextAlignment(.leading)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            DisclosureGroup("Original") {
+                                Text(viewModel.title)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.leading)
+                                    .textSelection(.enabled)
+                            }
+                            .font(.caption2)
+                            .foregroundColor(.blue)
+                        }
+                    } else {
+                        Text(viewModel.title)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .multilineTextAlignment(.leading)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     // Tappable podcast title - navigates to show
                     NavigationLink(destination: podcastDestination) {
@@ -589,13 +630,13 @@ struct EpisodeDetailView: View {
             .background(Color.platformSystemGray6)
             .cornerRadius(10)
 
-            // Translate button
+            // Translate button with circular progress
             Button {
                 viewModel.translateTranscript()
             } label: {
                 if viewModel.translationStatus.isTranslating {
-                    ProgressView()
-                        .scaleEffect(0.8)
+                    TranslationProgressCircle(status: viewModel.translationStatus)
+                        .frame(width: 28, height: 28)
                 } else {
                     Image(systemName: viewModel.hasExistingTranslation ? "translate.fill" : "translate")
                         .font(.system(size: 20))
@@ -630,11 +671,21 @@ struct EpisodeDetailView: View {
 
                 Divider()
 
-                Button(action: {
-                    viewModel.copyTranscriptToClipboard()
-                    showCopySuccess = true
-                }) {
-                    Label("Copy All", systemImage: "doc.on.doc")
+                // Copy options section
+                Section("Copy") {
+                    Button(action: {
+                        viewModel.copyTranscriptToClipboard()
+                        showCopySuccess = true
+                    }) {
+                        Label("Copy All (with timestamps)", systemImage: "doc.on.doc")
+                    }
+
+                    Button(action: {
+                        PlatformClipboard.string = viewModel.cleanTranscriptText
+                        showCopySuccess = true
+                    }) {
+                        Label("Copy Text Only", systemImage: "text.alignleft")
+                    }
                 }
 
                 Button(
@@ -1035,6 +1086,41 @@ struct EpisodeDetailView: View {
     }
 }
 
+// MARK: - Translation Progress Circle
+
+/// A circular progress indicator for translation status
+struct TranslationProgressCircle: View {
+    let status: TranslationStatus
+
+    var body: some View {
+        ZStack {
+            // Background circle
+            Circle()
+                .stroke(Color.gray.opacity(0.2), lineWidth: 3)
+
+            // Progress arc
+            if case .translating(let progress, let completed, _) = status {
+                Circle()
+                    .trim(from: 0, to: CGFloat(progress))
+                    .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 0.2), value: progress)
+
+                // Small text showing count
+                Text("\(completed)")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.blue)
+            } else if case .preparingSession = status {
+                // Indeterminate spinning indicator
+                Circle()
+                    .trim(from: 0, to: 0.3)
+                    .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+        }
+    }
+}
+
 // MARK: - Tab Button Component
 
 struct TabButton: View {
@@ -1251,6 +1337,90 @@ struct TranscriptSegmentRow: View {
     }
 }
 
+// MARK: - CJK Text Utilities
+
+/// Utilities for detecting and tokenizing CJK (Chinese, Japanese, Korean) text
+enum CJKTextUtils {
+    /// CJK Unicode ranges
+    private static let cjkRanges: [ClosedRange<UInt32>] = [
+        0x4E00...0x9FFF,    // CJK Unified Ideographs
+        0x3400...0x4DBF,    // CJK Unified Ideographs Extension A
+        0x20000...0x2A6DF,  // CJK Unified Ideographs Extension B
+        0x2A700...0x2B73F,  // CJK Unified Ideographs Extension C
+        0x2B740...0x2B81F,  // CJK Unified Ideographs Extension D
+        0x3040...0x309F,    // Hiragana
+        0x30A0...0x30FF,    // Katakana
+        0xAC00...0xD7AF,    // Hangul Syllables
+        0x1100...0x11FF,    // Hangul Jamo
+    ]
+
+    /// Check if text contains CJK characters
+    static func containsCJK(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            for range in cjkRanges {
+                if range.contains(scalar.value) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /// Tokenize text - uses NLTokenizer for CJK, space-split for others
+    static func tokenize(_ text: String) -> [String] {
+        if containsCJK(text) {
+            return tokenizeCJK(text)
+        } else {
+            return text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        }
+    }
+
+    /// Tokenize CJK text using NLTokenizer
+    private static func tokenizeCJK(_ text: String) -> [String] {
+        let tokenizer = NLTokenizer(unit: .word)
+        tokenizer.string = text
+
+        var tokens: [String] = []
+        var lastIndex = text.startIndex
+
+        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
+            // Add any non-token text (spaces, punctuation) before this token
+            if lastIndex < range.lowerBound {
+                let betweenText = String(text[lastIndex..<range.lowerBound])
+                if !betweenText.isEmpty {
+                    tokens.append(betweenText)
+                }
+            }
+
+            // Add the token
+            tokens.append(String(text[range]))
+            lastIndex = range.upperBound
+            return true
+        }
+
+        // Add any remaining text after the last token
+        if lastIndex < text.endIndex {
+            let remaining = String(text[lastIndex..<text.endIndex])
+            if !remaining.isEmpty {
+                tokens.append(remaining)
+            }
+        }
+
+        return tokens.isEmpty ? [text] : tokens
+    }
+
+    /// Check if a token is a CJK character (for determining if space should be added)
+    static func isCJKToken(_ token: String) -> Bool {
+        guard let first = token.unicodeScalars.first else { return false }
+        for range in cjkRanges {
+            if range.contains(first.value) {
+                return true
+            }
+        }
+        return false
+    }
+}
+
 // MARK: - Flowing Transcript View (Apple Podcasts Style)
 
 /// A flowing paragraph-style transcript view with word-level highlighting
@@ -1359,50 +1529,53 @@ struct FlowingSegmentText: View {
 }
 
 /// Text view with word-by-word highlighting based on playback progress
+/// Supports CJK text with character-level tokenization
 struct WordHighlightedText: View {
     let text: String
     let progress: Double
     let searchQuery: String
 
     var body: some View {
-        let words = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
-        let totalWords = words.count
-        let highlightedCount = Int(Double(totalWords) * progress)
+        // Use CJKTextUtils for proper tokenization (handles CJK and non-CJK)
+        let tokens = CJKTextUtils.tokenize(text)
+        let totalTokens = tokens.count
+        let highlightedCount = Int(Double(totalTokens) * progress)
 
-        // Build attributed string with highlighted words
-        Text(buildAttributedString(words: words, highlightedCount: highlightedCount))
+        // Build attributed string with highlighted tokens
+        Text(buildAttributedString(tokens: tokens, highlightedCount: highlightedCount))
     }
 
-    private func buildAttributedString(words: [String], highlightedCount: Int) -> AttributedString {
+    private func buildAttributedString(tokens: [String], highlightedCount: Int) -> AttributedString {
         var result = AttributedString()
+        let isCJKText = CJKTextUtils.containsCJK(text)
 
-        for (index, word) in words.enumerated() {
-            var wordAttr = AttributedString(word)
+        for (index, token) in tokens.enumerated() {
+            var tokenAttr = AttributedString(token)
 
             if index < highlightedCount {
                 // Already spoken - bold blue
-                wordAttr.foregroundColor = .blue
-                wordAttr.font = .system(size: 17, weight: .semibold)
+                tokenAttr.foregroundColor = .blue
+                tokenAttr.font = .system(size: 17, weight: .semibold)
             } else if index == highlightedCount {
                 // Currently speaking - highlighted
-                wordAttr.foregroundColor = .blue
-                wordAttr.font = .system(size: 17, weight: .bold)
-                wordAttr.backgroundColor = Color.blue.opacity(0.2)
+                tokenAttr.foregroundColor = .blue
+                tokenAttr.font = .system(size: 17, weight: .bold)
+                tokenAttr.backgroundColor = Color.blue.opacity(0.2)
             } else {
                 // Not yet spoken
-                wordAttr.foregroundColor = .primary.opacity(0.6)
-                wordAttr.font = .system(size: 17, weight: .regular)
+                tokenAttr.foregroundColor = .primary.opacity(0.6)
+                tokenAttr.font = .system(size: 17, weight: .regular)
             }
 
             // Apply search highlighting if applicable
-            if !searchQuery.isEmpty && word.lowercased().contains(searchQuery.lowercased()) {
-                wordAttr.backgroundColor = .yellow.opacity(0.4)
+            if !searchQuery.isEmpty && token.lowercased().contains(searchQuery.lowercased()) {
+                tokenAttr.backgroundColor = .yellow.opacity(0.4)
             }
 
-            result.append(wordAttr)
+            result.append(tokenAttr)
 
-            // Add space after word (except last)
-            if index < words.count - 1 {
+            // Add space after token for non-CJK text only (CJK doesn't use spaces between words)
+            if !isCJKText && index < tokens.count - 1 {
                 result.append(AttributedString(" "))
             }
         }

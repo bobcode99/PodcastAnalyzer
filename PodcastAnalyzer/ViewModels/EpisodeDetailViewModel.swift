@@ -109,14 +109,19 @@ final class EpisodeDetailViewModel {
   // Translation state
   var translationStatus: TranslationStatus = .idle
   var translatedDescription: String?
+  var translatedEpisodeTitle: String?
   var transcriptTranslationTrigger: Bool = false  // Toggle to trigger .translationTask
   var descriptionTranslationTrigger: Bool = false  // Toggle to trigger description translation
+  var episodeTitleTranslationTrigger: Bool = false  // Toggle to trigger title translation
 
   @ObservationIgnored
   private let translationService = TranslationService.shared
 
   @ObservationIgnored
   private let transcriptDownloadService = TranscriptDownloadService.shared
+
+  @ObservationIgnored
+  private let subtitleSettings = SubtitleSettingsManager.shared
 
   // Playback state from SwiftData
   @ObservationIgnored
@@ -597,8 +602,9 @@ final class EpisodeDetailViewModel {
 
   func translateDescription() {
     logger.debug("Translate description requested")
-    // Toggle to trigger the .translationTask modifier
+    // Toggle to trigger the .translationTask modifiers for both description and title
     descriptionTranslationTrigger.toggle()
+    episodeTitleTranslationTrigger.toggle()
   }
 
   // MARK: - Transcript Translation
@@ -720,6 +726,25 @@ final class EpisodeDetailViewModel {
       logger.info("Translated description for \(self.episode.title)")
     } catch {
       logger.error("Description translation failed: \(error.localizedDescription)")
+    }
+    #endif
+  }
+
+  /// Called by .translationTask for title translation
+  @available(iOS 17.4, macOS 14.4, *)
+  func performTitleTranslation(using session: TranslationSession) async {
+    #if canImport(Translation)
+    let title = episode.title
+    guard !title.isEmpty else { return }
+
+    do {
+      let response = try await session.translate(title)
+      await MainActor.run {
+        self.translatedEpisodeTitle = response.targetText
+      }
+      logger.info("Translated title for \(self.episode.title)")
+    } catch {
+      logger.error("Title translation failed: \(error.localizedDescription)")
     }
     #endif
   }
@@ -1207,10 +1232,19 @@ final class EpisodeDetailViewModel {
         ))
     }
 
-    transcriptSegments = segments
-    logger.info(
-      "Successfully parsed \(segments.count) transcript segments from \(matches.count) regex matches"
-    )
+    // Apply sentence grouping if enabled
+    if subtitleSettings.groupSegmentsIntoSentences {
+      let grouped = groupSegmentsIntoSentences(segments)
+      transcriptSegments = grouped
+      logger.info(
+        "Grouped \(segments.count) segments into \(grouped.count) sentences"
+      )
+    } else {
+      transcriptSegments = segments
+      logger.info(
+        "Successfully parsed \(segments.count) transcript segments from \(matches.count) regex matches"
+      )
+    }
 
     // Debug: log first few segments if we have any
     if !segments.isEmpty {
@@ -1219,6 +1253,61 @@ final class EpisodeDetailViewModel {
         logger.info("Second segment: \(segments[1].text.prefix(50))...")
       }
     }
+  }
+
+  // MARK: - Sentence Grouping
+
+  /// Groups transcript segments into complete sentences by merging segments that don't end with sentence-ending punctuation
+  private func groupSegmentsIntoSentences(_ segments: [TranscriptSegment]) -> [TranscriptSegment] {
+    let sentenceEndings = CharacterSet(charactersIn: ".!?。！？")
+    var grouped: [TranscriptSegment] = []
+    var currentGroup: [TranscriptSegment] = []
+
+    for segment in segments {
+      currentGroup.append(segment)
+
+      // Check if this segment ends with sentence-ending punctuation
+      let trimmedText = segment.text.trimmingCharacters(in: .whitespaces)
+      if let lastChar = trimmedText.unicodeScalars.last,
+         sentenceEndings.contains(lastChar) {
+        // End of sentence - merge the group
+        if let merged = mergeSegments(currentGroup) {
+          grouped.append(merged)
+        }
+        currentGroup = []
+      }
+    }
+
+    // Handle any remaining segments that didn't end with punctuation
+    if !currentGroup.isEmpty, let merged = mergeSegments(currentGroup) {
+      grouped.append(merged)
+    }
+
+    return grouped
+  }
+
+  /// Merges multiple transcript segments into a single segment
+  private func mergeSegments(_ segments: [TranscriptSegment]) -> TranscriptSegment? {
+    guard let first = segments.first, let last = segments.last else { return nil }
+
+    // Combine text with spaces
+    let combinedText = segments.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+
+    // Combine translated text if all segments have translations
+    let translatedText: String?
+    if segments.allSatisfy({ $0.translatedText != nil }) {
+      translatedText = segments.compactMap { $0.translatedText?.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+    } else {
+      translatedText = nil
+    }
+
+    return TranscriptSegment(
+      id: first.id,
+      startTime: first.startTime,
+      endTime: last.endTime,
+      text: combinedText,
+      translatedText: translatedText
+    )
   }
 
   /// Parses SRT time format (HH:MM:SS,mmm) to TimeInterval

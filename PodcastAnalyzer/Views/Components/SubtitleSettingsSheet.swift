@@ -85,7 +85,9 @@ struct SubtitleSettingsSheet: View {
         }
       }
       .navigationTitle("Subtitle Settings")
+      #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)
+      #endif
       .toolbar {
         ToolbarItem(placement: .confirmationAction) {
           Button("Done") {
