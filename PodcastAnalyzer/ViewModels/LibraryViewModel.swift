@@ -431,7 +431,7 @@ final class LibraryViewModel {
   private func syncDownloadedFilesWithSwiftData() async {
     guard let context = modelContext else { return }
 
-    // Batch fetch ALL EpisodeDownloadModel entries ONCE for O(1) lookups
+    // 1. Gather data on MainActor
     let descriptor = FetchDescriptor<EpisodeDownloadModel>()
     let existingModelsDict: [String: EpisodeDownloadModel]
     do {
@@ -442,48 +442,142 @@ final class LibraryViewModel {
       return
     }
 
-    var syncedCount = 0
+    // Prepare episode data for background processing (Sendable)
+    struct EpisodeCheckItem: Sendable {
+      let episodeTitle: String
+      let podcastTitle: String
+      let audioURL: String?
+      let imageURL: String
+      let pubDate: Date?
+      let episodeKey: String
+    }
 
-    // Check each episode from all podcasts
+    let delimiter = Self.episodeKeyDelimiter
+    var itemsToCheck: [EpisodeCheckItem] = []
     for podcast in allPodcasts {
       let podcastInfo = podcast.podcastInfo
-
       for episode in podcastInfo.episodes {
-        // Ask DownloadManager if this episode has a file on disk
-        let state = downloadManager.getDownloadState(
+        let episodeKey = "\(podcastInfo.title)\(delimiter)\(episode.title)"
+        itemsToCheck.append(EpisodeCheckItem(
           episodeTitle: episode.title,
-          podcastTitle: podcastInfo.title
-        )
+          podcastTitle: podcastInfo.title,
+          audioURL: episode.audioURL,
+          imageURL: episode.imageURL ?? podcastInfo.imageURL,
+          pubDate: episode.pubDate,
+          episodeKey: episodeKey
+        ))
+      }
+    }
 
-        // If downloaded on disk, ensure SwiftData is synced
-        if case .downloaded(let localPath) = state {
-          let episodeKey = "\(podcastInfo.title)\(Self.episodeKeyDelimiter)\(episode.title)"
+    // 2. Perform file system checks in background (this is the slow part)
+    struct SyncResult: Sendable {
+      let episodeKey: String
+      let localPath: String
+      let episodeTitle: String
+      let podcastTitle: String
+      let audioURL: String
+      let imageURL: String
+      let pubDate: Date?
+      let needsUpdate: Bool
+      let needsInsert: Bool
+    }
 
-          // O(1) dictionary lookup instead of SwiftData fetch
-          if let existingModel = existingModelsDict[episodeKey] {
-            // Update if localAudioPath is missing or different
-            if existingModel.localAudioPath != localPath {
-              existingModel.localAudioPath = localPath
-              existingModel.downloadedDate = existingModel.downloadedDate ?? Date()
-              syncedCount += 1
-            }
-          } else {
-            // Create new SwiftData entry for this downloaded file
-            guard let audioURL = episode.audioURL else { continue }
+    let existingKeys = Set(existingModelsDict.keys)
+    let existingPaths: [String: String?] = Dictionary(uniqueKeysWithValues: 
+      existingModelsDict.map { ($0.key, $0.value.localAudioPath) }
+    )
 
-            let model = EpisodeDownloadModel(
-              episodeTitle: episode.title,
-              podcastTitle: podcastInfo.title,
-              audioURL: audioURL,
-              localAudioPath: localPath,
-              downloadedDate: Date(),
-              imageURL: episode.imageURL ?? podcastInfo.imageURL,
-              pubDate: episode.pubDate
-            )
-            context.insert(model)
-            syncedCount += 1
+    let syncResults = await Task.detached(priority: .background) { () -> [SyncResult] in
+      var results: [SyncResult] = []
+      let fm = FileManager.default
+      
+      // Get audio directory path (same logic as DownloadManager.checkAudioFileExistsSynchronously)
+      #if os(macOS)
+      let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      let audioDir = appSupport.appendingPathComponent("PodcastAnalyzer/Audio", isDirectory: true)
+      #else
+      let libraryDir = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+      let audioDir = libraryDir.appendingPathComponent("Audio", isDirectory: true)
+      #endif
+      
+      let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
+      let possibleExtensions = ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"]
+      
+      for item in itemsToCheck {
+        // Direct file system check (same logic as DownloadManager)
+        let baseFileName = "\(item.podcastTitle)_\(item.episodeTitle)"
+          .components(separatedBy: invalidCharacters)
+          .joined(separator: "_")
+          .trimmingCharacters(in: .whitespaces)
+        
+        var localPath: String? = nil
+        for ext in possibleExtensions {
+          let path = audioDir.appendingPathComponent("\(baseFileName).\(ext)")
+          if fm.fileExists(atPath: path.path) {
+            localPath = path.path
+            break
           }
         }
+        
+        guard let foundPath = localPath else { continue }
+        
+        let existsInDB = existingKeys.contains(item.episodeKey)
+        let currentPath = existingPaths[item.episodeKey] ?? nil
+        
+        if existsInDB {
+          // Check if path needs update
+          if currentPath != foundPath {
+            results.append(SyncResult(
+              episodeKey: item.episodeKey,
+              localPath: foundPath,
+              episodeTitle: item.episodeTitle,
+              podcastTitle: item.podcastTitle,
+              audioURL: item.audioURL ?? "",
+              imageURL: item.imageURL,
+              pubDate: item.pubDate,
+              needsUpdate: true,
+              needsInsert: false
+            ))
+          }
+        } else if item.audioURL != nil {
+          // Needs insert
+          results.append(SyncResult(
+            episodeKey: item.episodeKey,
+            localPath: foundPath,
+            episodeTitle: item.episodeTitle,
+            podcastTitle: item.podcastTitle,
+            audioURL: item.audioURL!,
+            imageURL: item.imageURL,
+            pubDate: item.pubDate,
+            needsUpdate: false,
+            needsInsert: true
+          ))
+        }
+      }
+      return results
+    }.value
+
+    // 3. Apply results on MainActor
+    var syncedCount = 0
+    for result in syncResults {
+      if result.needsUpdate {
+        if let existingModel = existingModelsDict[result.episodeKey] {
+          existingModel.localAudioPath = result.localPath
+          existingModel.downloadedDate = existingModel.downloadedDate ?? Date()
+          syncedCount += 1
+        }
+      } else if result.needsInsert {
+        let model = EpisodeDownloadModel(
+          episodeTitle: result.episodeTitle,
+          podcastTitle: result.podcastTitle,
+          audioURL: result.audioURL,
+          localAudioPath: result.localPath,
+          downloadedDate: Date(),
+          imageURL: result.imageURL,
+          pubDate: result.pubDate
+        )
+        context.insert(model)
+        syncedCount += 1
       }
     }
 
