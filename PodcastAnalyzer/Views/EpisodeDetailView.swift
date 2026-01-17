@@ -1486,6 +1486,7 @@ struct FlowingTranscriptView: View {
                     segment: segment,
                     isActive: isCurrentSegment,
                     wordProgress: wordProgress,
+                    currentTime: currentTime,
                     searchQuery: searchQuery,
                     displayMode: settings.displayMode,
                     onTap: { onSegmentTap(segment) }
@@ -1519,6 +1520,7 @@ struct FlowingSegmentText: View {
     let segment: TranscriptSegment
     let isActive: Bool
     let wordProgress: Double?
+    let currentTime: TimeInterval?
     let searchQuery: String
     let displayMode: SubtitleDisplayMode
     let onTap: () -> Void
@@ -1554,11 +1556,14 @@ struct FlowingSegmentText: View {
 
     @ViewBuilder
     private func buildHighlightedText(_ text: String, isPrimary: Bool) -> some View {
-        if isActive, let progress = wordProgress, isPrimary {
+        if isActive, isPrimary {
             // Word-level highlighting for currently playing segment
+            // Use word timings if available, otherwise fall back to linear interpolation
             WordHighlightedText(
                 text: text,
-                progress: progress,
+                progress: wordProgress ?? 0,
+                wordTimings: segment.wordTimings,
+                currentTime: currentTime,
                 searchQuery: searchQuery
             )
         } else if !searchQuery.isEmpty {
@@ -1574,37 +1579,69 @@ struct FlowingSegmentText: View {
 
 /// Text view with word-by-word highlighting based on playback progress
 /// Supports CJK text with character-level tokenization
+/// Uses actual word timings when available for accurate highlighting
 struct WordHighlightedText: View {
     let text: String
     let progress: Double
+    let wordTimings: [WordTiming]?
+    let currentTime: TimeInterval?
     let searchQuery: String
 
     var body: some View {
         // Use CJKTextUtils for proper tokenization (handles CJK and non-CJK)
         let tokens = CJKTextUtils.tokenize(text)
-        let totalTokens = tokens.count
-        let highlightedCount = Int(Double(totalTokens) * progress)
+
+        // Calculate which word index should be highlighted
+        let (highlightedIndex, isSpeaking) = calculateHighlightedWordIndex(tokens: tokens)
 
         // Build attributed string with highlighted tokens
-        Text(buildAttributedString(tokens: tokens, highlightedCount: highlightedCount))
+        Text(buildAttributedString(tokens: tokens, highlightedIndex: highlightedIndex, isSpeaking: isSpeaking))
     }
 
-    private func buildAttributedString(tokens: [String], highlightedCount: Int) -> AttributedString {
+    /// Calculates which word index should be highlighted based on current time
+    /// Returns (index, isSpeaking) where isSpeaking indicates if we're mid-word
+    private func calculateHighlightedWordIndex(tokens: [String]) -> (Int, Bool) {
+        // If we have actual word timings and current time, use precise highlighting
+        if let timings = wordTimings, let time = currentTime, !timings.isEmpty {
+            // Find the word that matches current time
+            for (index, timing) in timings.enumerated() {
+                if time >= timing.startTime && time <= timing.endTime {
+                    return (index, true)  // Currently speaking this word
+                } else if time < timing.startTime {
+                    // We're before this word - highlight up to previous word
+                    return (max(0, index - 1), false)
+                }
+            }
+            // We're past the last word - all words spoken
+            return (timings.count, false)
+        }
+
+        // Fall back to linear interpolation when word timings unavailable
+        let totalTokens = tokens.count
+        let highlightedCount = Int(Double(totalTokens) * progress)
+        return (highlightedCount, true)
+    }
+
+    private func buildAttributedString(tokens: [String], highlightedIndex: Int, isSpeaking: Bool) -> AttributedString {
         var result = AttributedString()
         let isCJKText = CJKTextUtils.containsCJK(text)
 
         for (index, token) in tokens.enumerated() {
             var tokenAttr = AttributedString(token)
 
-            if index < highlightedCount {
+            if index < highlightedIndex {
                 // Already spoken - bold blue
                 tokenAttr.foregroundColor = .blue
                 tokenAttr.font = .system(size: 17, weight: .semibold)
-            } else if index == highlightedCount {
-                // Currently speaking - highlighted
+            } else if index == highlightedIndex && isSpeaking {
+                // Currently speaking - highlighted with background
                 tokenAttr.foregroundColor = .blue
                 tokenAttr.font = .system(size: 17, weight: .bold)
                 tokenAttr.backgroundColor = Color.blue.opacity(0.2)
+            } else if index == highlightedIndex {
+                // Just finished this word
+                tokenAttr.foregroundColor = .blue
+                tokenAttr.font = .system(size: 17, weight: .semibold)
             } else {
                 // Not yet spoken
                 tokenAttr.foregroundColor = .primary.opacity(0.6)

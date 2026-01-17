@@ -351,6 +351,65 @@ actor FileStorageManager {
     }
   }
 
+  // MARK: - Word Timing File Management
+
+  /// Generates filename for word timing JSON (same base as caption but with .json extension)
+  private func wordTimingFileName(for episodeTitle: String, podcastTitle: String) -> String {
+    let sanitized = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
+    return "\(sanitized)_wordtimings.json"
+  }
+
+  /// Gets the full path for a word timing JSON file
+  func wordTimingFilePath(for episodeTitle: String, podcastTitle: String) -> URL {
+    captionsDirectory.appendingPathComponent(
+      wordTimingFileName(for: episodeTitle, podcastTitle: podcastTitle))
+  }
+
+  /// Saves word timing JSON alongside the SRT file
+  func saveWordTimingFile(content: String, episodeTitle: String, podcastTitle: String) throws -> URL {
+    if !fileManager.fileExists(atPath: captionsDirectory.path) {
+      try fileManager.createDirectory(at: captionsDirectory, withIntermediateDirectories: true)
+    }
+
+    let destinationURL = wordTimingFilePath(for: episodeTitle, podcastTitle: podcastTitle)
+
+    do {
+      try content.write(to: destinationURL, atomically: true, encoding: .utf8)
+      logger.info("Saved word timing file: \(destinationURL.lastPathComponent)")
+      return destinationURL
+    } catch {
+      logger.error("Failed to save word timing: \(error.localizedDescription)")
+      throw FileStorageError.saveFailed(error)
+    }
+  }
+
+  /// Loads word timing JSON file if it exists
+  func loadWordTimingFile(for episodeTitle: String, podcastTitle: String) throws -> String? {
+    let path = wordTimingFilePath(for: episodeTitle, podcastTitle: podcastTitle)
+
+    guard fileManager.fileExists(atPath: path.path) else {
+      return nil  // Return nil instead of throwing - word timings are optional
+    }
+
+    return try String(contentsOf: path, encoding: .utf8)
+  }
+
+  /// Checks if word timing file exists
+  func wordTimingFileExists(for episodeTitle: String, podcastTitle: String) -> Bool {
+    let path = wordTimingFilePath(for: episodeTitle, podcastTitle: podcastTitle)
+    return fileManager.fileExists(atPath: path.path)
+  }
+
+  /// Deletes word timing file
+  func deleteWordTimingFile(for episodeTitle: String, podcastTitle: String) throws {
+    let path = wordTimingFilePath(for: episodeTitle, podcastTitle: podcastTitle)
+
+    if fileManager.fileExists(atPath: path.path) {
+      try fileManager.removeItem(at: path)
+      logger.info("Deleted word timing file: \(path.lastPathComponent)")
+    }
+  }
+
   // MARK: - Translated Caption File Management
 
   /// Generates filename for translated captions

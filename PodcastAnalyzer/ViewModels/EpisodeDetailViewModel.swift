@@ -23,6 +23,13 @@ import AppKit
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "EpisodeDetailViewModel")
 
+/// Represents word-level timing information for accurate highlighting
+struct WordTiming: Equatable, Sendable {
+  let word: String
+  let startTime: TimeInterval
+  let endTime: TimeInterval
+}
+
 /// Represents a single transcript segment with timing information
 struct TranscriptSegment: Identifiable, Equatable {
   let id: Int
@@ -30,6 +37,8 @@ struct TranscriptSegment: Identifiable, Equatable {
   let endTime: TimeInterval
   let text: String
   var translatedText: String?
+  /// Word-level timing for accurate highlighting (from Speech framework)
+  var wordTimings: [WordTiming]?
 
   /// Formatted start time string (MM:SS or HH:MM:SS)
   var formattedStartTime: String {
@@ -1073,6 +1082,9 @@ final class EpisodeDetailViewModel {
     PlatformClipboard.string = transcriptText
   }
 
+  /// Cached word timings data from JSON file (for accurate word-level highlighting)
+  private var wordTimingsData: TranscriptService.TranscriptData?
+
   private func loadExistingTranscript() async {
     do {
       let content = try await fileStorage.loadCaptionFile(
@@ -1086,9 +1098,21 @@ final class EpisodeDetailViewModel {
         podcastTitle: podcastTitle
       )
 
+      // Try to load word timings JSON (optional - may not exist for RSS transcripts)
+      var timingsData: TranscriptService.TranscriptData?
+      if let wordTimingsJSON = try await fileStorage.loadWordTimingFile(
+        for: episode.title,
+        podcastTitle: podcastTitle
+      ) {
+        if let jsonData = wordTimingsJSON.data(using: .utf8) {
+          timingsData = try? JSONDecoder().decode(TranscriptService.TranscriptData.self, from: jsonData)
+        }
+      }
+
       await MainActor.run {
         transcriptText = content
         cachedTranscriptDate = fileDate
+        wordTimingsData = timingsData
         transcriptState = .completed
         parseTranscriptSegments()
       }
@@ -1154,6 +1178,35 @@ final class EpisodeDetailViewModel {
   }
 
   // MARK: - Live Captions Methods
+
+  /// Finds word timings for a segment from the loaded word timings data
+  /// - Parameters:
+  ///   - segmentId: The segment ID (1-based)
+  ///   - startTime: Segment start time
+  ///   - endTime: Segment end time
+  /// - Returns: Array of WordTiming if found, nil otherwise
+  private func findWordTimingsForSegment(segmentId: Int, startTime: TimeInterval, endTime: TimeInterval) -> [WordTiming]? {
+    guard let data = wordTimingsData else { return nil }
+
+    // Try to find segment by ID first
+    if let segment = data.segments.first(where: { $0.id == segmentId }) {
+      return segment.wordTimings.map { timing in
+        WordTiming(word: timing.word, startTime: timing.startTime, endTime: timing.endTime)
+      }
+    }
+
+    // Fallback: find segment by time overlap
+    for segment in data.segments {
+      // Check if times roughly match (within 0.5s tolerance)
+      if abs(segment.startTime - startTime) < 0.5 && abs(segment.endTime - endTime) < 0.5 {
+        return segment.wordTimings.map { timing in
+          WordTiming(word: timing.word, startTime: timing.startTime, endTime: timing.endTime)
+        }
+      }
+    }
+
+    return nil
+  }
 
   /// Parses SRT content into transcript segments
   func parseTranscriptSegments() {
@@ -1245,12 +1298,20 @@ final class EpisodeDetailViewModel {
         continue
       }
 
+      // Look up word timings for this segment if available
+      let wordTimings: [WordTiming]? = findWordTimingsForSegment(
+        segmentId: index + 1,  // Word timings use 1-based IDs
+        startTime: startTime,
+        endTime: endTime
+      )
+
       segments.append(
         TranscriptSegment(
           id: index,
           startTime: startTime,
           endTime: endTime,
-          text: text
+          text: text,
+          wordTimings: wordTimings
         ))
     }
 
@@ -1323,12 +1384,18 @@ final class EpisodeDetailViewModel {
       translatedText = nil
     }
 
+    // Combine word timings from all segments (if any have them)
+    let combinedWordTimings: [WordTiming]?
+    let allTimings = segments.compactMap { $0.wordTimings }.flatMap { $0 }
+    combinedWordTimings = allTimings.isEmpty ? nil : allTimings
+
     return TranscriptSegment(
       id: first.id,
       startTime: first.startTime,
       endTime: last.endTime,
       text: combinedText,
-      translatedText: translatedText
+      translatedText: translatedText,
+      wordTimings: combinedWordTimings
     )
   }
 
