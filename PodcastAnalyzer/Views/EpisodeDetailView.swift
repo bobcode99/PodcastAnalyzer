@@ -37,6 +37,10 @@ struct EpisodeDetailView: View {
     @State private var showDeleteConfirmation = false
     @State private var showSubtitleSettings = false
 
+    // Translation error alert
+    @State private var showTranslationError = false
+    @State private var translationErrorMessage = ""
+
     // Timer state for transcript highlighting during playback (managed by .task modifier)
     @State private var playbackTimerActive = false
 
@@ -44,6 +48,7 @@ struct EpisodeDetailView: View {
     @State private var transcriptTranslationConfig: TranslationSession.Configuration?
     @State private var descriptionTranslationConfig: TranslationSession.Configuration?
     @State private var titleTranslationConfig: TranslationSession.Configuration?
+    @State private var podcastTitleTranslationConfig: TranslationSession.Configuration?
 
     init(
         episode: PodcastEpisodeInfo,
@@ -151,6 +156,17 @@ struct EpisodeDetailView: View {
         } message: {
             Text("Transcript copied to clipboard")
         }
+        .alert("Translation Failed", isPresented: $showTranslationError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(translationErrorMessage)
+        }
+        .onChange(of: viewModel.translationStatus) { _, newStatus in
+            if case .failed(let error) = newStatus {
+                translationErrorMessage = error
+                showTranslationError = true
+            }
+        }
         .confirmationDialog(
             "Delete Download",
             isPresented: $showDeleteConfirmation,
@@ -189,6 +205,9 @@ struct EpisodeDetailView: View {
         .onChange(of: viewModel.episodeTitleTranslationTrigger) { _, _ in
             triggerTitleTranslation()
         }
+        .onChange(of: viewModel.podcastTitleTranslationTrigger) { _, _ in
+            triggerPodcastTitleTranslation()
+        }
         .translationTask(transcriptTranslationConfig) { session in
             await viewModel.performTranscriptTranslation(using: session)
         }
@@ -197,6 +216,9 @@ struct EpisodeDetailView: View {
         }
         .translationTask(titleTranslationConfig) { session in
             await viewModel.performTitleTranslation(using: session)
+        }
+        .translationTask(podcastTitleTranslationConfig) { session in
+            await viewModel.performPodcastTitleTranslation(using: session)
         }
     }
 
@@ -230,6 +252,17 @@ struct EpisodeDetailView: View {
 
         let sourceLang = TranslationService.shared.detectSourceLanguage(from: viewModel.podcastLanguage)
         titleTranslationConfig = TranslationService.shared.makeConfiguration(
+            sourceLanguage: sourceLang,
+            targetLanguage: targetLang
+        )
+    }
+
+    private func triggerPodcastTitleTranslation() {
+        let settings = SubtitleSettingsManager.shared
+        guard let targetLang = settings.targetLanguage.localeLanguage else { return }
+
+        let sourceLang = TranslationService.shared.detectSourceLanguage(from: viewModel.podcastLanguage)
+        podcastTitleTranslationConfig = TranslationService.shared.makeConfiguration(
             sourceLanguage: sourceLang,
             targetLanguage: targetLang
         )
@@ -291,9 +324,20 @@ struct EpisodeDetailView: View {
                     // Tappable podcast title - navigates to show
                     NavigationLink(destination: podcastDestination) {
                         HStack(spacing: 4) {
-                            Text(viewModel.podcastTitle)
-                                .font(.caption)
-                                .foregroundColor(.blue)
+                            if let translatedTitle = viewModel.translatedPodcastTitle {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(translatedTitle)
+                                        .font(.caption)
+                                        .foregroundColor(.blue)
+                                    Text(viewModel.podcastTitle)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            } else {
+                                Text(viewModel.podcastTitle)
+                                    .font(.caption)
+                                    .foregroundColor(.blue)
+                            }
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 8))
                                 .foregroundColor(.blue)
@@ -637,6 +681,10 @@ struct EpisodeDetailView: View {
                 if viewModel.translationStatus.isTranslating {
                     TranslationProgressCircle(status: viewModel.translationStatus)
                         .frame(width: 28, height: 28)
+                } else if case .failed = viewModel.translationStatus {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(.red)
                 } else {
                     Image(systemName: viewModel.hasExistingTranslation ? "translate.fill" : "translate")
                         .font(.system(size: 20))

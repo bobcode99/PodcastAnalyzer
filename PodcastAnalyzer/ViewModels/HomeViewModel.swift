@@ -70,7 +70,14 @@ final class HomeViewModel {
   private static let episodeKeyDelimiter = "\u{1F}"
 
   var selectedRegionName: String {
-    Constants.podcastRegions.first { $0.code == selectedRegion }?.name ?? selectedRegion.uppercased()
+    if let region = Constants.podcastRegions.first(where: { $0.code == selectedRegion }) {
+      return "\(region.flag) \(region.name)"
+    }
+    return selectedRegion.uppercased()
+  }
+
+  var selectedRegionFlag: String {
+    Constants.podcastRegions.first { $0.code == selectedRegion }?.flag ?? "🌍"
   }
 
   init() {
@@ -260,6 +267,14 @@ final class HomeViewModel {
 
     Self.isLoadingTopPodcastsGlobally = true
     isLoadingTopPodcasts = true
+
+    // Clear old data when force refreshing (region change)
+    // This ensures the UI shows loading state and displays new data when ready
+    if forceRefresh {
+      topPodcasts = []
+      Self.cachedTopPodcasts = []
+      Self.cachedRegion = ""
+    }
 
     do {
       let podcasts = try await applePodcastService.fetchTopPodcasts(region: selectedRegion, limit: 25)

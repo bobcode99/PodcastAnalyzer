@@ -46,6 +46,12 @@ final class LibraryViewModel {
   var isLoading = false
   var error: String?
 
+  // Separate loading states for progressive UI updates
+  var isLoadingPodcasts = false
+  var isLoadingSaved = false
+  var isLoadingDownloaded = false
+  var isLoadingLatest = false
+
   // Search state for subpages
   var savedSearchText: String = ""
   var downloadedSearchText: String = ""
@@ -197,15 +203,31 @@ final class LibraryViewModel {
 
   func setModelContext(_ context: ModelContext) {
     self.modelContext = context
-    // Always reload data when context is set (e.g., when view appears or pull-to-refresh)
+    // Load data progressively - don't block UI
     Task {
-      await loadAll()
+      await loadAllProgressively()
       isAlreadyLoaded = true
     }
   }
 
   // MARK: - Load All Data
 
+  /// Load data progressively so UI can render immediately with available data
+  private func loadAllProgressively() async {
+    // Step 1: Load podcasts from cache first (instant, shows UI immediately)
+    await loadPodcastFeedsFromCache()
+
+    // Step 2: Load all podcasts for lookups (needed by other loaders)
+    await loadAllPodcasts()
+
+    // Step 3: Start loading all sections in parallel without awaiting all together
+    // Each section updates its own loading state and data independently
+    Task { await loadSavedEpisodesWithState() }
+    Task { await loadDownloadedEpisodesWithState() }
+    Task { await loadLatestEpisodesWithState() }
+  }
+
+  /// Legacy loadAll for refresh operations that need to wait for completion
   private func loadAll() async {
     isLoading = true
 
@@ -216,12 +238,19 @@ final class LibraryViewModel {
     await loadPodcastFeeds()
 
     // Then load the rest using async let for parallelism while staying on MainActor
-    async let savedTask: () = loadSavedEpisodes()
-    async let downloadedTask: () = loadDownloadedEpisodes()
-    async let latestTask: () = loadLatestEpisodes()
+    async let savedTask: () = loadSavedEpisodesWithState()
+    async let downloadedTask: () = loadDownloadedEpisodesWithState()
+    async let latestTask: () = loadLatestEpisodesWithState()
     _ = await (savedTask, downloadedTask, latestTask)
 
     isLoading = false
+  }
+
+  /// Load podcast feeds from cache (synchronous SwiftData fetch)
+  private func loadPodcastFeedsFromCache() async {
+    isLoadingPodcasts = true
+    await loadPodcastFeeds()
+    isLoadingPodcasts = false
   }
 
   // MARK: - Load All Podcasts (for episode lookups)
@@ -456,6 +485,29 @@ final class LibraryViewModel {
     }
     EnhancedAudioManager.shared.updateAutoPlayCandidates(playbackEpisodes)
     logger.info("Updated auto-play candidates with \(playbackEpisodes.count) unplayed episodes")
+  }
+
+  // MARK: - Loading with State Wrappers
+
+  /// Load saved episodes with loading state indicator
+  private func loadSavedEpisodesWithState() async {
+    isLoadingSaved = true
+    await loadSavedEpisodes()
+    isLoadingSaved = false
+  }
+
+  /// Load downloaded episodes with loading state indicator
+  private func loadDownloadedEpisodesWithState() async {
+    isLoadingDownloaded = true
+    await loadDownloadedEpisodes()
+    isLoadingDownloaded = false
+  }
+
+  /// Load latest episodes with loading state indicator
+  private func loadLatestEpisodesWithState() async {
+    isLoadingLatest = true
+    await loadLatestEpisodes()
+    isLoadingLatest = false
   }
 
   // MARK: - Helper Methods

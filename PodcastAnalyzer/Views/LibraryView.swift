@@ -47,7 +47,9 @@ struct LibraryView: View {
           .padding(.bottom, 40)
         }
 
-        if viewModel.isLoading && viewModel.podcastInfoModelList.isEmpty {
+        // Only show full-screen loading on first load when no cached data exists
+        if viewModel.isLoadingPodcasts && viewModel.podcastInfoModelList.isEmpty
+            && viewModel.savedEpisodes.isEmpty && viewModel.downloadedEpisodes.isEmpty {
           ProgressView("Loading Library...")
             .scaleEffect(1.5)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -113,7 +115,8 @@ struct LibraryView: View {
             icon: "star.fill",
             iconColor: .yellow,
             title: "Saved",
-            count: viewModel.savedEpisodes.count
+            count: viewModel.savedEpisodes.count,
+            isLoading: viewModel.isLoadingSaved
           )
         }
         .buttonStyle(.plain)
@@ -124,7 +127,8 @@ struct LibraryView: View {
             icon: "arrow.down.circle.fill",
             iconColor: .green,
             title: "Downloaded",
-            count: viewModel.downloadedEpisodes.count
+            count: viewModel.downloadedEpisodes.count,
+            isLoading: viewModel.isLoadingDownloaded
           )
         }
         .buttonStyle(.plain)
@@ -146,12 +150,17 @@ struct LibraryView: View {
           Spacer()
 
           HStack(spacing: 4) {
-            Text("\(viewModel.latestEpisodes.count)")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            Image(systemName: "chevron.right")
-              .font(.caption)
-              .foregroundColor(.secondary)
+            if viewModel.isLoadingLatest {
+              ProgressView()
+                .scaleEffect(0.6)
+            } else {
+              Text("\(viewModel.latestEpisodes.count)")
+                .font(.caption)
+                .foregroundColor(.secondary)
+              Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            }
           }
         }
         .padding(.horizontal, 16)
@@ -174,9 +183,14 @@ struct LibraryView: View {
 
         Spacer()
 
-        Text("\(viewModel.podcastsSortedByRecentUpdate.count)")
-          .font(.subheadline)
-          .foregroundColor(.secondary)
+        if viewModel.isLoadingPodcasts {
+          ProgressView()
+            .scaleEffect(0.7)
+        } else {
+          Text("\(viewModel.podcastsSortedByRecentUpdate.count)")
+            .font(.subheadline)
+            .foregroundColor(.secondary)
+        }
       }
 
       if viewModel.podcastsSortedByRecentUpdate.isEmpty {
@@ -278,6 +292,7 @@ struct QuickAccessCard: View {
   let iconColor: Color
   let title: String
   let count: Int
+  var isLoading: Bool = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -288,9 +303,14 @@ struct QuickAccessCard: View {
 
         Spacer()
 
-        Image(systemName: "chevron.right")
-          .font(.caption)
-          .foregroundColor(.secondary)
+        if isLoading {
+          ProgressView()
+            .scaleEffect(0.6)
+        } else {
+          Image(systemName: "chevron.right")
+            .font(.caption)
+            .foregroundColor(.secondary)
+        }
       }
 
       Spacer()

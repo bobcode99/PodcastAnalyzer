@@ -110,9 +110,11 @@ final class EpisodeDetailViewModel {
   var translationStatus: TranslationStatus = .idle
   var translatedDescription: String?
   var translatedEpisodeTitle: String?
+  var translatedPodcastTitle: String?  // Translated podcast show name
   var transcriptTranslationTrigger: Bool = false  // Toggle to trigger .translationTask
   var descriptionTranslationTrigger: Bool = false  // Toggle to trigger description translation
   var episodeTitleTranslationTrigger: Bool = false  // Toggle to trigger title translation
+  var podcastTitleTranslationTrigger: Bool = false  // Toggle to trigger podcast title translation
 
   @ObservationIgnored
   private let translationService = TranslationService.shared
@@ -602,9 +604,10 @@ final class EpisodeDetailViewModel {
 
   func translateDescription() {
     logger.debug("Translate description requested")
-    // Toggle to trigger the .translationTask modifiers for both description and title
+    // Toggle to trigger the .translationTask modifiers for description, title, and podcast name
     descriptionTranslationTrigger.toggle()
     episodeTitleTranslationTrigger.toggle()
+    podcastTitleTranslationTrigger.toggle()
   }
 
   // MARK: - Transcript Translation
@@ -745,6 +748,25 @@ final class EpisodeDetailViewModel {
       logger.info("Translated title for \(self.episode.title)")
     } catch {
       logger.error("Title translation failed: \(error.localizedDescription)")
+    }
+    #endif
+  }
+
+  /// Called by .translationTask for podcast name translation
+  @available(iOS 17.4, macOS 14.4, *)
+  func performPodcastTitleTranslation(using session: TranslationSession) async {
+    #if canImport(Translation)
+    let title = podcastTitle
+    guard !title.isEmpty else { return }
+
+    do {
+      let response = try await session.translate(title)
+      await MainActor.run {
+        self.translatedPodcastTitle = response.targetText
+      }
+      logger.info("Translated podcast title: \(title)")
+    } catch {
+      logger.error("Podcast title translation failed: \(error.localizedDescription)")
     }
     #endif
   }
@@ -1375,7 +1397,7 @@ final class EpisodeDetailViewModel {
     return result
   }
 
-  /// Returns filtered segments based on search query
+  /// Returns filtered segments based on search query (searches both original and translated text)
   var filteredTranscriptSegments: [TranscriptSegment] {
     guard !transcriptSearchQuery.isEmpty else {
       return transcriptSegments
@@ -1383,7 +1405,16 @@ final class EpisodeDetailViewModel {
 
     let query = transcriptSearchQuery.lowercased()
     return transcriptSegments.filter { segment in
-      segment.text.lowercased().contains(query)
+      // Search in original text
+      if segment.text.lowercased().contains(query) {
+        return true
+      }
+      // Also search in translated text if available
+      if let translatedText = segment.translatedText,
+         translatedText.lowercased().contains(query) {
+        return true
+      }
+      return false
     }
   }
 

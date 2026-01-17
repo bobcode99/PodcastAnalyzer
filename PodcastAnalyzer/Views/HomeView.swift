@@ -39,8 +39,8 @@ struct HomeView: View {
         ToolbarItem(placement: .primaryAction) {
           Button(action: { showRegionPicker = true }) {
             HStack(spacing: 4) {
-              Text(viewModel.selectedRegionName)
-                .font(.caption)
+              Text(viewModel.selectedRegionFlag)
+                .font(.title3)
               Image(systemName: "chevron.down")
                 .font(.caption2)
             }
@@ -514,6 +514,8 @@ struct RegionPickerSheet: View {
             isPresented = false
           }) {
             HStack {
+              Text(region.flag)
+                .font(.title2)
               Text(region.name)
                 .foregroundColor(.primary)
 

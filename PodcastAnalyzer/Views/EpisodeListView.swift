@@ -157,6 +157,8 @@ struct EpisodeListView: View {
       viewModel?.startRefreshTimer()
     }
     .task {
+      // Auto-refresh episodes in background when navigating to the podcast
+      await viewModel?.refreshPodcast()
       await lookupApplePodcastURL(title: podcastModel.podcastInfo.title)
     }
   }

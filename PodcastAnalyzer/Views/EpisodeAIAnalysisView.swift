@@ -286,20 +286,45 @@ struct EpisodeAIAnalysisView: View {
         description: "Ask any question about the episode content"
       )
 
-      // Question input
-      HStack {
-        TextField("Enter your question...", text: $questionInput)
-          .textFieldStyle(.roundedBorder)
+      // Question input with X button and Enter to send
+      HStack(spacing: 8) {
+        HStack {
+          TextField("Enter your question...", text: $questionInput)
+            .textFieldStyle(.plain)
+            .onSubmit {
+              submitQuestion()
+            }
 
-        Button(action: {
-          viewModel.askCloudQuestion(questionInput)
-          questionInput = ""
-        }) {
+          // X button to clear input
+          if !questionInput.isEmpty {
+            Button(action: {
+              questionInput = ""
+              #if os(iOS)
+              // Hide keyboard when clearing
+              UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+              #endif
+            }) {
+              Image(systemName: "xmark.circle.fill")
+                .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+          }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.platformSystemGray6)
+        .cornerRadius(10)
+
+        Button(action: submitQuestion) {
           Image(systemName: "paperplane.fill")
+            .font(.system(size: 18))
         }
         .disabled(
           questionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !canAnalyze)
       }
+      #if os(iOS)
+      .submitLabel(.send)
+      #endif
 
       // Previous Q&A history
       if !viewModel.cloudAnalysisCache.questionAnswers.isEmpty {
@@ -335,6 +360,17 @@ struct EpisodeAIAnalysisView: View {
 
   private var canAnalyze: Bool {
     settings.hasConfiguredProvider && viewModel.hasTranscript
+  }
+
+  private func submitQuestion() {
+    let trimmed = questionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, canAnalyze else { return }
+    viewModel.askCloudQuestion(questionInput)
+    questionInput = ""
+    #if os(iOS)
+    // Hide keyboard after submitting
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    #endif
   }
 
   private func generateButton(title: String, action: @escaping () -> Void) -> some View {
