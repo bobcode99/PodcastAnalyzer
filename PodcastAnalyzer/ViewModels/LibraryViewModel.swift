@@ -109,6 +109,9 @@ final class LibraryViewModel {
   // Use Unit Separator (U+001F) as delimiter
   private static let episodeKeyDelimiter = "\u{1F}"
 
+  // Cache for O(1) lookups
+  private var podcastTitleMap: [String: PodcastInfoModel] = [:]
+
   init(modelContext: ModelContext?) {
     self.modelContext = modelContext
     if modelContext != nil {
@@ -170,8 +173,8 @@ final class LibraryViewModel {
         }
         try context.save()
       } else {
-        // Find the episode from allPodcasts
-        guard let podcast = allPodcasts.first(where: { $0.podcastInfo.title == podcastTitle }),
+        // Find the episode from allPodcasts using O(1) lookup
+        guard let podcast = podcastTitleMap[podcastTitle],
               let episode = podcast.podcastInfo.episodes.first(where: { $0.title == episodeTitle }),
               let audioURL = episode.audioURL else { return }
 
@@ -202,6 +205,11 @@ final class LibraryViewModel {
   }
 
   func setModelContext(_ context: ModelContext) {
+    // Prevent redundant reloading if context hasn't changed and data is loaded
+    if self.modelContext == context && isAlreadyLoaded {
+      return
+    }
+    
     self.modelContext = context
     // Start ALL loading in parallel - don't block UI at all
     // Each section loads independently and updates its own state
@@ -210,11 +218,16 @@ final class LibraryViewModel {
     isLoadingDownloaded = true
     isLoadingLatest = true
 
-    // Launch all loading tasks in parallel immediately
-    Task { await loadPodcastsSection() }
+    // Launch loading tasks
+    // Chain podcasts -> latest to ensure dependencies are met without polling
+    Task { 
+      await loadPodcastsSection()
+      await loadLatestSection()
+    }
+    
+    // Independent sections
     Task { await loadSavedSection() }
     Task { await loadDownloadedSection() }
-    Task { await loadLatestSection() }
 
     isAlreadyLoaded = true
   }
@@ -253,11 +266,7 @@ final class LibraryViewModel {
   /// Load latest episodes section independently
   private func loadLatestSection() async {
     // This section depends heavily on podcastInfoModelList
-    // Wait for podcasts to load first
-    for _ in 0..<20 {
-      if !podcastInfoModelList.isEmpty { break }
-      try? await Task.sleep(for: .milliseconds(100))
-    }
+    // We now await this AFTER loadPodcastsSection completes, so no need to poll
     await loadLatestEpisodes()
     isLoadingLatest = false
   }
@@ -300,6 +309,12 @@ final class LibraryViewModel {
       let podcasts = try context.fetch(descriptor)
       // Since we're @MainActor, update directly
       self.allPodcasts = podcasts
+      
+      // Update lookup map
+      self.podcastTitleMap = Dictionary(uniqueKeysWithValues: 
+        podcasts.compactMap { ($0.podcastInfo.title, $0) }
+      )
+      
       logger.info("Loaded \(self.allPodcasts.count) total podcasts for episode lookups")
     } catch {
       logger.error("Failed to load all podcasts: \(error.localizedDescription)")
@@ -597,8 +612,8 @@ final class LibraryViewModel {
     if let (podcastTitle, episodeTitle) = parseEpisodeKey(model.id) {
       // Verify parsed titles match stored titles (catches mis-parsing due to | in episode titles)
       if podcastTitle == model.podcastTitle && episodeTitle == model.episodeTitle {
-        // Try to find full podcast info for richer data
-        if let podcast = allPodcasts.first(where: { $0.podcastInfo.title == podcastTitle }),
+        // Try to find full podcast info for richer data using O(1) lookup
+        if let podcast = podcastTitleMap[podcastTitle],
            let episode = podcast.podcastInfo.episodes.first(where: { $0.title == episodeTitle }) {
           return LibraryEpisode(
             id: model.id,
@@ -668,9 +683,8 @@ final class LibraryViewModel {
       return createFallbackLibraryEpisode(from: model)
     }
 
-    // Find the podcast from ALL podcasts (subscribed + browsed)
-    let podcasts = allPodcasts
-    if let podcast = podcasts.first(where: { $0.podcastInfo.title == podcastTitle }),
+    // Find the podcast using O(1) lookup
+    if let podcast = podcastTitleMap[podcastTitle],
        let episode = podcast.podcastInfo.episodes.first(where: { $0.title == episodeTitle }) {
       // Found the full episode info
       return LibraryEpisode(
