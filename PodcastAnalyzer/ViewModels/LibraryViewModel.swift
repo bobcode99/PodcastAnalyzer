@@ -46,6 +46,15 @@ final class LibraryViewModel {
   var isLoading = false
   var error: String?
 
+  // Private DTO for background processing
+  private struct EpisodeDownloadData: Sendable {
+    let id: String
+    let isStarred: Bool
+    let localAudioPath: String?
+    let isCompleted: Bool
+    let lastPlaybackPosition: TimeInterval
+  }
+
   // Separate loading states for progressive UI updates
   var isLoadingPodcasts = false
   var isLoadingSaved = false
@@ -489,53 +498,68 @@ final class LibraryViewModel {
   private func loadLatestEpisodes() async {
     guard let context = modelContext else { return }
 
-    // Batch fetch ALL EpisodeDownloadModel entries ONCE for O(1) lookups
+    // 1. Gather all necessary data on MainActor (where ModelContext lives)
     let descriptor = FetchDescriptor<EpisodeDownloadModel>()
-    let episodeModelsDict: [String: EpisodeDownloadModel]
+    let episodeDataDict: [String: EpisodeDownloadData]
     do {
       let allModels = try context.fetch(descriptor)
-      episodeModelsDict = Dictionary(uniqueKeysWithValues: allModels.map { ($0.id, $0) })
-    } catch {
-      logger.error("Failed to fetch episode models: \(error)")
-      episodeModelsDict = [:]
-    }
-
-    // Since we're @MainActor, access podcastInfoModelList directly
-    let pods = podcastInfoModelList
-    var allEpisodes: [LibraryEpisode] = []
-
-    for podcast in pods {
-      let podcastInfo = podcast.podcastInfo
-      // Get latest 5 episodes from each podcast
-      for episode in podcastInfo.episodes.prefix(5) {
-        let episodeKey = "\(podcastInfo.title)\(Self.episodeKeyDelimiter)\(episode.title)"
-        // O(1) dictionary lookup instead of SwiftData fetch
-        let model = episodeModelsDict[episodeKey]
-
-        allEpisodes.append(LibraryEpisode(
-          id: episodeKey,
-          podcastTitle: podcastInfo.title,
-          imageURL: episode.imageURL ?? podcastInfo.imageURL,
-          language: podcastInfo.language,
-          episodeInfo: episode,
-          isStarred: model?.isStarred ?? false,
-          isDownloaded: model?.localAudioPath != nil,
-          isCompleted: model?.isCompleted ?? false,
-          lastPlaybackPosition: model?.lastPlaybackPosition ?? 0
+      // Map to Sendable DTOs
+      let keyValues = allModels.map { model in
+        (model.id, EpisodeDownloadData(
+          id: model.id,
+          isStarred: model.isStarred,
+          localAudioPath: model.localAudioPath,
+          isCompleted: model.isCompleted,
+          lastPlaybackPosition: model.lastPlaybackPosition
         ))
       }
+      episodeDataDict = Dictionary(uniqueKeysWithValues: keyValues)
+    } catch {
+      logger.error("Failed to fetch episode models: \(error)")
+      return
     }
 
-    // Sort by date and take latest 50
-    let sorted = allEpisodes
-      .sorted { ($0.episodeInfo.pubDate ?? .distantPast) > ($1.episodeInfo.pubDate ?? .distantPast) }
-      .prefix(50)
+    // Capture the podcast info structs (already Sendable)
+    let podcasts = self.podcastInfoModelList.map { $0.podcastInfo }
 
-    // Since we're @MainActor, update directly
-    self.latestEpisodes = Array(sorted)
-    logger.info("Loaded \(self.latestEpisodes.count) latest episodes")
+    // 2. Perform heavy processing in background
+    let delimiter = Self.episodeKeyDelimiter
+    
+    let sortedEpisodes = await Task.detached(priority: .userInitiated) { () -> [LibraryEpisode] in
+      var allEpisodes: [LibraryEpisode] = []
 
-    // Update auto-play candidates (only episodes that haven't been completed)
+      for podcastInfo in podcasts {
+        // Get latest 5 episodes from each podcast
+        for episode in podcastInfo.episodes.prefix(5) {
+          let episodeKey = "\(podcastInfo.title)\(delimiter)\(episode.title)"
+          let data = episodeDataDict[episodeKey]
+
+          allEpisodes.append(LibraryEpisode(
+            id: episodeKey,
+            podcastTitle: podcastInfo.title,
+            imageURL: episode.imageURL ?? podcastInfo.imageURL,
+            language: podcastInfo.language,
+            episodeInfo: episode,
+            isStarred: data?.isStarred ?? false,
+            isDownloaded: data?.localAudioPath != nil,
+            isCompleted: data?.isCompleted ?? false,
+            lastPlaybackPosition: data?.lastPlaybackPosition ?? 0
+          ))
+        }
+      }
+
+      // Sort by date and take latest 50
+      return allEpisodes
+        .sorted { ($0.episodeInfo.pubDate ?? .distantPast) > ($1.episodeInfo.pubDate ?? .distantPast) }
+        .prefix(50)
+        .map { $0 } // Convert SubSequence back to Array
+    }.value
+
+    // 3. Update UI on MainActor
+    self.latestEpisodes = sortedEpisodes
+    logger.info("Loaded \(self.latestEpisodes.count) latest episodes (background processed)")
+
+    // Update auto-play candidates
     updateAutoPlayCandidates()
   }
 
