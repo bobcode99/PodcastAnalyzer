@@ -203,39 +203,79 @@ final class LibraryViewModel {
 
   func setModelContext(_ context: ModelContext) {
     self.modelContext = context
-    // Load data progressively - don't block UI
-    Task {
-      await loadAllProgressively()
-      isAlreadyLoaded = true
+    // Start ALL loading in parallel - don't block UI at all
+    // Each section loads independently and updates its own state
+    isLoadingPodcasts = true
+    isLoadingSaved = true
+    isLoadingDownloaded = true
+    isLoadingLatest = true
+
+    // Launch all loading tasks in parallel immediately
+    Task { await loadPodcastsSection() }
+    Task { await loadSavedSection() }
+    Task { await loadDownloadedSection() }
+    Task { await loadLatestSection() }
+
+    isAlreadyLoaded = true
+  }
+
+  // MARK: - Independent Section Loaders
+
+  /// Load podcasts section independently
+  private func loadPodcastsSection() async {
+    await loadPodcastFeeds()
+    await loadAllPodcasts()
+    isLoadingPodcasts = false
+  }
+
+  /// Load saved episodes section independently
+  private func loadSavedSection() async {
+    // Load immediately - EpisodeDownloadModel has all the data we need
+    await loadSavedEpisodes()
+    isLoadingSaved = false
+  }
+
+  /// Load downloaded episodes section independently
+  private func loadDownloadedSection() async {
+    // Load downloaded episodes immediately from SwiftData (fast)
+    await loadDownloadedEpisodesQuick()
+    isLoadingDownloaded = false
+
+    // Then sync with disk in background (slow, but doesn't block UI)
+    Task.detached(priority: .background) { [weak self] in
+      guard let self else { return }
+      await self.syncDownloadedFilesWithSwiftData()
+      // Reload to pick up any newly synced episodes
+      await self.loadDownloadedEpisodesQuick()
     }
   }
 
-  // MARK: - Load All Data
-
-  /// Load data progressively so UI can render immediately with available data
-  private func loadAllProgressively() async {
-    // Step 1: Load podcasts from cache first (instant, shows UI immediately)
-    await loadPodcastFeedsFromCache()
-
-    // Step 2: Load all podcasts for lookups (needed by other loaders)
-    await loadAllPodcasts()
-
-    // Step 3: Start loading all sections in parallel without awaiting all together
-    // Each section updates its own loading state and data independently
-    Task { await loadSavedEpisodesWithState() }
-    Task { await loadDownloadedEpisodesWithState() }
-    Task { await loadLatestEpisodesWithState() }
+  /// Load latest episodes section independently
+  private func loadLatestSection() async {
+    // This section depends heavily on podcastInfoModelList
+    // Wait for podcasts to load first
+    for _ in 0..<20 {
+      if !podcastInfoModelList.isEmpty { break }
+      try? await Task.sleep(for: .milliseconds(100))
+    }
+    await loadLatestEpisodes()
+    isLoadingLatest = false
   }
 
   /// Legacy loadAll for refresh operations that need to wait for completion
   private func loadAll() async {
     isLoading = true
+    isLoadingPodcasts = true
+    isLoadingSaved = true
+    isLoadingDownloaded = true
+    isLoadingLatest = true
 
     // First, load all podcasts (needed by other loaders)
     await loadAllPodcasts()
 
     // Load feeds first (other loaders depend on podcastInfoModelList)
     await loadPodcastFeeds()
+    isLoadingPodcasts = false
 
     // Then load the rest using async let for parallelism while staying on MainActor
     async let savedTask: () = loadSavedEpisodesWithState()
@@ -244,13 +284,6 @@ final class LibraryViewModel {
     _ = await (savedTask, downloadedTask, latestTask)
 
     isLoading = false
-  }
-
-  /// Load podcast feeds from cache (synchronous SwiftData fetch)
-  private func loadPodcastFeedsFromCache() async {
-    isLoadingPodcasts = true
-    await loadPodcastFeeds()
-    isLoadingPodcasts = false
   }
 
   // MARK: - Load All Podcasts (for episode lookups)
@@ -325,6 +358,36 @@ final class LibraryViewModel {
 
   // MARK: - Load Downloaded Episodes
 
+  /// Quick load from SwiftData without disk sync (for responsive UI)
+  private func loadDownloadedEpisodesQuick() async {
+    guard let context = modelContext else { return }
+
+    // Fetch ALL EpisodeDownloadModel and filter in memory
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      sortBy: [SortDescriptor(\.downloadedDate, order: .reverse)]
+    )
+
+    do {
+      let allModels = try context.fetch(descriptor)
+
+      // Filter for downloaded episodes in memory (localAudioPath is not nil and not empty)
+      let downloadedModels = allModels.filter { model in
+        guard let path = model.localAudioPath else { return false }
+        return !path.isEmpty
+      }
+
+      // Map to LibraryEpisode
+      let results = downloadedModels.map { model in
+        self.createLibraryEpisode(from: model)
+      }
+      self.downloadedEpisodes = results
+      logger.info("Quick loaded \(self.downloadedEpisodes.count) downloaded episodes")
+    } catch {
+      logger.error("Download fetch failed: \(error)")
+    }
+  }
+
+  /// Full load with disk sync (for refresh operations)
   private func loadDownloadedEpisodes() async {
     guard let context = modelContext else { return }
 
@@ -365,6 +428,17 @@ final class LibraryViewModel {
   private func syncDownloadedFilesWithSwiftData() async {
     guard let context = modelContext else { return }
 
+    // Batch fetch ALL EpisodeDownloadModel entries ONCE for O(1) lookups
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+    let existingModelsDict: [String: EpisodeDownloadModel]
+    do {
+      let allModels = try context.fetch(descriptor)
+      existingModelsDict = Dictionary(uniqueKeysWithValues: allModels.map { ($0.id, $0) })
+    } catch {
+      logger.error("Failed to fetch existing models for sync: \(error)")
+      return
+    }
+
     var syncedCount = 0
 
     // Check each episode from all podcasts
@@ -382,37 +456,29 @@ final class LibraryViewModel {
         if case .downloaded(let localPath) = state {
           let episodeKey = "\(podcastInfo.title)\(Self.episodeKeyDelimiter)\(episode.title)"
 
-          // Check if SwiftData entry exists and has correct path
-          let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-            predicate: #Predicate { $0.id == episodeKey }
-          )
-
-          do {
-            if let existingModel = try context.fetch(descriptor).first {
-              // Update if localAudioPath is missing or different
-              if existingModel.localAudioPath != localPath {
-                existingModel.localAudioPath = localPath
-                existingModel.downloadedDate = existingModel.downloadedDate ?? Date()
-                syncedCount += 1
-              }
-            } else {
-              // Create new SwiftData entry for this downloaded file
-              guard let audioURL = episode.audioURL else { continue }
-
-              let model = EpisodeDownloadModel(
-                episodeTitle: episode.title,
-                podcastTitle: podcastInfo.title,
-                audioURL: audioURL,
-                localAudioPath: localPath,
-                downloadedDate: Date(),
-                imageURL: episode.imageURL ?? podcastInfo.imageURL,
-                pubDate: episode.pubDate
-              )
-              context.insert(model)
+          // O(1) dictionary lookup instead of SwiftData fetch
+          if let existingModel = existingModelsDict[episodeKey] {
+            // Update if localAudioPath is missing or different
+            if existingModel.localAudioPath != localPath {
+              existingModel.localAudioPath = localPath
+              existingModel.downloadedDate = existingModel.downloadedDate ?? Date()
               syncedCount += 1
             }
-          } catch {
-            logger.error("Failed to sync episode \(episode.title): \(error.localizedDescription)")
+          } else {
+            // Create new SwiftData entry for this downloaded file
+            guard let audioURL = episode.audioURL else { continue }
+
+            let model = EpisodeDownloadModel(
+              episodeTitle: episode.title,
+              podcastTitle: podcastInfo.title,
+              audioURL: audioURL,
+              localAudioPath: localPath,
+              downloadedDate: Date(),
+              imageURL: episode.imageURL ?? podcastInfo.imageURL,
+              pubDate: episode.pubDate
+            )
+            context.insert(model)
+            syncedCount += 1
           }
         }
       }
@@ -427,6 +493,19 @@ final class LibraryViewModel {
   // MARK: - Load Latest Episodes
 
   private func loadLatestEpisodes() async {
+    guard let context = modelContext else { return }
+
+    // Batch fetch ALL EpisodeDownloadModel entries ONCE for O(1) lookups
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+    let episodeModelsDict: [String: EpisodeDownloadModel]
+    do {
+      let allModels = try context.fetch(descriptor)
+      episodeModelsDict = Dictionary(uniqueKeysWithValues: allModels.map { ($0.id, $0) })
+    } catch {
+      logger.error("Failed to fetch episode models: \(error)")
+      episodeModelsDict = [:]
+    }
+
     // Since we're @MainActor, access podcastInfoModelList directly
     let pods = podcastInfoModelList
     var allEpisodes: [LibraryEpisode] = []
@@ -436,8 +515,8 @@ final class LibraryViewModel {
       // Get latest 5 episodes from each podcast
       for episode in podcastInfo.episodes.prefix(5) {
         let episodeKey = "\(podcastInfo.title)\(Self.episodeKeyDelimiter)\(episode.title)"
-        // Since we're @MainActor, access getEpisodeModel directly
-        let model = getEpisodeModel(for: episodeKey)
+        // O(1) dictionary lookup instead of SwiftData fetch
+        let model = episodeModelsDict[episodeKey]
 
         allEpisodes.append(LibraryEpisode(
           id: episodeKey,
