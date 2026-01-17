@@ -274,14 +274,10 @@ struct EpisodeDetailView: View {
             HStack(alignment: .top, spacing: 12) {
                 // Artwork
                 if let url = URL(string: viewModel.imageURLString) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFit()
-                        case .failure: Color.gray
-                        case .empty: ProgressView()
-                        @unknown default: Color.gray
-                        }
+                    CachedAsyncImage(url: url) { image in
+                        image.resizable().scaledToFit()
+                    } placeholder: {
+                        Color.gray.overlay(ProgressView())
                     }
                     .frame(width: 80, height: 80)
                     .cornerRadius(10)

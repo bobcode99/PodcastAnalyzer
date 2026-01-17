@@ -17,7 +17,9 @@ final class HomeViewModel {
   // Static cache shared across all instances to prevent duplicate API calls
   private static var cachedTopPodcasts: [AppleRSSPodcast] = []
   private static var cachedRegion: String = ""
-  private static var isLoadingTopPodcastsGlobally = false
+  // Replace boolean flag with Task to allow joining
+  private static var loadingTask: Task<[AppleRSSPodcast], Error>?
+  private static var loadingRegion: String?
 
   // Up Next episodes (unplayed from subscribed podcasts)
   var upNextEpisodes: [LibraryEpisode] = []
@@ -259,17 +261,34 @@ final class HomeViewModel {
       return
     }
 
-    // Skip if already loading globally
-    guard !Self.isLoadingTopPodcastsGlobally else {
-      logger.debug("Already loading top podcasts, skipping")
+    // Join existing task if it matches our region
+    if let task = Self.loadingTask, Self.loadingRegion == selectedRegion, !forceRefresh {
+      logger.debug("Joining existing top podcasts load task for \(self.selectedRegion)")
+      isLoadingTopPodcasts = true
+      do {
+        let podcasts = try await task.value
+        topPodcasts = podcasts
+      } catch {
+        logger.error("Joined task failed: \(error.localizedDescription)")
+      }
+      isLoadingTopPodcasts = false
       return
     }
 
-    Self.isLoadingTopPodcastsGlobally = true
+    // Start new task
+    logger.info("Starting new top podcasts load for \(self.selectedRegion)")
     isLoadingTopPodcasts = true
+    
+    let regionToLoad = selectedRegion
+    Self.loadingRegion = regionToLoad
 
-    // Clear old data when force refreshing (region change)
-    // This ensures the UI shows loading state and displays new data when ready
+    // Create shared task
+    let task = Task {
+      try await applePodcastService.fetchTopPodcasts(region: regionToLoad, limit: 25)
+    }
+    Self.loadingTask = task
+    
+    // Clean up old data if force refreshing
     if forceRefresh {
       topPodcasts = []
       Self.cachedTopPodcasts = []
@@ -277,17 +296,26 @@ final class HomeViewModel {
     }
 
     do {
-      let podcasts = try await applePodcastService.fetchTopPodcasts(region: selectedRegion, limit: 25)
+      let podcasts = try await task.value
       // Update both static cache and observable instance property
       Self.cachedTopPodcasts = podcasts
-      Self.cachedRegion = selectedRegion
-      topPodcasts = podcasts  // This triggers SwiftUI update
-      logger.info("Loaded \(podcasts.count) top podcasts for \(self.selectedRegion)")
+      Self.cachedRegion = regionToLoad
+      
+      // Update instance property only if region hasn't changed
+      if selectedRegion == regionToLoad {
+        topPodcasts = podcasts
+      }
+      logger.info("Loaded \(podcasts.count) top podcasts for \(regionToLoad)")
     } catch {
       logger.error("Failed to load top podcasts: \(error.localizedDescription)")
     }
 
-    Self.isLoadingTopPodcastsGlobally = false
+    // Cleanup static state if it's still ours
+    if Self.loadingRegion == regionToLoad {
+      Self.loadingRegion = nil
+      Self.loadingTask = nil
+    }
+    
     isLoadingTopPodcasts = false
   }
 

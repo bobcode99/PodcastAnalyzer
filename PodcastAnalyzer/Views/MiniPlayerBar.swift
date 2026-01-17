@@ -44,12 +44,11 @@ struct MiniPlayerBar: View {
         // Artwork or Placeholder
         Group {
           if let urlString = audioManager.currentEpisode?.imageURL, let url = URL(string: urlString) {
-            AsyncImage(url: url) { phase in
-              if let image = phase.image {
-                image.resizable().aspectRatio(contentMode: .fill)
-              } else {
-                Color.gray
-              }
+
+            CachedAsyncImage(url: url) { image in
+              image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+              Color.gray
             }
           } else {
             RoundedRectangle(cornerRadius: 8)

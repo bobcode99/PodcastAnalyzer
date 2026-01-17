@@ -556,12 +556,10 @@ struct PodcastPreviewSheet: View {
       ScrollView {
         VStack(spacing: 20) {
           // Artwork
-          AsyncImage(url: URL(string: podcast.artworkUrl100.replacingOccurrences(of: "100x100", with: "600x600"))) { phase in
-            if let image = phase.image {
+          CachedAsyncImage(url: URL(string: podcast.artworkUrl100.replacingOccurrences(of: "100x100", with: "600x600"))) { image in
               image.resizable().scaledToFit()
-            } else {
+          } placeholder: {
               Color.gray
-            }
           }
           .frame(width: 200, height: 200)
           .cornerRadius(16)

@@ -19,6 +19,16 @@ import UIKit
 struct LibraryView: View {
   @State private var viewModel = LibraryViewModel(modelContext: nil)
   @Environment(\.modelContext) private var modelContext
+  
+  // Use @Query for instant persistence and automatic updates
+  @Query(
+    filter: #Predicate<PodcastInfoModel> { $0.isSubscribed },
+    sort: \.lastUpdated,
+    order: .reverse
+  ) private var subscribedPodcasts: [PodcastInfoModel]
+
+  // Filtered podcasts for display
+  private var displayPodcasts: [PodcastInfoModel] { subscribedPodcasts }
 
   // Grid layout: 2 columns
   private let columns = [
@@ -48,7 +58,7 @@ struct LibraryView: View {
         }
 
         // Only show full-screen loading on first load when no cached data exists
-        if viewModel.isLoadingPodcasts && viewModel.podcastInfoModelList.isEmpty
+        if viewModel.isLoadingPodcasts && subscribedPodcasts.isEmpty
             && viewModel.savedEpisodes.isEmpty && viewModel.downloadedEpisodes.isEmpty {
           ProgressView("Loading Library...")
             .scaleEffect(1.5)
@@ -77,6 +87,10 @@ struct LibraryView: View {
     .onAppear {
       // This is the key: set the context once
       viewModel.setModelContext(modelContext)
+      viewModel.setPodcasts(subscribedPodcasts)
+    }
+    .onChange(of: subscribedPodcasts) { _, newPodcasts in
+        viewModel.setPodcasts(newPodcasts)
     }
     .onDisappear {
       viewModel.cleanup()
@@ -187,17 +201,17 @@ struct LibraryView: View {
           ProgressView()
             .scaleEffect(0.7)
         } else {
-          Text("\(viewModel.podcastsSortedByRecentUpdate.count)")
+          Text("\(displayPodcasts.count)")
             .font(.subheadline)
             .foregroundColor(.secondary)
         }
       }
 
-      if viewModel.podcastsSortedByRecentUpdate.isEmpty {
+      if displayPodcasts.isEmpty {
         emptyPodcastsView
       } else {
         LazyVGrid(columns: columns, spacing: 16) {
-          ForEach(viewModel.podcastsSortedByRecentUpdate) { podcast in
+          ForEach(displayPodcasts) { podcast in
             NavigationLink(destination: EpisodeListView(podcastModel: podcast)) {
               PodcastGridCell(podcast: podcast)
             }

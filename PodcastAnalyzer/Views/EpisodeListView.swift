@@ -186,13 +186,11 @@ struct EpisodeListView: View {
   private var loadingView: some View {
     VStack(spacing: 20) {
       if case .browse(_, let name, _, let artwork, _) = source {
-        AsyncImage(url: URL(string: artwork.replacingOccurrences(of: "100x100", with: "300x300"))) {
-          phase in
-          if let image = phase.image {
-            image.resizable().scaledToFit()
-          } else {
+        // Use CachedAsyncImage for browse mode artwork
+        CachedAsyncImage(url: URL(string: artwork.replacingOccurrences(of: "100x100", with: "300x300"))) { image in
+             image.resizable().scaledToFit()
+        } placeholder: {
             Color.gray
-          }
         }
         .frame(width: 150, height: 150)
         .cornerRadius(12)
@@ -500,14 +498,11 @@ struct EpisodeListView: View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(alignment: .top) {
         if let url = URL(string: viewModel.podcastInfo.imageURL) {
-          AsyncImage(url: url) { phase in
-            if let image = phase.image {
-              image.resizable().scaledToFit()
-            } else if phase.error != nil {
-              Color.gray
-            } else {
-              ProgressView()
-            }
+          CachedAsyncImage(url: url) { image in
+               image.resizable().scaledToFit()
+          } placeholder: {
+               Color.gray
+                  .overlay(ProgressView())
           }
           .frame(width: 100, height: 100)
           .cornerRadius(8)

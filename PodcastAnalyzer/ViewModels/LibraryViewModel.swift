@@ -85,14 +85,7 @@ final class LibraryViewModel {
     }
   }
 
-  /// Podcasts sorted by most recent episode date (for Library grid)
-  var podcastsSortedByRecentUpdate: [PodcastInfoModel] {
-    podcastInfoModelList.sorted { p1, p2 in
-      let date1 = p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
-      let date2 = p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
-      return date1 > date2
-    }
-  }
+  // Removed podcastsSortedByRecentUpdate as it is now handled by @Query in the View
 
   private let service = PodcastRssService()
   private let downloadManager = DownloadManager.shared
@@ -232,11 +225,19 @@ final class LibraryViewModel {
     isAlreadyLoaded = true
   }
 
+  /// Receive updated podcast list from View's @Query
+  func setPodcasts(_ podcasts: [PodcastInfoModel]) {
+    self.podcastInfoModelList = podcasts
+    // Update dependent sections
+    Task { await loadLatestSection() }
+  }
+
   // MARK: - Independent Section Loaders
 
   /// Load podcasts section independently
   private func loadPodcastsSection() async {
-    await loadPodcastFeeds()
+    // We no longer load feeds manually here, they are injected via setPodcasts
+    // Just load the full lookup map
     await loadAllPodcasts()
     isLoadingPodcasts = false
   }
@@ -282,8 +283,7 @@ final class LibraryViewModel {
     // First, load all podcasts (needed by other loaders)
     await loadAllPodcasts()
 
-    // Load feeds first (other loaders depend on podcastInfoModelList)
-    await loadPodcastFeeds()
+    // No need to load feeds here, they come from @Query
     isLoadingPodcasts = false
 
     // Then load the rest using async let for parallelism while staying on MainActor
@@ -322,30 +322,9 @@ final class LibraryViewModel {
   }
 
   // MARK: - Load Podcasts
-
-  private func loadPodcastFeeds() async {
-    guard let context = modelContext else {
-      logger.warning("ModelContext is nil, cannot load feeds")
-      return
-    }
-
-    // Only load subscribed podcasts (not browsed/cached ones)
-    let descriptor = FetchDescriptor<PodcastInfoModel>(
-      predicate: #Predicate { $0.isSubscribed == true },
-      sortBy: [SortDescriptor(\.dateAdded, order: .reverse)]
-    )
-
-    do {
-      let podcasts = try context.fetch(descriptor)
-      // Since we're @MainActor, update directly
-      self.podcastInfoModelList = podcasts
-      logger.info("Loaded \(self.podcastInfoModelList.count) subscribed podcast feeds from database")
-    } catch {
-      self.error = "Failed to load feeds: \(error.localizedDescription)"
-      logger.error("Failed to load feeds: \(error.localizedDescription)")
-    }
-  }
-
+  
+  // Removed loadPodcastFeeds as it's replaced by @Query injection via setPodcasts
+  
   // MARK: - Load Saved Episodes
 
   private func loadSavedEpisodes() async {
