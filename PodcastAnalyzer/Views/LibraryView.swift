@@ -27,8 +27,14 @@ struct LibraryView: View {
     order: .reverse
   ) private var subscribedPodcasts: [PodcastInfoModel]
 
-  // Filtered podcasts for display
-  private var displayPodcasts: [PodcastInfoModel] { subscribedPodcasts }
+  // Filtered podcasts for display, sorted by latest episode date
+  private var displayPodcasts: [PodcastInfoModel] {
+    subscribedPodcasts.sorted { p1, p2 in
+      let date1 = p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      let date2 = p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      return date1 > date2
+    }
+  }
 
   // Grid layout: 2 columns
   private let columns = [

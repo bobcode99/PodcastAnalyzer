@@ -98,8 +98,8 @@ final class LibraryViewModel {
   var podcastsSortedByRecentUpdate: [PodcastInfoModel] {
     podcastInfoModelList.sorted { p1, p2 in
       // Use lastUpdated if available (set during sync), otherwise use latest episode date
-      let date1 = p1.lastUpdated ?? p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
-      let date2 = p2.lastUpdated ?? p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
+        let date1 = p1.lastUpdated
+        let date2 = p2.lastUpdated
       return date1 > date2
     }
   }
