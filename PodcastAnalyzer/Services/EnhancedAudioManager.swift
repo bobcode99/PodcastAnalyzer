@@ -99,14 +99,36 @@ class EnhancedAudioManager: NSObject {
     do {
       let session = AVAudioSession.sharedInstance()
       try session.setCategory(.playback, mode: .spokenAudio, options: [])
-      try session.setActive(true, options: .notifyOthersOnDeactivation)
-      logger.info("Audio session configured for background playback")
+      // Don't activate session here - only activate when actually playing
+      logger.info("Audio session configured (will activate when playing)")
     } catch {
-      logger.error("Audio session failed: \(error.localizedDescription)")
+      logger.error("Audio session setup failed: \(error.localizedDescription)")
     }
     #else
     // macOS doesn't require AVAudioSession configuration
     logger.info("Audio manager initialized for macOS")
+    #endif
+  }
+
+  private func activateAudioSession() {
+    #if os(iOS)
+    do {
+      try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+      logger.info("Audio session activated")
+    } catch {
+      logger.error("Failed to activate audio session: \(error.localizedDescription)")
+    }
+    #endif
+  }
+
+  private func deactivateAudioSession() {
+    #if os(iOS)
+    do {
+      try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+      logger.info("Audio session deactivated - other apps can now play")
+    } catch {
+      logger.error("Failed to deactivate audio session: \(error.localizedDescription)")
+    }
     #endif
   }
 
@@ -239,6 +261,9 @@ private func handleAudioInterruption(_ notification: Notification) {
 
     cleanup()
 
+    // Activate audio session now that we're about to play
+    activateAudioSession()
+
     // Use cached duration from episode metadata if available
     // This provides immediate feedback instead of showing 0:00
     if let episodeDuration = episode.duration, episodeDuration > 0 {
@@ -301,6 +326,9 @@ private func handleAudioInterruption(_ notification: Notification) {
       return
     }
 
+    // Ensure audio session is active when resuming
+    activateAudioSession()
+
     player?.play()
     player?.rate = playbackRate
     isPlaying = true
@@ -317,7 +345,11 @@ private func handleAudioInterruption(_ notification: Notification) {
     currentCaption = ""
     captionSegments = []
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-    logger.info("Playback stopped")
+
+    // Deactivate audio session so other apps can play
+    deactivateAudioSession()
+
+    logger.info("Playback stopped and audio session deactivated")
   }
 
   func seek(to time: TimeInterval) {
