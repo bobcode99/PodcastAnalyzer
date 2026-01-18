@@ -94,7 +94,15 @@ final class LibraryViewModel {
     }
   }
 
-  // Removed podcastsSortedByRecentUpdate as it is now handled by @Query in the View
+  /// Podcasts sorted by most recent update (combines lastUpdated and latest episode date)
+  var podcastsSortedByRecentUpdate: [PodcastInfoModel] {
+    podcastInfoModelList.sorted { p1, p2 in
+      // Use lastUpdated if available (set during sync), otherwise use latest episode date
+      let date1 = p1.lastUpdated ?? p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      let date2 = p2.lastUpdated ?? p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      return date1 > date2
+    }
+  }
 
   private let service = PodcastRssService()
   private let downloadManager = DownloadManager.shared
@@ -876,12 +884,14 @@ final class LibraryViewModel {
       return collected
     }
 
-    // Update models
+    // Update models and set lastUpdated timestamp
     var successCount = 0
+    let now = Date()
     for (id, updatedPodcast) in results {
       if let podcast = updatedPodcast,
          let model = self.podcastInfoModelList.first(where: { $0.id == id }) {
         model.podcastInfo = podcast
+        model.lastUpdated = now  // Update timestamp for proper sorting
         successCount += 1
         logger.info("Updated \(podcast.title) with \(podcast.episodes.count) episodes")
       }
