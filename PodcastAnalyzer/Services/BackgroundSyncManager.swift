@@ -63,7 +63,17 @@ class BackgroundSyncManager {
   }
 
   private init() {
-    self.isBackgroundSyncEnabled = UserDefaults.standard.bool(forKey: Keys.backgroundSyncEnabled)
+    // Check if user has explicitly set the preference
+    let isFirstLaunch = UserDefaults.standard.object(forKey: Keys.backgroundSyncEnabled) == nil
+    if isFirstLaunch {
+      // First launch: enable background sync by default
+      self.isBackgroundSyncEnabled = true
+      UserDefaults.standard.set(true, forKey: Keys.backgroundSyncEnabled)
+    } else {
+      // User has made a choice, respect it
+      self.isBackgroundSyncEnabled = UserDefaults.standard.bool(forKey: Keys.backgroundSyncEnabled)
+    }
+
     self.isNotificationsEnabled = UserDefaults.standard.bool(forKey: Keys.notificationsEnabled)
     if let date = UserDefaults.standard.object(forKey: Keys.lastSyncDate) as? Date {
       self.lastSyncDate = date
@@ -71,6 +81,13 @@ class BackgroundSyncManager {
 
     Task {
       await checkNotificationPermission()
+
+      // Schedule background refresh if enabled (especially important on first launch)
+      if isBackgroundSyncEnabled {
+        await MainActor.run {
+          scheduleBackgroundRefresh()
+        }
+      }
     }
   }
 
