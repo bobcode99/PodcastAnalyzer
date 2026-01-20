@@ -21,6 +21,32 @@ import UIKit
 import AppKit
 #endif
 
+// MARK: - Scroll Offset Tracking
+
+/// Preference key for tracking scroll offset
+struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// Helper view to read scroll offset
+struct ScrollOffsetReader: View {
+    let coordinateSpace: String
+
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .preference(
+                    key: ScrollOffsetPreferenceKey.self,
+                    value: proxy.frame(in: .named(coordinateSpace)).minY
+                )
+        }
+        .frame(height: 0)
+    }
+}
+
 struct EpisodeDetailView: View {
     private var toolbarPlacement: ToolbarItemPlacement {
         #if os(iOS)
@@ -43,6 +69,30 @@ struct EpisodeDetailView: View {
 
     // Timer state for transcript highlighting during playback (managed by .task modifier)
     @State private var playbackTimerActive = false
+
+    // Scroll offset for collapsible header
+    @State private var scrollOffset: CGFloat = 0
+
+    // AI sub-tab selection (for integrated AI tab)
+
+
+    // Computed properties for header collapse
+    private var isHeaderCollapsed: Bool {
+        scrollOffset < -80
+    }
+
+    private var headerOpacity: Double {
+        let threshold: CGFloat = 80
+        if scrollOffset >= 0 {
+            return 1.0
+        } else if scrollOffset <= -threshold {
+            return 0.0
+        } else {
+            return 1.0 + Double(scrollOffset / threshold)
+        }
+    }
+
+
 
     // Translation configuration for .translationTask
     @State private var transcriptTranslationConfig: TranslationSession.Configuration?
@@ -87,31 +137,44 @@ struct EpisodeDetailView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            headerSection
-            Divider()
-            tabSelector
-            Divider()
+        ZStack(alignment: .top) {
+            // Main content
+            VStack(spacing: 0) {
+                // Header with opacity based on scroll
+                headerSection
+                    .opacity(headerOpacity)
 
-            #if os(iOS)
-            TabView(selection: $selectedTab) {
-                summaryTab.tag(0)
-                transcriptTab.tag(1)
-                keywordsTab.tag(2)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            #else
-            // macOS: Use simple view switching to avoid default tab bar
-            Group {
-                switch selectedTab {
-                case 0: summaryTab
-                case 1: transcriptTab
-                case 2: keywordsTab
-                default: summaryTab
+                Divider()
+                tabSelector
+                Divider()
+
+                #if os(iOS)
+                TabView(selection: $selectedTab) {
+                    summaryTab.tag(0)
+                    transcriptTab.tag(1)
+                    aiTab.tag(2)
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                #else
+                // macOS: Use simple view switching to avoid default tab bar
+                Group {
+                    switch selectedTab {
+                    case 0: summaryTab
+                    case 1: transcriptTab
+                    case 2: aiTab
+                    default: summaryTab
+                    }
+                }
+                #endif
             }
-            #endif
+
+            // Collapsed mini header overlay
+            if isHeaderCollapsed {
+                collapsedMiniHeader
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: isHeaderCollapsed)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -184,6 +247,7 @@ struct EpisodeDetailView: View {
         .sheet(isPresented: $showSubtitleSettings) {
             SubtitleSettingsSheet()
         }
+
         .onAppear {
             viewModel.setModelContext(modelContext)
             viewModel.checkTranscriptStatus()
@@ -266,6 +330,58 @@ struct EpisodeDetailView: View {
             sourceLanguage: sourceLang,
             targetLanguage: targetLang
         )
+    }
+
+    // MARK: - Collapsed Mini Header
+    private var collapsedMiniHeader: some View {
+        HStack(spacing: 12) {
+            // Small artwork
+            if let url = URL(string: viewModel.imageURLString) {
+                CachedAsyncImage(url: url) { image in
+                    image.resizable().scaledToFit()
+                } placeholder: {
+                    Color.gray.overlay(ProgressView().scaleEffect(0.5))
+                }
+                .frame(width: 36, height: 36)
+                .cornerRadius(6)
+            } else {
+                Color.gray
+                    .frame(width: 36, height: 36)
+                    .cornerRadius(6)
+            }
+
+            // Episode title (1 line)
+            Text(viewModel.translatedEpisodeTitle ?? viewModel.title)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .lineLimit(1)
+
+            Spacer()
+
+            // Circular play button
+            Button(action: { viewModel.playAction() }) {
+                ZStack {
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 36, height: 36)
+
+                    if viewModel.isPlayingThisEpisode && viewModel.audioManager.isPlaying {
+                        Image(systemName: "pause.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white)
+                    } else {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isPlayDisabled)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
     }
 
     // MARK: - Header Section (Updated)
@@ -414,9 +530,9 @@ struct EpisodeDetailView: View {
                 Spacer()
             }
 
-            // Play + Download + AI Analysis buttons
+            // Play + Download buttons (icon-only capsules)
             HStack(spacing: 8) {
-                // Play button with progress (using reusable component)
+                // Play button with progress (icon-only style)
                 EpisodePlayButton(
                     isPlaying: viewModel.audioManager.isPlaying,
                     isPlayingThisEpisode: viewModel.isPlayingThisEpisode,
@@ -426,31 +542,11 @@ struct EpisodeDetailView: View {
                     lastPlaybackPosition: viewModel.lastPlaybackPosition,
                     formattedDuration: viewModel.formattedDuration,
                     isDisabled: viewModel.isPlayDisabled,
-                    style: .standard,
+                    style: .iconOnly,
                     action: { viewModel.playAction() }
                 )
 
-                downloadButton
-
-                // AI Analysis button (iOS 26+)
-                if #available(iOS 26.0, macOS 26.0, *) {
-                    NavigationLink(
-                        destination: EpisodeAIAnalysisView(viewModel: viewModel)
-                    ) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 12))
-                            Text("AI")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.purple)
-                    .disabled(!viewModel.hasTranscript)
-                }
+                downloadButtonIconOnly
 
                 Spacer()
             }
@@ -468,66 +564,85 @@ struct EpisodeDetailView: View {
         .padding(.horizontal)
         .padding(.vertical, 10)
     }
-    // MARK: - Download Button
+    // MARK: - Download Button (Icon-Only Capsule)
     @ViewBuilder
-    private var downloadButton: some View {
+    private var downloadButtonIconOnly: some View {
         switch viewModel.downloadState {
         case .notDownloaded:
             Button(action: { viewModel.startDownload() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.down.circle").font(
-                        .system(size: 12)
-                    )
-                    Text("Download").font(.caption).fontWeight(.medium)
-                }
-                .padding(.horizontal, 12).padding(.vertical, 8)
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.gray)
+                    .clipShape(Capsule())
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
+
         case .downloading(let progress):
             Button(action: { viewModel.cancelDownload() }) {
-                HStack(spacing: 4) {
-                    ProgressView().scaleEffect(0.6)
-                    Text("\(Int(progress * 100))%").font(.caption).fontWeight(
-                        .medium
-                    )
+                HStack(spacing: 6) {
+                    // Circular progress indicator
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                            .frame(width: 16, height: 16)
+                        Circle()
+                            .trim(from: 0, to: CGFloat(progress))
+                            .stroke(Color.white, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .frame(width: 16, height: 16)
+                            .rotationEffect(.degrees(-90))
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.white)
                 }
-                .padding(.horizontal, 12).padding(.vertical, 8)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.orange)
+                .clipShape(Capsule())
             }
-            .buttonStyle(.bordered).tint(.orange)
+            .buttonStyle(.plain)
+
         case .finishing:
-            HStack(spacing: 4) {
-                ProgressView().scaleEffect(0.6)
-                Text("Saving...").font(.caption).fontWeight(.medium)
+            HStack(spacing: 6) {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .tint(.white)
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(Color.blue.opacity(0.1))
-            .cornerRadius(8)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
-            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.blue)
+            .clipShape(Capsule())
+
         case .downloaded:
             Button(action: { showDeleteConfirmation = true }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill").font(
-                        .system(size: 12)
-                    )
-                    Text("Downloaded").font(.caption).fontWeight(.medium)
-                }
-                .padding(.horizontal, 12).padding(.vertical, 8)
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.green)
+                    .clipShape(Capsule())
             }
-            .buttonStyle(.bordered).tint(.green)
+            .buttonStyle(.plain)
+
         case .failed:
             Button(action: { viewModel.startDownload() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.circle").font(
-                        .system(size: 12)
-                    )
-                    Text("Retry").font(.caption).fontWeight(.medium)
-                }
-                .padding(.horizontal, 12).padding(.vertical, 8)
+                Image(systemName: "exclamationmark.circle")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.red)
+                    .clipShape(Capsule())
             }
-            .buttonStyle(.bordered).tint(.red)
+            .buttonStyle(.plain)
         }
     }
 
@@ -540,7 +655,7 @@ struct EpisodeDetailView: View {
             TabButton(title: "Transcript", isSelected: selectedTab == 1) {
                 withAnimation { selectedTab = 1 }
             }
-            TabButton(title: "Keywords", isSelected: selectedTab == 2) {
+            TabButton(title: "AI", isSelected: selectedTab == 2) {
                 withAnimation { selectedTab = 2 }
             }
         }
@@ -886,247 +1001,9 @@ struct EpisodeDetailView: View {
         .padding(.horizontal)
     }
 
-    // MARK: - Keywords Tab
-    private var keywordsTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // On-device AI availability check
-                if #available(iOS 26.0, macOS 26.0, *) {
-                    onDeviceKeywordsContent
-                } else {
-                    // Fallback for older iOS versions
-                    VStack(spacing: 12) {
-                        Image(systemName: "apple.intelligence")
-                            .font(.system(size: 48))
-                            .foregroundColor(.secondary)
-                        Text("Requires iOS 26+")
-                            .font(.headline)
-                        Text(
-                            "On-device AI keywords require iOS 26 or later with Apple Intelligence."
-                        )
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                }
-            }
-            .padding()
-        }
-        .onAppear {
-            viewModel.checkOnDeviceAIAvailability()
-        }
-    }
-
-    @available(iOS 26.0, macOS 26.0, *)
-    @ViewBuilder
-    private var onDeviceKeywordsContent: some View {
-        // Header
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: "apple.intelligence")
-                    .foregroundColor(.blue)
-                Text("Quick Tags")
-                    .font(.title2)
-                    .bold()
-            }
-            Text("AI-generated tags from episode metadata (on-device, private)")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-
-        // Availability banner if not available
-        if !viewModel.onDeviceAIAvailability.isAvailable {
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                Text(
-                    viewModel.onDeviceAIAvailability.message
-                        ?? "On-device AI unavailable"
-                )
-                .font(.caption)
-                .foregroundColor(.secondary)
-                Spacer()
-            }
-            .padding()
-            .background(Color.orange.opacity(0.1))
-            .cornerRadius(8)
-        }
-
-        // Quick tags content
-        if let tags = viewModel.quickTagsCache.tags {
-            // Tags card
-            VStack(alignment: .leading, spacing: 12) {
-                // Category
-                HStack {
-                    categoryBadge(tags.primaryCategory, isPrimary: true)
-                    if let secondary = tags.secondaryCategory {
-                        categoryBadge(secondary, isPrimary: false)
-                    }
-                }
-
-                Divider()
-
-                // Tags as chips
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Tags")
-                        .font(.headline)
-                    FlowLayout(spacing: 8) {
-                        ForEach(tags.tags, id: \.self) { tag in
-                            tagChip(tag)
-                        }
-                    }
-                }
-
-                Divider()
-
-                // Content type and difficulty
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Content Type")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(tags.contentType.capitalized)
-                            .font(.subheadline)
-                    }
-
-                    Spacer()
-
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("Difficulty")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        difficultyBadge(tags.difficulty)
-                    }
-                }
-
-                // Regenerate button
-                Button(action: {
-                    viewModel.quickTagsCache.tags = nil
-                    viewModel.generateQuickTags()
-                }) {
-                    Label("Regenerate", systemImage: "arrow.clockwise")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding()
-            .background(Color.platformSystemGray6)
-            .cornerRadius(12)
-        } else {
-            // Generate button
-            Button(action: { viewModel.generateQuickTags() }) {
-                HStack {
-                    Image(systemName: "sparkles")
-                    Text("Generate Quick Tags")
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(
-                    viewModel.onDeviceAIAvailability.isAvailable
-                        ? Color.blue : Color.gray
-                )
-                .foregroundColor(.white)
-                .cornerRadius(12)
-            }
-            .disabled(!viewModel.onDeviceAIAvailability.isAvailable)
-        }
-
-        // Analysis state feedback
-        keywordsAnalysisStateView
-    }
-
-    @ViewBuilder
-    private var keywordsAnalysisStateView: some View {
-        switch viewModel.quickTagsState {
-        case .idle, .completed:
-            EmptyView()
-
-        case .analyzing(let progress, let message):
-            VStack(spacing: 12) {
-                if progress < 0 {
-                    ProgressView()
-                        .scaleEffect(1.2)
-                } else {
-                    ProgressView(value: progress)
-                        .progressViewStyle(.linear)
-                }
-
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .foregroundColor(.blue)
-                    Text(message)
-                        .font(.subheadline)
-                }
-
-                if progress >= 0 {
-                    Text("\(Int(progress * 100))%")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding()
-            .background(Color.blue.opacity(0.05))
-            .cornerRadius(12)
-
-        case .error(let message):
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.red)
-                Text(message)
-                    .font(.caption)
-                    .foregroundColor(.red)
-            }
-            .padding()
-            .background(Color.red.opacity(0.1))
-            .cornerRadius(8)
-        }
-    }
-
-    // MARK: - Helper Views for Keywords Tab
-
-    private func categoryBadge(_ category: String, isPrimary: Bool) -> some View
-    {
-        Text(category)
-            .font(.caption)
-            .fontWeight(isPrimary ? .bold : .regular)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                isPrimary ? Color.blue.opacity(0.2) : Color.gray.opacity(0.1)
-            )
-            .foregroundColor(isPrimary ? .blue : .secondary)
-            .cornerRadius(8)
-    }
-
-    private func tagChip(_ tag: String) -> some View {
-        Text("#\(tag)")
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.blue.opacity(0.1))
-            .foregroundColor(.blue)
-            .cornerRadius(6)
-    }
-
-    private func difficultyBadge(_ level: String) -> some View {
-        Text(level.capitalized)
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(difficultyColor(level).opacity(0.2))
-            .foregroundColor(difficultyColor(level))
-            .cornerRadius(8)
-    }
-
-    private func difficultyColor(_ level: String) -> Color {
-        switch level.lowercased() {
-        case "beginner": return .green
-        case "intermediate": return .orange
-        case "advanced": return .red
-        default: return .gray
-        }
+    // MARK: - AI Tab (reuse EpisodeAIAnalysisView)
+    private var aiTab: some View {
+        EpisodeAIAnalysisView(viewModel: viewModel)
     }
 }
 

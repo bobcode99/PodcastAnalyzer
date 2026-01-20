@@ -36,6 +36,7 @@ struct EpisodePlayButton: View {
   enum PlayButtonStyle {
     case compact      // For list rows (smaller, capsule shape)
     case standard     // For detail views (larger, bordered prominent)
+    case iconOnly     // Icon + duration only, capsule with semantic color
   }
 
   init(
@@ -127,6 +128,8 @@ struct EpisodePlayButton: View {
       compactButton
     case .standard:
       standardButton
+    case .iconOnly:
+      iconOnlyButton
     }
   }
 
@@ -184,6 +187,29 @@ struct EpisodePlayButton: View {
       .padding(.vertical, 8)
     }
     .buttonStyle(.borderedProminent)
+    .disabled(isDisabled)
+  }
+
+  // MARK: - Icon Only Style (capsule with icon and duration)
+
+  private var iconOnlyButton: some View {
+    Button(action: action) {
+      HStack(spacing: 6) {
+        playIcon(size: 14)
+
+        if let duration = durationText {
+          Text(duration)
+            .font(.caption)
+            .fontWeight(.medium)
+        }
+      }
+      .foregroundColor(.white)
+      .padding(.horizontal, 14)
+      .padding(.vertical, 10)
+      .background(Color.blue)
+      .clipShape(Capsule())
+    }
+    .buttonStyle(.plain)
     .disabled(isDisabled)
   }
 
