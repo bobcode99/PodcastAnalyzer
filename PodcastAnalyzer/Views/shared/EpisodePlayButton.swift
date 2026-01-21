@@ -190,12 +190,27 @@ struct EpisodePlayButton: View {
     .disabled(isDisabled)
   }
 
-  // MARK: - Icon Only Style (capsule with icon and duration)
+  // MARK: - Icon Only Style (capsule with icon, progress bar, and duration)
 
   private var iconOnlyButton: some View {
     Button(action: action) {
       HStack(spacing: 6) {
         playIcon(size: 14)
+
+        // Progress bar (only show when partially played)
+        if playbackProgress > 0 && playbackProgress < 1 {
+          GeometryReader { geo in
+            ZStack(alignment: .leading) {
+              Capsule()
+                .fill(Color.white.opacity(0.4))
+                .frame(height: 3)
+              Capsule()
+                .fill(Color.white)
+                .frame(width: geo.size.width * playbackProgress, height: 3)
+            }
+          }
+          .frame(width: 32, height: 3)
+        }
 
         if let duration = durationText {
           Text(duration)

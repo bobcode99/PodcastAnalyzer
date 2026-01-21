@@ -51,6 +51,8 @@ struct EpisodeAIAnalysisView: View {
 
       // Content area
       ScrollView {
+        // Track scroll offset for collapsible header (when embedded in EpisodeDetailView)
+        ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll")
         VStack(alignment: .leading, spacing: 16) {
           switch selectedTab {
           case .summary: summaryTab
@@ -63,7 +65,6 @@ struct EpisodeAIAnalysisView: View {
         .padding()
       }
     }
-    .navigationTitle("AI Analysis")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif

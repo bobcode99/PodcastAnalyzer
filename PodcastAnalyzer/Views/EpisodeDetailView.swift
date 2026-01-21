@@ -174,7 +174,11 @@ struct EpisodeDetailView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .coordinateSpace(name: "EpisodeDetailScroll")
         .animation(.easeInOut(duration: 0.2), value: isHeaderCollapsed)
+        .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+            scrollOffset = value
+        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -511,21 +515,6 @@ struct EpisodeDetailView: View {
                             }
                         }
                     }
-
-                    // Playback progress (unchanged)
-                    if viewModel.playbackProgress > 0
-                        && viewModel.playbackProgress < 1
-                    {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ProgressView(value: viewModel.playbackProgress)
-                                .tint(.blue)
-                            if let remaining = viewModel.remainingTimeString {
-                                Text(remaining)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
                 }
                 Spacer()
             }
@@ -665,6 +654,7 @@ struct EpisodeDetailView: View {
     // MARK: - Summary Tab
     private var summaryTab: some View {
         ScrollView {
+            ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll")
             VStack(alignment: .leading, spacing: 16) {
                 // Show translated description if available
                 if let translated = viewModel.translatedDescription {
@@ -704,6 +694,7 @@ struct EpisodeDetailView: View {
             } else {
                 // Case 2: Processing or no transcript - wrap in ScrollView for consistent layout
                 ScrollView {
+                    ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll")
                     transcriptStatusSection
                         .padding(.vertical)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -736,6 +727,7 @@ struct EpisodeDetailView: View {
             // Flowing transcript content
             ScrollViewReader { proxy in
                 ScrollView {
+                    ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll")
                     FlowingTranscriptView(
                         segments: viewModel.filteredTranscriptSegments,
                         currentTime: viewModel.isPlayingThisEpisode ? viewModel.audioManager.currentTime : nil,
