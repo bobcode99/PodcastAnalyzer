@@ -24,6 +24,7 @@ struct EpisodeAIAnalysisView: View {
     #endif
   }
   @Bindable var viewModel: EpisodeDetailViewModel
+  var isActive: Bool = true  // Whether this tab is currently visible in parent TabView
 
   @State private var selectedTab: CloudAnalysisTab = .summary
   @State private var questionInput: String = ""
@@ -52,7 +53,7 @@ struct EpisodeAIAnalysisView: View {
       // Content area
       ScrollView {
         // Track scroll offset for collapsible header (when embedded in EpisodeDetailView)
-        ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll")
+        ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll", isActive: isActive)
         VStack(alignment: .leading, spacing: 16) {
           switch selectedTab {
           case .summary: summaryTab

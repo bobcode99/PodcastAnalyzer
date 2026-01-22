@@ -24,26 +24,32 @@ import AppKit
 // MARK: - Scroll Offset Tracking
 
 /// Preference key for tracking scroll offset
+/// Uses Optional so inactive tabs can report nil without overwriting active tab's offset
 struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+    static var defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        // Only update if the next value is non-nil (from active tab)
+        if let next = nextValue() {
+            value = next
+        }
     }
 }
 
-/// Helper view to read scroll offset
+/// Helper view to read scroll offset using named coordinate space
+/// Only reports offset when isActive is true to work correctly inside TabView with page style
 struct ScrollOffsetReader: View {
     let coordinateSpace: String
+    var isActive: Bool = true  // Only report offset when active (for TabView support)
 
     var body: some View {
         GeometryReader { proxy in
             Color.clear
                 .preference(
                     key: ScrollOffsetPreferenceKey.self,
-                    value: proxy.frame(in: .named(coordinateSpace)).minY
+                    value: isActive ? proxy.frame(in: .named(coordinateSpace)).minY : nil
                 )
         }
-        .frame(height: 0)
+        .frame(height: 1)
     }
 }
 
@@ -72,6 +78,7 @@ struct EpisodeDetailView: View {
 
     // Scroll offset for collapsible header
     @State private var scrollOffset: CGFloat = 0
+    @State private var baselineOffset: CGFloat?  // Captured on first scroll report
 
     // AI sub-tab selection (for integrated AI tab)
 
@@ -140,11 +147,16 @@ struct EpisodeDetailView: View {
         ZStack(alignment: .top) {
             // Main content
             VStack(spacing: 0) {
-                // Header with opacity based on scroll
+                // Header with animated height collapse
                 headerSection
+                    .frame(height: isHeaderCollapsed ? 0 : nil)
                     .opacity(headerOpacity)
+                    .clipped()
 
-                Divider()
+                if !isHeaderCollapsed {
+                    Divider()
+                }
+
                 tabSelector
                 Divider()
 
@@ -168,7 +180,7 @@ struct EpisodeDetailView: View {
                 #endif
             }
 
-            // Collapsed mini header overlay
+            // Collapsed mini header overlay (floats on top)
             if isHeaderCollapsed {
                 collapsedMiniHeader
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -177,7 +189,21 @@ struct EpisodeDetailView: View {
         .coordinateSpace(name: "EpisodeDetailScroll")
         .animation(.easeInOut(duration: 0.2), value: isHeaderCollapsed)
         .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
-            scrollOffset = value
+            // Only update if we got a non-nil value from the active tab
+            guard let rawOffset = value else { return }
+
+            // Capture baseline on first report
+            if baselineOffset == nil {
+                baselineOffset = rawOffset
+            }
+
+            // Calculate relative offset (negative = scrolled down)
+            scrollOffset = rawOffset - (baselineOffset ?? 0)
+        }
+        .onChange(of: selectedTab) { _, _ in
+            // Reset baseline when switching tabs
+            baselineOffset = nil
+            scrollOffset = 0
         }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -654,7 +680,7 @@ struct EpisodeDetailView: View {
     // MARK: - Summary Tab
     private var summaryTab: some View {
         ScrollView {
-            ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll")
+            ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll", isActive: selectedTab == 0)
             VStack(alignment: .leading, spacing: 16) {
                 // Show translated description if available
                 if let translated = viewModel.translatedDescription {
@@ -694,7 +720,7 @@ struct EpisodeDetailView: View {
             } else {
                 // Case 2: Processing or no transcript - wrap in ScrollView for consistent layout
                 ScrollView {
-                    ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll")
+                    ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll", isActive: selectedTab == 1)
                     transcriptStatusSection
                         .padding(.vertical)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -727,7 +753,7 @@ struct EpisodeDetailView: View {
             // Flowing transcript content
             ScrollViewReader { proxy in
                 ScrollView {
-                    ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll")
+                    ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll", isActive: selectedTab == 1)
                     FlowingTranscriptView(
                         segments: viewModel.filteredTranscriptSegments,
                         currentTime: viewModel.isPlayingThisEpisode ? viewModel.audioManager.currentTime : nil,
@@ -995,7 +1021,7 @@ struct EpisodeDetailView: View {
 
     // MARK: - AI Tab (reuse EpisodeAIAnalysisView)
     private var aiTab: some View {
-        EpisodeAIAnalysisView(viewModel: viewModel)
+        EpisodeAIAnalysisView(viewModel: viewModel, isActive: selectedTab == 2)
     }
 }
 

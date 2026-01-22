@@ -19,7 +19,7 @@ import UIKit
 struct LibraryView: View {
   @State private var viewModel = LibraryViewModel(modelContext: nil)
   @Environment(\.modelContext) private var modelContext
-  
+
   // Use @Query for instant persistence and automatic updates
   @Query(
     filter: #Predicate<PodcastInfoModel> { $0.isSubscribed },
@@ -27,14 +27,8 @@ struct LibraryView: View {
     order: .reverse
   ) private var subscribedPodcasts: [PodcastInfoModel]
 
-  // Filtered podcasts for display, sorted by latest episode date
-  private var displayPodcasts: [PodcastInfoModel] {
-    subscribedPodcasts.sorted { p1, p2 in
-      let date1 = p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
-      let date2 = p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
-      return date1 > date2
-    }
-  }
+  // Cached sorted podcasts to avoid re-sorting on every render
+  @State private var sortedPodcasts: [PodcastInfoModel] = []
 
   // Grid layout: 2 columns
   private let columns = [
@@ -45,6 +39,10 @@ struct LibraryView: View {
   // Context menu state
   @State private var podcastToUnsubscribe: PodcastInfoModel?
   @State private var showUnsubscribeConfirmation = false
+
+  // Notification observers
+  @State private var syncObserver: NSObjectProtocol?
+  @State private var downloadObserver: NSObjectProtocol?
 
   var body: some View {
     NavigationStack {
@@ -91,15 +89,22 @@ struct LibraryView: View {
       }
     }
     .onAppear {
-      // This is the key: set the context once
+      // Set the context and initial podcasts
       viewModel.setModelContext(modelContext)
       viewModel.setPodcasts(subscribedPodcasts)
+      updateSortedPodcasts()
+      setupNotificationObservers()
     }
     .onChange(of: subscribedPodcasts) { _, newPodcasts in
-        viewModel.setPodcasts(newPodcasts)
+      viewModel.setPodcasts(newPodcasts)
+      // Update sorted cache with animation
+      withAnimation(.easeInOut(duration: 0.3)) {
+        updateSortedPodcasts()
+      }
     }
     .onDisappear {
       viewModel.cleanup()
+      removeNotificationObservers()
     }
     .confirmationDialog(
       "Unsubscribe from Podcast",
@@ -192,6 +197,55 @@ struct LibraryView: View {
     }
   }
 
+  // MARK: - Helper Methods
+
+  private func updateSortedPodcasts() {
+    sortedPodcasts = subscribedPodcasts.sorted { p1, p2 in
+      let date1 = p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      let date2 = p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      return date1 > date2
+    }
+  }
+
+  private func setupNotificationObservers() {
+    // Listen for sync completion to refresh data
+    syncObserver = NotificationCenter.default.addObserver(
+      forName: .podcastSyncCompleted,
+      object: nil,
+      queue: .main
+    ) { [self] _ in
+      Task { @MainActor in
+        // Refresh the view model data
+        viewModel.setModelContext(modelContext)
+        withAnimation(.easeInOut(duration: 0.3)) {
+          updateSortedPodcasts()
+        }
+      }
+    }
+
+    // Listen for download completion to update counts
+    downloadObserver = NotificationCenter.default.addObserver(
+      forName: .episodeDownloadCompleted,
+      object: nil,
+      queue: .main
+    ) { [self] _ in
+      Task { @MainActor in
+        viewModel.setModelContext(modelContext)
+      }
+    }
+  }
+
+  private func removeNotificationObservers() {
+    if let observer = syncObserver {
+      NotificationCenter.default.removeObserver(observer)
+      syncObserver = nil
+    }
+    if let observer = downloadObserver {
+      NotificationCenter.default.removeObserver(observer)
+      downloadObserver = nil
+    }
+  }
+
   // MARK: - Podcasts Grid Section
 
   @ViewBuilder
@@ -207,17 +261,17 @@ struct LibraryView: View {
           ProgressView()
             .scaleEffect(0.7)
         } else {
-          Text("\(displayPodcasts.count)")
+          Text("\(sortedPodcasts.count)")
             .font(.subheadline)
             .foregroundColor(.secondary)
         }
       }
 
-      if displayPodcasts.isEmpty {
+      if sortedPodcasts.isEmpty {
         emptyPodcastsView
       } else {
         LazyVGrid(columns: columns, spacing: 16) {
-          ForEach(displayPodcasts) { podcast in
+          ForEach(sortedPodcasts) { podcast in
             NavigationLink(destination: EpisodeListView(podcastModel: podcast)) {
               PodcastGridCell(podcast: podcast)
             }

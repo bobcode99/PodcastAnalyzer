@@ -122,6 +122,8 @@ final class LibraryViewModel {
   // Cache for O(1) lookups
   private var podcastTitleMap: [String: PodcastInfoModel] = [:]
 
+  private var syncCompletionObserver: NSObjectProtocol?
+
   init(modelContext: ModelContext?) {
     self.modelContext = modelContext
     if modelContext != nil {
@@ -130,6 +132,7 @@ final class LibraryViewModel {
       }
     }
     setupDownloadCompletionObserver()
+    setupSyncCompletionObserver()
   }
 
   /// Clean up resources. Call this from onDisappear.
@@ -137,6 +140,32 @@ final class LibraryViewModel {
     if let observer = downloadCompletionObserver {
       NotificationCenter.default.removeObserver(observer)
       downloadCompletionObserver = nil
+    }
+    if let observer = syncCompletionObserver {
+      NotificationCenter.default.removeObserver(observer)
+      syncCompletionObserver = nil
+    }
+  }
+
+  private func setupSyncCompletionObserver() {
+    // Listen for background sync completion to reload data
+    syncCompletionObserver = NotificationCenter.default.addObserver(
+      forName: .podcastSyncCompleted,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let self = self else { return }
+
+      let newCount = notification.userInfo?["newEpisodeCount"] as? Int ?? 0
+      self.logger.info("Sync completed notification received, \(newCount) new episodes")
+
+      Task { @MainActor in
+        // Reload all data sections
+        await self.loadAllPodcasts()
+        await self.loadLatestEpisodes()
+        await self.loadSavedEpisodes()
+        await self.loadDownloadedEpisodesQuick()
+      }
     }
   }
 

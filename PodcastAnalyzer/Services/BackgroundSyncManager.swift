@@ -14,6 +14,17 @@ import SwiftData
 import UserNotifications
 import os.log
 
+// MARK: - Sync Notifications
+
+extension Notification.Name {
+  /// Posted when background sync completes with new episodes
+  /// userInfo contains: "newEpisodeCount" (Int), "updatedPodcastTitles" ([String])
+  static let podcastSyncCompleted = Notification.Name("podcastSyncCompleted")
+
+  /// Posted when a podcast is updated (from any source)
+  static let podcastDataChanged = Notification.Name("podcastDataChanged")
+}
+
 @MainActor
 @Observable
 class BackgroundSyncManager {
@@ -237,13 +248,24 @@ class BackgroundSyncManager {
       lastSyncDate = Date()
       UserDefaults.standard.set(lastSyncDate, forKey: Keys.lastSyncDate)
 
-      // Send notification if there are new episodes
+      // Send push notification if there are new episodes and enabled
       if totalNewEpisodes > 0 && isNotificationsEnabled {
         await sendNewEpisodesNotification(
           totalCount: totalNewEpisodes,
           details: newEpisodeDetails
         )
       }
+
+      // Always post internal notification for UI updates (even if no new episodes, to update timestamps)
+      let updatedTitles = Set(newEpisodeDetails.map { $0.podcastTitle })
+      NotificationCenter.default.post(
+        name: .podcastSyncCompleted,
+        object: nil,
+        userInfo: [
+          "newEpisodeCount": totalNewEpisodes,
+          "updatedPodcastTitles": Array(updatedTitles)
+        ]
+      )
 
       logger.info("Sync completed. Found \(totalNewEpisodes) new episodes total.")
       return true
