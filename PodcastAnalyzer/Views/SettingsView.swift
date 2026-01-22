@@ -174,6 +174,29 @@ struct SettingsView: View {
           Text("Region for browsing top podcasts on Home")
         }
 
+        // MARK: - Translation Section
+        Section {
+          Picker(selection: Binding(
+            get: { SubtitleSettingsManager.shared.targetLanguage },
+            set: { SubtitleSettingsManager.shared.targetLanguage = $0 }
+          )) {
+            ForEach(TranslationTargetLanguage.allCases, id: \.self) { language in
+              Text(language.displayName).tag(language)
+            }
+          } label: {
+            HStack {
+              Image(systemName: "translate")
+                .foregroundColor(.blue)
+                .frame(width: 24)
+              Text("Default Translation Language")
+            }
+          }
+        } header: {
+          Text("Translation")
+        } footer: {
+          Text("Default target language for translating transcripts and episode descriptions")
+        }
+
         // MARK: - Transcript Section
         Section {
           // Language picker

@@ -24,7 +24,7 @@ struct EpisodeAIAnalysisView: View {
     #endif
   }
   @Bindable var viewModel: EpisodeDetailViewModel
-  var isActive: Bool = true  // Whether this tab is currently visible in parent TabView
+  var embedsOwnScroll: Bool = true  // When false, parent provides scrolling (for embedded mode)
 
   @State private var selectedTab: CloudAnalysisTab = .summary
   @State private var questionInput: String = ""
@@ -50,20 +50,13 @@ struct EpisodeAIAnalysisView: View {
 
       Divider()
 
-      // Content area
-      ScrollView {
-        // Track scroll offset for collapsible header (when embedded in EpisodeDetailView)
-        ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll", isActive: isActive)
-        VStack(alignment: .leading, spacing: 16) {
-          switch selectedTab {
-          case .summary: summaryTab
-          case .entities: entitiesTab
-          case .highlights: highlightsTab
-          case .fullAnalysis: fullAnalysisTab
-          case .askQuestion: questionAnswerTab
-          }
+      // Content area - conditionally wrap in ScrollView based on embedsOwnScroll
+      if embedsOwnScroll {
+        ScrollView {
+          aiContentView
         }
-        .padding()
+      } else {
+        aiContentView
       }
     }
     #if os(iOS)
@@ -89,6 +82,21 @@ struct EpisodeAIAnalysisView: View {
           }
       }
     }
+  }
+
+  // MARK: - AI Content View (shared between scrolled and non-scrolled modes)
+
+  private var aiContentView: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      switch selectedTab {
+      case .summary: summaryTab
+      case .entities: entitiesTab
+      case .highlights: highlightsTab
+      case .fullAnalysis: fullAnalysisTab
+      case .askQuestion: questionAnswerTab
+      }
+    }
+    .padding()
   }
 
   // MARK: - Configuration Banner

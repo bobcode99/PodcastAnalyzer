@@ -2,8 +2,7 @@
 //  EpisodeDetailView.swift
 //  PodcastAnalyzer
 //
-//  Fixed: Added Regenerate option to live view and fixed state visibility
-//  Fixed: Memory leaks from static timer and proper cleanup on macOS
+//  Redesigned with simpler architecture: single ScrollView + sticky tabs
 //
 
 import Foundation
@@ -21,38 +20,6 @@ import UIKit
 import AppKit
 #endif
 
-// MARK: - Scroll Offset Tracking
-
-/// Preference key for tracking scroll offset
-/// Uses Optional so inactive tabs can report nil without overwriting active tab's offset
-struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat? = nil
-    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
-        // Only update if the next value is non-nil (from active tab)
-        if let next = nextValue() {
-            value = next
-        }
-    }
-}
-
-/// Helper view to read scroll offset using named coordinate space
-/// Only reports offset when isActive is true to work correctly inside TabView with page style
-struct ScrollOffsetReader: View {
-    let coordinateSpace: String
-    var isActive: Bool = true  // Only report offset when active (for TabView support)
-
-    var body: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .preference(
-                    key: ScrollOffsetPreferenceKey.self,
-                    value: isActive ? proxy.frame(in: .named(coordinateSpace)).minY : nil
-                )
-        }
-        .frame(height: 1)
-    }
-}
-
 struct EpisodeDetailView: View {
     private var toolbarPlacement: ToolbarItemPlacement {
         #if os(iOS)
@@ -68,6 +35,7 @@ struct EpisodeDetailView: View {
     @State private var showCopySuccess = false
     @State private var showDeleteConfirmation = false
     @State private var showSubtitleSettings = false
+    @State private var showTranslationLanguagePicker = false
 
     // Translation error alert
     @State private var showTranslationError = false
@@ -75,31 +43,6 @@ struct EpisodeDetailView: View {
 
     // Timer state for transcript highlighting during playback (managed by .task modifier)
     @State private var playbackTimerActive = false
-
-    // Scroll offset for collapsible header
-    @State private var scrollOffset: CGFloat = 0
-    @State private var baselineOffset: CGFloat?  // Captured on first scroll report
-
-    // AI sub-tab selection (for integrated AI tab)
-
-
-    // Computed properties for header collapse
-    private var isHeaderCollapsed: Bool {
-        scrollOffset < -80
-    }
-
-    private var headerOpacity: Double {
-        let threshold: CGFloat = 80
-        if scrollOffset >= 0 {
-            return 1.0
-        } else if scrollOffset <= -threshold {
-            return 0.0
-        } else {
-            return 1.0 + Double(scrollOffset / threshold)
-        }
-    }
-
-
 
     // Translation configuration for .translationTask
     @State private var transcriptTranslationConfig: TranslationSession.Configuration?
@@ -144,66 +87,26 @@ struct EpisodeDetailView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            // Main content
-            VStack(spacing: 0) {
-                // Header with animated height collapse
+        ScrollView {
+            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                // Header scrolls away naturally
                 headerSection
-                    .frame(height: isHeaderCollapsed ? 0 : nil)
-                    .opacity(headerOpacity)
-                    .clipped()
+                    .padding(.bottom, 8)
 
-                if !isHeaderCollapsed {
-                    Divider()
-                }
-
-                tabSelector
                 Divider()
 
-                #if os(iOS)
-                TabView(selection: $selectedTab) {
-                    summaryTab.tag(0)
-                    transcriptTab.tag(1)
-                    aiTab.tag(2)
+                // Sticky tabs + content
+                Section {
+                    tabContentView
+                        .frame(minHeight: 400)
+                } header: {
+                    tabSelector
+                        .background(.regularMaterial)
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                #else
-                // macOS: Use simple view switching to avoid default tab bar
-                Group {
-                    switch selectedTab {
-                    case 0: summaryTab
-                    case 1: transcriptTab
-                    case 2: aiTab
-                    default: summaryTab
-                    }
-                }
-                #endif
-            }
-
-            // Collapsed mini header overlay (floats on top)
-            if isHeaderCollapsed {
-                collapsedMiniHeader
-                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .coordinateSpace(name: "EpisodeDetailScroll")
-        .animation(.easeInOut(duration: 0.2), value: isHeaderCollapsed)
-        .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
-            // Only update if we got a non-nil value from the active tab
-            guard let rawOffset = value else { return }
-
-            // Capture baseline on first report
-            if baselineOffset == nil {
-                baselineOffset = rawOffset
-            }
-
-            // Calculate relative offset (negative = scrolled down)
-            scrollOffset = rawOffset - (baselineOffset ?? 0)
-        }
-        .onChange(of: selectedTab) { _, _ in
-            // Reset baseline when switching tabs
-            baselineOffset = nil
-            scrollOffset = 0
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 80)
         }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -211,7 +114,7 @@ struct EpisodeDetailView: View {
         .toolbar {
             ToolbarItem(placement: toolbarPlacement) {
                 HStack(spacing: 16) {
-                    Button(action: { viewModel.translateDescription() }) {
+                    Button(action: { showTranslationLanguagePicker = true }) {
                         Image(systemName: "translate")
                     }
                     Menu {
@@ -277,12 +180,21 @@ struct EpisodeDetailView: View {
         .sheet(isPresented: $showSubtitleSettings) {
             SubtitleSettingsSheet()
         }
-
+        .sheet(isPresented: $showTranslationLanguagePicker) {
+            TranslationLanguagePickerSheet(
+                availableTranslations: viewModel.availableTranslationLanguages,
+                translationStatus: viewModel.translationStatus,
+                onSelectLanguage: { language in
+                    viewModel.translateTo(language)
+                }
+            )
+        }
         .onAppear {
             viewModel.setModelContext(modelContext)
             viewModel.checkTranscriptStatus()
-            // Try to load existing translations
+            // Try to load existing translations and check available ones
             viewModel.loadExistingTranslations()
+            viewModel.checkAvailableTranslations()
         }
         .onDisappear {
             // Clean up subscriptions to prevent memory leaks
@@ -316,11 +228,22 @@ struct EpisodeDetailView: View {
         }
     }
 
+    // MARK: - Tab Content View
+
+    @ViewBuilder
+    private var tabContentView: some View {
+        switch selectedTab {
+        case 0: summaryContent
+        case 1: transcriptContent
+        case 2: EpisodeAIAnalysisView(viewModel: viewModel, embedsOwnScroll: false)
+        default: EmptyView()
+        }
+    }
+
     // MARK: - Translation Helpers
 
     private func triggerTranscriptTranslation() {
-        let settings = SubtitleSettingsManager.shared
-        guard let targetLang = settings.targetLanguage.localeLanguage else { return }
+        guard let targetLang = viewModel.selectedTranslationLanguage?.localeLanguage else { return }
 
         let sourceLang = TranslationService.shared.detectSourceLanguage(from: viewModel.podcastLanguage)
         transcriptTranslationConfig = TranslationService.shared.makeConfiguration(
@@ -330,8 +253,7 @@ struct EpisodeDetailView: View {
     }
 
     private func triggerDescriptionTranslation() {
-        let settings = SubtitleSettingsManager.shared
-        guard let targetLang = settings.targetLanguage.localeLanguage else { return }
+        guard let targetLang = viewModel.selectedTranslationLanguage?.localeLanguage else { return }
 
         let sourceLang = TranslationService.shared.detectSourceLanguage(from: viewModel.podcastLanguage)
         descriptionTranslationConfig = TranslationService.shared.makeConfiguration(
@@ -341,8 +263,7 @@ struct EpisodeDetailView: View {
     }
 
     private func triggerTitleTranslation() {
-        let settings = SubtitleSettingsManager.shared
-        guard let targetLang = settings.targetLanguage.localeLanguage else { return }
+        guard let targetLang = viewModel.selectedTranslationLanguage?.localeLanguage else { return }
 
         let sourceLang = TranslationService.shared.detectSourceLanguage(from: viewModel.podcastLanguage)
         titleTranslationConfig = TranslationService.shared.makeConfiguration(
@@ -352,66 +273,13 @@ struct EpisodeDetailView: View {
     }
 
     private func triggerPodcastTitleTranslation() {
-        let settings = SubtitleSettingsManager.shared
-        guard let targetLang = settings.targetLanguage.localeLanguage else { return }
+        guard let targetLang = viewModel.selectedTranslationLanguage?.localeLanguage else { return }
 
         let sourceLang = TranslationService.shared.detectSourceLanguage(from: viewModel.podcastLanguage)
         podcastTitleTranslationConfig = TranslationService.shared.makeConfiguration(
             sourceLanguage: sourceLang,
             targetLanguage: targetLang
         )
-    }
-
-    // MARK: - Collapsed Mini Header
-    private var collapsedMiniHeader: some View {
-        HStack(spacing: 12) {
-            // Small artwork
-            if let url = URL(string: viewModel.imageURLString) {
-                CachedAsyncImage(url: url) { image in
-                    image.resizable().scaledToFit()
-                } placeholder: {
-                    Color.gray.overlay(ProgressView().scaleEffect(0.5))
-                }
-                .frame(width: 36, height: 36)
-                .cornerRadius(6)
-            } else {
-                Color.gray
-                    .frame(width: 36, height: 36)
-                    .cornerRadius(6)
-            }
-
-            // Episode title (1 line)
-            Text(viewModel.translatedEpisodeTitle ?? viewModel.title)
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .lineLimit(1)
-
-            Spacer()
-
-            // Circular play button
-            Button(action: { viewModel.playAction() }) {
-                ZStack {
-                    Circle()
-                        .fill(Color.blue)
-                        .frame(width: 36, height: 36)
-
-                    if viewModel.isPlayingThisEpisode && viewModel.audioManager.isPlaying {
-                        Image(systemName: "pause.fill")
-                            .font(.system(size: 14))
-                            .foregroundColor(.white)
-                    } else {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 14))
-                            .foregroundColor(.white)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isPlayDisabled)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
     }
 
     // MARK: - Header Section (Updated)
@@ -663,68 +531,64 @@ struct EpisodeDetailView: View {
 
     // MARK: - Tab Selector
     private var tabSelector: some View {
-        HStack(spacing: 0) {
-            TabButton(title: "Summary", isSelected: selectedTab == 0) {
-                withAnimation { selectedTab = 0 }
-            }
-            TabButton(title: "Transcript", isSelected: selectedTab == 1) {
-                withAnimation { selectedTab = 1 }
-            }
-            TabButton(title: "AI", isSelected: selectedTab == 2) {
-                withAnimation { selectedTab = 2 }
-            }
-        }
-        .background(Color.platformBackground)
-    }
-
-    // MARK: - Summary Tab
-    private var summaryTab: some View {
-        ScrollView {
-            ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll", isActive: selectedTab == 0)
-            VStack(alignment: .leading, spacing: 16) {
-                // Show translated description if available
-                if let translated = viewModel.translatedDescription {
-                    VStack(alignment: .leading, spacing: 12) {
-                        // Translated text
-                        Text(translated)
-                            .font(.body)
-                            .textSelection(.enabled)
-
-                        Divider()
-
-                        // Original description (collapsed by default)
-                        DisclosureGroup("Original") {
-                            viewModel.descriptionView
-                                .textSelection(.enabled)
-                        }
-                        .foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal)
-                } else {
-                    // Original description only
-                    viewModel.descriptionView
-                        .textSelection(.enabled)
-                        .padding(.horizontal)
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                TabButton(title: "Summary", isSelected: selectedTab == 0) {
+                    withAnimation { selectedTab = 0 }
+                }
+                TabButton(title: "Transcript", isSelected: selectedTab == 1) {
+                    withAnimation { selectedTab = 1 }
+                }
+                TabButton(title: "AI", isSelected: selectedTab == 2) {
+                    withAnimation { selectedTab = 2 }
                 }
             }
-            .padding(.vertical)
+            Divider()
         }
     }
 
-    // MARK: - Transcript Tab (FIXED)
-    private var transcriptTab: some View {
+    // MARK: - Summary Content (no ScrollView - parent provides scrolling)
+    private var summaryContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Show translated description if available
+            if let translated = viewModel.translatedDescription {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Translated text
+                    Text(translated)
+                        .font(.body)
+                        .textSelection(.enabled)
+
+                    Divider()
+
+                    // Original description (collapsed by default)
+                    DisclosureGroup("Original") {
+                        viewModel.descriptionView
+                            .textSelection(.enabled)
+                    }
+                    .foregroundColor(.secondary)
+                }
+                .padding(.horizontal)
+            } else {
+                // Original description only
+                viewModel.descriptionView
+                    .textSelection(.enabled)
+                    .padding(.horizontal)
+            }
+        }
+        .padding(.vertical)
+    }
+
+    // MARK: - Transcript Content (no ScrollView wrapper - parent provides scrolling)
+    private var transcriptContent: some View {
         VStack(spacing: 0) {
             if viewModel.hasTranscript && !viewModel.isTranscriptProcessing {
                 // Case 1: Transcript exists and we are idle - show live captions
-                liveCaptionsView
+                liveCaptionsContent
             } else {
-                // Case 2: Processing or no transcript - wrap in ScrollView for consistent layout
-                ScrollView {
-                    ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll", isActive: selectedTab == 1)
-                    transcriptStatusSection
-                        .padding(.vertical)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                // Case 2: Processing or no transcript
+                transcriptStatusSection
+                    .padding(.vertical)
+                    .frame(maxWidth: .infinity)
             }
         }
         .task(id: playbackTimerActive) {
@@ -744,35 +608,23 @@ struct EpisodeDetailView: View {
         }
     }
 
-    // MARK: - Live Captions View (Apple Podcasts Style - Flowing Text)
-    private var liveCaptionsView: some View {
+    // MARK: - Live Captions Content (Apple Podcasts Style - Flowing Text)
+    private var liveCaptionsContent: some View {
         VStack(spacing: 0) {
             // Compact header with search and menu
             transcriptHeader
 
-            // Flowing transcript content
-            ScrollViewReader { proxy in
-                ScrollView {
-                    ScrollOffsetReader(coordinateSpace: "EpisodeDetailScroll", isActive: selectedTab == 1)
-                    FlowingTranscriptView(
-                        segments: viewModel.filteredTranscriptSegments,
-                        currentTime: viewModel.isPlayingThisEpisode ? viewModel.audioManager.currentTime : nil,
-                        searchQuery: viewModel.transcriptSearchQuery,
-                        onSegmentTap: { segment in
-                            viewModel.seekToSegment(segment)
-                        }
-                    )
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
+            // Flowing transcript content (no ScrollView - parent provides scrolling)
+            FlowingTranscriptView(
+                segments: viewModel.filteredTranscriptSegments,
+                currentTime: viewModel.isPlayingThisEpisode ? viewModel.audioManager.currentTime : nil,
+                searchQuery: viewModel.transcriptSearchQuery,
+                onSegmentTap: { segment in
+                    viewModel.seekToSegment(segment)
                 }
-                .onChange(of: viewModel.currentSegmentId) { _, newId in
-                    if let id = newId, viewModel.transcriptSearchQuery.isEmpty {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            proxy.scrollTo("segment-\(id)", anchor: .center)
-                        }
-                    }
-                }
-            }
+            )
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
         }
     }
 
@@ -803,9 +655,9 @@ struct EpisodeDetailView: View {
             .background(Color.platformSystemGray6)
             .cornerRadius(10)
 
-            // Translate button with circular progress
+            // Translate button with circular progress - shows language picker
             Button {
-                viewModel.translateTranscript()
+                showTranslationLanguagePicker = true
             } label: {
                 if viewModel.translationStatus.isTranslating {
                     TranslationProgressCircle(status: viewModel.translationStatus)
@@ -1019,10 +871,6 @@ struct EpisodeDetailView: View {
         .padding(.horizontal)
     }
 
-    // MARK: - AI Tab (reuse EpisodeAIAnalysisView)
-    private var aiTab: some View {
-        EpisodeAIAnalysisView(viewModel: viewModel, isActive: selectedTab == 2)
-    }
 }
 
 // MARK: - Translation Progress Circle

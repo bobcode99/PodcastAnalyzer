@@ -125,6 +125,10 @@ final class EpisodeDetailViewModel {
   var episodeTitleTranslationTrigger: Bool = false  // Toggle to trigger title translation
   var podcastTitleTranslationTrigger: Bool = false  // Toggle to trigger podcast title translation
 
+  // Translation language selection
+  var selectedTranslationLanguage: TranslationTargetLanguage?  // Language selected for translation
+  var availableTranslationLanguages: Set<String> = []  // Cached language codes
+
   @ObservationIgnored
   private let translationService = TranslationService.shared
 
@@ -621,6 +625,61 @@ final class EpisodeDetailViewModel {
 
   // MARK: - Transcript Translation
 
+  /// Translate to a specific language (called from language picker)
+  func translateTo(_ language: TranslationTargetLanguage) {
+    // Store the selected language for the translation triggers to use
+    selectedTranslationLanguage = language
+    let targetLang = language.languageIdentifier
+
+    logger.debug("Translate requested to: \(language.displayName) (\(targetLang))")
+
+    guard !transcriptSegments.isEmpty else {
+      logger.warning("No transcript segments to translate")
+      return
+    }
+
+    Task {
+      // Try to load existing translation first
+      if let translated = await translationService.loadExistingTranslation(
+        segments: transcriptSegments,
+        episodeTitle: episode.title,
+        podcastTitle: podcastTitle,
+        targetLanguage: targetLang
+      ) {
+        await MainActor.run {
+          self.transcriptSegments = translated
+          self.translationStatus = .completed
+          logger.info("Loaded cached translation for \(self.episode.title) in \(language.displayName)")
+        }
+        return
+      }
+
+      // No cached translation, trigger the translation tasks
+      await MainActor.run {
+        self.translationStatus = .preparingSession
+        self.transcriptTranslationTrigger.toggle()
+        self.descriptionTranslationTrigger.toggle()
+        self.episodeTitleTranslationTrigger.toggle()
+        self.podcastTitleTranslationTrigger.toggle()
+      }
+    }
+  }
+
+  /// Check which translation languages are available (cached)
+  func checkAvailableTranslations() {
+    Task {
+      let available = await fileStorage.listAvailableTranslations(
+        for: episode.title,
+        podcastTitle: podcastTitle
+      )
+
+      await MainActor.run {
+        self.availableTranslationLanguages = available
+        logger.info("Found \(available.count) cached translations: \(available)")
+      }
+    }
+  }
+
   /// Trigger transcript translation using Apple's Translation framework
   func translateTranscript() {
     guard !transcriptSegments.isEmpty else {
@@ -628,9 +687,8 @@ final class EpisodeDetailViewModel {
       return
     }
 
-    // Check if translations already exist
-    let settings = SubtitleSettingsManager.shared
-    let targetLang = settings.targetLanguage.languageIdentifier
+    // Use selected language or fall back to settings default
+    let targetLang = (selectedTranslationLanguage ?? subtitleSettings.targetLanguage).languageIdentifier
 
     Task {
       // Try to load existing translation first
@@ -695,9 +753,10 @@ final class EpisodeDetailViewModel {
       }
     }
 
-    // Save translated segments
-    let settings = await MainActor.run { SubtitleSettingsManager.shared }
-    let targetLang = settings.targetLanguage.languageIdentifier
+    // Save translated segments using selected language or settings default
+    let targetLang = await MainActor.run {
+      (self.selectedTranslationLanguage ?? self.subtitleSettings.targetLanguage).languageIdentifier
+    }
 
     do {
       try await translationService.saveTranslatedSRT(
@@ -713,6 +772,8 @@ final class EpisodeDetailViewModel {
     await MainActor.run {
       self.transcriptSegments = translatedSegments
       self.translationStatus = .completed
+      // Update available translations
+      self.availableTranslationLanguages.insert(targetLang)
     }
 
     logger.info("Completed translation for \(self.episode.title)")

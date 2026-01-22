@@ -565,6 +565,65 @@ actor FileStorageManager {
     }
   }
 
+  /// Lists all available translation language codes for an episode
+  /// Returns a Set of language codes (e.g., "zh-Hant", "ja", "es")
+  func listAvailableTranslations(
+    for episodeTitle: String,
+    podcastTitle: String
+  ) -> Set<String> {
+    let sanitized = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
+
+    guard fileManager.fileExists(atPath: captionsDirectory.path) else {
+      return []
+    }
+
+    do {
+      let contents = try fileManager.contentsOfDirectory(
+        at: captionsDirectory,
+        includingPropertiesForKeys: nil
+      )
+
+      var languageCodes: Set<String> = []
+
+      // Pattern: {sanitized}_{langCode}.srt
+      // We need to find files that match this pattern and extract the language code
+      let prefix = sanitized + "_"
+      let suffix = ".srt"
+
+      for fileURL in contents {
+        let fileName = fileURL.lastPathComponent
+
+        // Skip the original caption file (no language suffix)
+        if fileName == sanitized + ".srt" {
+          continue
+        }
+
+        // Check if this is a translated caption file for this episode
+        if fileName.hasPrefix(prefix) && fileName.hasSuffix(suffix) {
+          // Extract the language code
+          // Remove prefix and suffix to get language code
+          var langPart = fileName
+          langPart.removeFirst(prefix.count)
+          langPart.removeLast(suffix.count)
+
+          // Skip word timings file pattern
+          if langPart == "wordtimings" {
+            continue
+          }
+
+          // Convert underscore back to hyphen for standard language codes
+          let langCode = langPart.replacingOccurrences(of: "_", with: "-")
+          languageCodes.insert(langCode)
+        }
+      }
+
+      return languageCodes
+    } catch {
+      logger.error("Failed to list available translations: \(error.localizedDescription)")
+      return []
+    }
+  }
+
   // MARK: - Storage Info
 
   /// Gets total size of stored audio files
