@@ -307,7 +307,7 @@ public actor TranscriptService {
   }
 
   /// Transcription progress update
-  public struct TranscriptionProgress {
+  public struct TranscriptionProgress: Sendable {
     public let progress: Double  // 0.0 to 1.0
     public let currentTimeSeconds: TimeInterval
     public let totalDurationSeconds: TimeInterval

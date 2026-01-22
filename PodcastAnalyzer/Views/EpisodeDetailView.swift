@@ -6,7 +6,6 @@
 //  Fixed: Memory leaks from static timer and proper cleanup on macOS
 //
 
-import Combine
 import Foundation
 import SwiftData
 import SwiftUI
@@ -32,8 +31,8 @@ struct EpisodeDetailView: View {
     @State private var showCopySuccess = false
     @State private var showDeleteConfirmation = false
 
-    // Timer subscription for transcript highlighting during playback
-    @State private var playbackTimerCancellable: AnyCancellable?
+    // Timer state for transcript highlighting during playback (managed by .task modifier)
+    @State private var playbackTimerActive = false
 
     init(
         episode: PodcastEpisodeInfo,
@@ -57,7 +56,7 @@ struct EpisodeDetailView: View {
         // Try to find the podcast model in SwiftData
         let title = viewModel.podcastTitle
         let descriptor = FetchDescriptor<PodcastInfoModel>(
-            predicate: #Predicate { $0.podcastInfo.title == title }
+            predicate: #Predicate { $0.title == title }
         )
         if let podcastModel = try? modelContext.fetch(descriptor).first {
             EpisodeListView(podcastModel: podcastModel)
@@ -160,8 +159,9 @@ struct EpisodeDetailView: View {
             viewModel.checkTranscriptStatus()
         }
         .onDisappear {
-            // Clean up timer and subscriptions to prevent memory leaks
-            stopPlaybackTimer()
+            // Clean up subscriptions to prevent memory leaks
+            // Timer is automatically cancelled by .task modifier when view disappears
+            playbackTimerActive = false
             viewModel.cleanup()
         }
     }
@@ -443,32 +443,21 @@ struct EpisodeDetailView: View {
                 }
             }
         }
+        .task(id: playbackTimerActive) {
+            // Task-based timer for playback updates - automatically cancelled when view disappears
+            guard playbackTimerActive else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled, viewModel.isPlayingThisEpisode else { continue }
+                // The view updates automatically via @Observable
+            }
+        }
         .onAppear {
-            startPlaybackTimer()
+            playbackTimerActive = true
         }
         .onDisappear {
-            stopPlaybackTimer()
+            playbackTimerActive = false
         }
-    }
-
-    // MARK: - Timer Management (Instance-level, properly managed)
-
-    private func startPlaybackTimer() {
-        // Only start if not already running
-        guard playbackTimerCancellable == nil else { return }
-
-        playbackTimerCancellable = Timer.publish(every: 0.5, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak viewModel] _ in
-                // This closure captures viewModel weakly to prevent retain cycle
-                guard let vm = viewModel, vm.isPlayingThisEpisode else { return }
-                // The view will update automatically via @Observable
-            }
-    }
-
-    private func stopPlaybackTimer() {
-        playbackTimerCancellable?.cancel()
-        playbackTimerCancellable = nil
     }
 
     // MARK: - Live Captions View (Redesigned - Clean Full Page)

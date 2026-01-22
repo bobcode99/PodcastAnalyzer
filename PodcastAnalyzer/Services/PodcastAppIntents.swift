@@ -16,8 +16,8 @@ import SwiftData
 /// Accepts combined text with RSS URLs and subscribes to all podcasts
 @available(iOS 16.0, macOS 13.0, *)
 struct ImportPodcastsIntent: AppIntent {
-    static var title: LocalizedStringResource = "Import Podcasts from List"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Import Podcasts from List"
+    static let description = IntentDescription(
         "Import and subscribe to podcasts from an Apple Podcasts export list. Pass the combined text containing RSS feed URLs."
     )
 
@@ -29,7 +29,7 @@ struct ImportPodcastsIntent: AppIntent {
     }
 
     // Opens the app when this intent runs
-    static var openAppWhenRun: Bool = true
+    static let openAppWhenRun: Bool = true
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
@@ -87,8 +87,8 @@ struct ImportPodcastsIntent: AppIntent {
 /// Users can create a Shortcut with Apple Intelligence actions and connect it here
 @available(iOS 16.0, macOS 13.0, *)
 struct AnalyzeTranscriptIntent: AppIntent {
-    static var title: LocalizedStringResource = "Analyze Podcast Transcript"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Analyze Podcast Transcript"
+    static let description = IntentDescription(
         "Analyze a podcast transcript using AI. Connect this to an Apple Intelligence action in Shortcuts."
     )
 
@@ -219,8 +219,8 @@ struct AnalyzeTranscriptIntent: AppIntent {
 /// Intent to get the current episode's transcript for use in Shortcuts
 @available(iOS 16.0, macOS 13.0, *)
 struct GetCurrentTranscriptIntent: AppIntent {
-    static var title: LocalizedStringResource = "Get Current Transcript"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Get Current Transcript"
+    static let description = IntentDescription(
         "Get the transcript of the currently playing podcast episode"
     )
 
@@ -279,8 +279,8 @@ struct GetCurrentTranscriptIntent: AppIntent {
 /// Intent to receive analysis results back from Shortcuts
 @available(iOS 16.0, macOS 13.0, *)
 struct SaveAnalysisResultIntent: AppIntent {
-    static var title: LocalizedStringResource = "Save Analysis Result"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Save Analysis Result"
+    static let description = IntentDescription(
         "Save the AI analysis result back to the podcast episode"
     )
 
@@ -316,7 +316,7 @@ struct SaveAnalysisResultIntent: AppIntent {
 
 // MARK: - Analysis Type Entity
 
-enum ShortcutAnalysisType: String, Codable, CaseIterable {
+enum ShortcutAnalysisType: String, Codable, CaseIterable, Sendable {
     case summary = "Summary"
     case highlights = "Highlights"
     case entities = "Entities"
@@ -325,7 +325,7 @@ enum ShortcutAnalysisType: String, Codable, CaseIterable {
 }
 
 @available(iOS 16.0, macOS 13.0, *)
-struct AnalysisTypeEntity: AppEntity {
+struct AnalysisTypeEntity: AppEntity, Sendable {
     var id: String { type.rawValue }
     var type: ShortcutAnalysisType
 
@@ -337,7 +337,7 @@ struct AnalysisTypeEntity: AppEntity {
         DisplayRepresentation(title: "\(type.rawValue)")
     }
 
-    static var defaultQuery = AnalysisTypeQuery()
+    static var defaultQuery: AnalysisTypeQuery { AnalysisTypeQuery() }
 
     init(type: ShortcutAnalysisType) {
         self.type = type

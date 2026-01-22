@@ -87,3 +87,4 @@ iOSInjectionProject/
 *.xcodeproj/
 
 buildServer.json
+*.txt

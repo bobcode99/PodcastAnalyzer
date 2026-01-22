@@ -411,7 +411,7 @@ final class CloudAIService {
         podcastTitle: String,
         analysisType: CloudAnalysisType,
         podcastLanguage: String? = nil,
-        progressCallback: ((String, Double) -> Void)? = nil
+        progressCallback: (@Sendable (String, Double) -> Void)? = nil
     ) async throws -> CloudAnalysisResult {
         progressCallback?("Starting Shortcuts analysis...", 0.2)
 
@@ -546,7 +546,7 @@ final class CloudAIService {
         transcript: String,
         episodeTitle: String,
         podcastLanguage: String? = nil,
-        progressCallback: ((String, Double) -> Void)? = nil
+        progressCallback: (@Sendable (String, Double) -> Void)? = nil
     ) async throws -> CloudQAResult {
         progressCallback?("Preparing question for Shortcuts...", 0.2)
 
@@ -741,7 +741,7 @@ final class CloudAIService {
         analysisType: CloudAnalysisType,
         podcastLanguage: String? = nil,
         onChunk: @escaping (String) -> Void,
-        progressCallback: ((String, Double) -> Void)? = nil
+        progressCallback: (@Sendable (String, Double) -> Void)? = nil
     ) async throws -> CloudAnalysisResult {
         let provider = settings.selectedProvider
         let apiKey = settings.currentAPIKey
@@ -841,7 +841,7 @@ final class CloudAIService {
         podcastTitle: String,
         analysisType: CloudAnalysisType,
         podcastLanguage: String? = nil,
-        progressCallback: ((String, Double) -> Void)? = nil
+        progressCallback: (@Sendable (String, Double) -> Void)? = nil
     ) async throws -> CloudAnalysisResult {
         let provider = settings.selectedProvider
         let apiKey = settings.currentAPIKey
@@ -938,7 +938,7 @@ final class CloudAIService {
         transcript: String,
         episodeTitle: String,
         podcastLanguage: String? = nil,
-        progressCallback: ((String, Double) -> Void)? = nil
+        progressCallback: (@Sendable (String, Double) -> Void)? = nil
     ) async throws -> CloudQAResult {
         let provider = settings.selectedProvider
         let apiKey = settings.currentAPIKey
@@ -1659,7 +1659,7 @@ struct CloudAnalysisResult {
     }
 }
 
-struct CloudQAResult {
+struct CloudQAResult: Sendable {
     let question: String
     let answer: String
     let confidence: String
@@ -1671,7 +1671,7 @@ struct CloudQAResult {
     /// Warning message when JSON parsing fails
     let jsonParseWarning: String?
 
-    init(
+    nonisolated init(
         question: String,
         answer: String,
         confidence: String = "unknown",
