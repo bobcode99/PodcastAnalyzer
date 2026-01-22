@@ -163,87 +163,16 @@ struct ExpandedPlayerView: View {
 
   // MARK: - Transcript Preview Section
   private var transcriptPreviewSection: some View {
-    VStack(spacing: 12) {
-      // Header
-      HStack {
-        HStack(spacing: 6) {
-          Image(systemName: "captions.bubble.fill")
-            .foregroundColor(.purple)
-          Text("Transcript")
-            .font(.headline)
-        }
-
-        Spacer()
-
-        Button(action: { showFullTranscript = true }) {
-          HStack(spacing: 4) {
-            Text("Expand")
-              .font(.subheadline)
-            Image(systemName: "arrow.up.left.and.arrow.down.right")
-              .font(.caption)
-          }
-          .foregroundColor(.blue)
-        }
-      }
-      .padding(.horizontal, 20)
-
-      // Current segment highlight
-      if let currentText = viewModel.currentSegmentText {
-        Text(currentText)
-          .font(.body)
-          .foregroundColor(.primary)
-          .multilineTextAlignment(.center)
-          .padding(.horizontal, 20)
-          .padding(.vertical, 12)
-          .frame(maxWidth: .infinity)
-          .background(Color.blue.opacity(0.1))
-          .cornerRadius(12)
-          .padding(.horizontal, 16)
-      }
-
-      // Preview of segments (show 3 upcoming)
-      VStack(spacing: 0) {
-        ForEach(getPreviewSegments(), id: \.id) { segment in
-          Button(action: { viewModel.seekToSegment(segment) }) {
-            HStack(alignment: .top, spacing: 10) {
-              Text(segment.formattedStartTime)
-                .font(.caption)
-                .foregroundColor(.blue)
-                .frame(width: 50, alignment: .leading)
-
-              Text(segment.text)
-                .font(.subheadline)
-                .foregroundColor(viewModel.currentSegmentId == segment.id ? .primary : .secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(
-              viewModel.currentSegmentId == segment.id
-                ? Color.blue.opacity(0.15)
-                : Color.clear
-            )
-          }
-          .buttonStyle(.plain)
-        }
-      }
-      .background(Color.platformSystemGray6)
-      .cornerRadius(12)
-      .padding(.horizontal, 16)
-    }
-  }
-
-  private func getPreviewSegments() -> [TranscriptSegment] {
-    let segments = viewModel.transcriptSegments
-    guard !segments.isEmpty else { return [] }
-
-    let currentId = viewModel.currentSegmentId ?? 0
-    let startIndex = max(0, currentId - 1)
-    let endIndex = min(segments.count, startIndex + 4)
-
-    return Array(segments[startIndex..<endIndex])
+    TranscriptPreviewView(
+      segments: viewModel.transcriptSegments,
+      currentSegmentId: viewModel.currentSegmentId,
+      currentTime: viewModel.currentTime,
+      onSegmentTap: { segment in
+        viewModel.seekToSegment(segment)
+      },
+      onExpandTap: { showFullTranscript = true },
+      previewCount: 4
+    )
   }
 
   // MARK: - Artwork Section
@@ -944,61 +873,25 @@ struct TranscriptFullScreenView: View {
   var body: some View {
     NavigationStack {
       VStack(spacing: 0) {
-        // Search bar
-        HStack {
-          Image(systemName: "magnifyingglass")
-            .foregroundColor(.secondary)
-            .font(.system(size: 14))
-          TextField(
-            "Search transcript...",
-            text: $viewModel.transcriptSearchQuery
-          )
-          .textFieldStyle(.plain)
-          .font(.subheadline)
-          if !viewModel.transcriptSearchQuery.isEmpty {
-            Button(action: { viewModel.transcriptSearchQuery = "" }) {
-              Image(systemName: "xmark.circle.fill")
-                .foregroundColor(.secondary)
-                .font(.system(size: 14))
-            }
-          }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color.platformSystemGray6)
-        .cornerRadius(10)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-
         // Mini player bar
         miniPlayerBar
           .padding(.horizontal, 16)
+          .padding(.top, 10)
           .padding(.bottom, 8)
 
         Divider()
 
-        // Transcript segments - using FlowingTranscriptView
-        ScrollViewReader { proxy in
-          ScrollView {
-            FlowingTranscriptView(
-              segments: viewModel.filteredTranscriptSegments,
-              currentTime: viewModel.isPlaying ? viewModel.currentTime : nil,
-              searchQuery: viewModel.transcriptSearchQuery,
-              onSegmentTap: { segment in
-                viewModel.seekToSegment(segment)
-              }
-            )
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+        // Transcript content with search and flowing view
+        FullTranscriptContent(
+          segments: viewModel.transcriptSegments,
+          currentSegmentId: viewModel.currentSegmentId,
+          currentTime: viewModel.isPlaying ? viewModel.currentTime : nil,
+          searchQuery: $viewModel.transcriptSearchQuery,
+          filteredSegments: viewModel.filteredTranscriptSegments,
+          onSegmentTap: { segment in
+            viewModel.seekToSegment(segment)
           }
-          .onChange(of: viewModel.currentSegmentId) { _, newId in
-            if let id = newId, viewModel.transcriptSearchQuery.isEmpty {
-              withAnimation(.easeInOut(duration: 0.3)) {
-                proxy.scrollTo("segment-\(id)", anchor: .center)
-              }
-            }
-          }
-        }
+        )
       }
       .navigationTitle("Transcript")
       #if os(iOS)
