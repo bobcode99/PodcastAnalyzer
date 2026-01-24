@@ -241,9 +241,15 @@ final class EpisodeDetailViewModel {
 
   // MARK: - Playback State
 
-  var isPlayingThisEpisode: Bool {
+  /// Check if this episode is the current one loaded in audio manager (regardless of play state)
+  var isCurrentEpisode: Bool {
     guard let currentEpisode = audioManager.currentEpisode else { return false }
     return currentEpisode.title == episode.title && currentEpisode.podcastTitle == podcastTitle
+  }
+
+  /// Check if this episode is currently playing
+  var isPlayingThisEpisode: Bool {
+    isCurrentEpisode && audioManager.isPlaying
   }
 
   var currentTime: TimeInterval {

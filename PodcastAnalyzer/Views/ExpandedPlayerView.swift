@@ -16,8 +16,6 @@ struct ExpandedPlayerView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.modelContext) private var modelContext
   @State private var viewModel = ExpandedPlayerViewModel()
-  @State private var showEpisodeDetail = false
-  @State private var showPodcastEpisodeList = false
   @State private var showSpeedPicker = false
   @State private var showQueue = false
   @State private var showEllipsisMenu = false
@@ -30,6 +28,10 @@ struct ExpandedPlayerView: View {
   // Speed options matching Apple Podcasts
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
   private let quickSpeeds: [Float] = [0.8, 1.0, 1.3, 1.5, 1.8, 2.0]
+
+  // Navigation callbacks - dismiss sheet first, then navigate in parent
+  var onNavigateToEpisodeDetail: ((PodcastEpisodeInfo, String, String?) -> Void)?
+  var onNavigateToPodcast: ((PodcastInfoModel) -> Void)?
 
   var body: some View {
     NavigationStack {
@@ -127,28 +129,6 @@ struct ExpandedPlayerView: View {
           .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
       }
-      .navigationDestination(isPresented: $showEpisodeDetail) {
-        if let episode = viewModel.currentEpisode {
-          EpisodeDetailView(
-            episode: PodcastEpisodeInfo(
-              title: episode.title,
-              podcastEpisodeDescription: episode.episodeDescription,
-              pubDate: episode.pubDate,
-              audioURL: episode.audioURL,
-              imageURL: episode.imageURL,
-              duration: episode.duration,
-              guid: episode.guid
-            ),
-            podcastTitle: episode.podcastTitle,
-            fallbackImageURL: episode.imageURL
-          )
-        }
-      }
-      .navigationDestination(isPresented: $showPodcastEpisodeList) {
-        if let podcastModel = viewModel.podcastModel {
-          EpisodeListView(podcastModel: podcastModel)
-        }
-      }
       .onAppear {
         viewModel.setModelContext(modelContext)
       }
@@ -232,8 +212,8 @@ struct ExpandedPlayerView: View {
             .multilineTextAlignment(.center)
             .foregroundColor(.primary)
 
-          // Podcast name button
-          Button(action: { showPodcastEpisodeList = true }) {
+          // Podcast name button - navigates to show's episode list
+          Button(action: { navigateToPodcast() }) {
             Text(viewModel.podcastTitle)
               .font(.subheadline)
               .fontWeight(.medium)
@@ -304,11 +284,11 @@ struct ExpandedPlayerView: View {
 
     // SECTION 3: Navigation & Info
     Section {
-      Button(action: { showEpisodeDetail = true }) {
+      Button(action: { navigateToEpisodeDetail() }) {
         Label("View Episode Description", systemImage: "doc.text")
       }
 
-      Button(action: { showPodcastEpisodeList = true }) {
+      Button(action: { navigateToPodcast() }) {
         Label("Go to Show", systemImage: "square.stack")
       }
     }
@@ -482,7 +462,7 @@ struct ExpandedPlayerView: View {
       Spacer()
 
       // Transcript button - go to episode detail
-      Button(action: { showEpisodeDetail = true }) {
+      Button(action: { navigateToEpisodeDetail() }) {
         HStack(spacing: 4) {
           Image(systemName: "text.bubble")
           Text("Detail")
@@ -522,6 +502,31 @@ struct ExpandedPlayerView: View {
     } else {
       return String(format: "%.2gx", speed)
     }
+  }
+
+  // MARK: - Navigation Helpers
+
+  /// Navigate to episode detail - dismisses sheet first, then triggers callback
+  private func navigateToEpisodeDetail() {
+    guard let episode = viewModel.currentEpisode else { return }
+    let episodeInfo = PodcastEpisodeInfo(
+      title: episode.title,
+      podcastEpisodeDescription: episode.episodeDescription,
+      pubDate: episode.pubDate,
+      audioURL: episode.audioURL,
+      imageURL: episode.imageURL,
+      duration: episode.duration,
+      guid: episode.guid
+    )
+    dismiss()
+    onNavigateToEpisodeDetail?(episodeInfo, episode.podcastTitle, episode.imageURL)
+  }
+
+  /// Navigate to podcast episode list - dismisses sheet first, then triggers callback
+  private func navigateToPodcast() {
+    guard let podcastModel = viewModel.podcastModel else { return }
+    dismiss()
+    onNavigateToPodcast?(podcastModel)
   }
 }
 

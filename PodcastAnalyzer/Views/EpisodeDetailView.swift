@@ -43,6 +43,7 @@ struct EpisodeDetailView: View {
 
     // Timer state for transcript highlighting during playback (managed by .task modifier)
     @State private var playbackTimerActive = false
+    @State private var currentPlaybackTime: TimeInterval = 0
 
     // Translation configuration for .translationTask
     @State private var transcriptTranslationConfig: TranslationSession.Configuration?
@@ -595,13 +596,22 @@ struct EpisodeDetailView: View {
             // Task-based timer for playback updates - automatically cancelled when view disappears
             guard playbackTimerActive else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(500))
-                guard !Task.isCancelled, viewModel.isPlayingThisEpisode else { continue }
-                // The view updates automatically via @Observable
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { break }
+                // Always update when this episode is current (playing or paused)
+                if viewModel.isCurrentEpisode {
+                    await MainActor.run {
+                        currentPlaybackTime = viewModel.audioManager.currentTime
+                    }
+                }
             }
         }
         .onAppear {
             playbackTimerActive = true
+            // Initialize immediately to avoid delay
+            if viewModel.isCurrentEpisode {
+                currentPlaybackTime = viewModel.audioManager.currentTime
+            }
         }
         .onDisappear {
             playbackTimerActive = false
@@ -615,9 +625,10 @@ struct EpisodeDetailView: View {
             transcriptHeader
 
             // Flowing transcript content (no ScrollView - parent provides scrolling)
+            // Always pass currentTime when this is the current episode (like ExpandedPlayerView)
             FlowingTranscriptView(
                 segments: viewModel.filteredTranscriptSegments,
-                currentTime: viewModel.isPlayingThisEpisode ? viewModel.audioManager.currentTime : nil,
+                currentTime: viewModel.isCurrentEpisode ? currentPlaybackTime : nil,
                 searchQuery: viewModel.transcriptSearchQuery,
                 onSegmentTap: { segment in
                     viewModel.seekToSegment(segment)

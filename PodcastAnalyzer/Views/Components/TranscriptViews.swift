@@ -2,11 +2,103 @@
 //  TranscriptViews.swift
 //  PodcastAnalyzer
 //
-//  Shared transcript display components for flowing sentence-based layout
-//  with segment-level highlighting (word-level highlighting optional when timings available)
+//  Shared transcript display components with sentence-based layout
+//  and segment-level highlighting within sentences.
+//
+//  Architecture:
+//  - Segments are grouped into Sentences (until sentence-ending punctuation)
+//  - Each sentence is displayed as one visual block
+//  - Within a sentence, the currently playing segment is highlighted
+//  - Optional: Word-level highlighting when accurate wordTimings exist
 //
 
 import SwiftUI
+
+// MARK: - Transcript Sentence Model
+
+/// A sentence composed of multiple transcript segments
+/// Segments are grouped until a sentence-ending punctuation is found
+struct TranscriptSentence: Identifiable {
+    let id: Int
+    let segments: [TranscriptSegment]
+
+    /// Start time of the first segment
+    var startTime: TimeInterval {
+        segments.first?.startTime ?? 0
+    }
+
+    /// End time of the last segment
+    var endTime: TimeInterval {
+        segments.last?.endTime ?? 0
+    }
+
+    /// Combined text of all segments (with proper spacing)
+    var text: String {
+        segments.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+    }
+
+    /// Combined translated text (if available)
+    var translatedText: String? {
+        let translations = segments.compactMap { $0.translatedText?.trimmingCharacters(in: .whitespaces) }
+        guard translations.count == segments.count else { return nil }
+        return translations.joined(separator: " ")
+    }
+
+    /// Formatted start time string
+    var formattedStartTime: String {
+        segments.first?.formattedStartTime ?? "0:00"
+    }
+
+    /// Check if a given time falls within this sentence
+    func containsTime(_ time: TimeInterval) -> Bool {
+        time >= startTime && time <= endTime
+    }
+
+    /// Find the segment that contains the given time
+    /// Returns nil if time is in a gap between segments
+    func activeSegment(at time: TimeInterval) -> TranscriptSegment? {
+        segments.first { time >= $0.startTime && time <= $0.endTime }
+    }
+}
+
+// MARK: - Sentence Grouping Utilities
+
+enum TranscriptGrouping {
+    /// Sentence-ending punctuation marks (English and CJK)
+    private static let sentenceEndings: Set<Character> = [".", "!", "?", "。", "！", "？"]
+
+    /// Check if text ends with a sentence-ending punctuation
+    static func isSentenceEnd(_ text: String) -> Bool {
+        guard let lastChar = text.trimmingCharacters(in: .whitespaces).last else { return false }
+        return sentenceEndings.contains(lastChar)
+    }
+
+    /// Group segments into sentences
+    /// Segments are accumulated until a segment ending with sentence punctuation is found
+    static func groupIntoSentences(_ segments: [TranscriptSegment]) -> [TranscriptSentence] {
+        var sentences: [TranscriptSentence] = []
+        var currentGroup: [TranscriptSegment] = []
+        var sentenceId = 0
+
+        for segment in segments {
+            currentGroup.append(segment)
+
+            // Check if this segment ends the sentence
+            if isSentenceEnd(segment.text) {
+                sentences.append(TranscriptSentence(id: sentenceId, segments: currentGroup))
+                sentenceId += 1
+                currentGroup = []
+            }
+        }
+
+        // Add any remaining segments as the last sentence
+        if !currentGroup.isEmpty {
+            sentences.append(TranscriptSentence(id: sentenceId, segments: currentGroup))
+        }
+
+        return sentences
+    }
+}
 
 // MARK: - CJK Text Utilities
 
@@ -39,10 +131,8 @@ enum CJKTextUtils {
     /// Tokenize text appropriately for CJK (character-by-character) or non-CJK (word-by-word)
     static func tokenize(_ text: String) -> [String] {
         if containsCJK(text) {
-            // For CJK text, split by character (excluding whitespace tokens)
             return text.map { String($0) }.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         } else {
-            // For non-CJK text, split by words
             return text.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
         }
     }
@@ -75,7 +165,7 @@ struct SearchHighlightedText: View {
                 result.append(AttributedString(String(text[beforeRange])))
             }
 
-            // Add highlighted match (use original case)
+            // Add highlighted match
             let originalRange = Range(uncheckedBounds: (
                 lower: text.index(text.startIndex, offsetBy: text.distance(from: text.startIndex, to: range.lowerBound)),
                 upper: text.index(text.startIndex, offsetBy: text.distance(from: text.startIndex, to: range.upperBound))
@@ -97,11 +187,11 @@ struct SearchHighlightedText: View {
     }
 }
 
-// MARK: - Flowing Transcript View (Segment-Based Highlighting)
+// MARK: - Sentence-Based Transcript View (NEW - Primary View)
 
-/// A flowing paragraph-style transcript view with segment-level highlighting
-/// Word-level highlighting is optional and only used when accurate word timings are available
-struct FlowingTranscriptView: View {
+/// Displays transcript as sentences with segment-level highlighting within each sentence
+/// This is the main transcript view used by EpisodeDetailView and ExpandedPlayerView
+struct SentenceBasedTranscriptView: View {
     let segments: [TranscriptSegment]
     let currentTime: TimeInterval?
     let searchQuery: String
@@ -110,74 +200,85 @@ struct FlowingTranscriptView: View {
     /// Whether to show timestamps on the left
     var showTimestamps: Bool = false
 
-    /// Whether to attempt word-level highlighting (only effective when wordTimings exist)
+    /// Whether to enable word-level highlighting (requires wordTimings)
     var enableWordHighlighting: Bool = false
 
     @State private var settings = SubtitleSettingsManager.shared
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(segments) { segment in
-                let isCurrentSegment = isSegmentActive(segment)
+    /// Sentences grouped from segments
+    private var sentences: [TranscriptSentence] {
+        TranscriptGrouping.groupIntoSentences(segments)
+    }
 
-                FlowingSegmentText(
-                    segment: segment,
-                    isActive: isCurrentSegment,
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(sentences) { sentence in
+                SentenceView(
+                    sentence: sentence,
                     currentTime: currentTime,
                     searchQuery: searchQuery,
                     displayMode: settings.displayMode,
                     showTimestamp: showTimestamps,
                     enableWordHighlighting: enableWordHighlighting,
-                    onTap: { onSegmentTap(segment) }
+                    onSegmentTap: onSegmentTap
                 )
-                .id("segment-\(segment.id)")
+                .id("sentence-\(sentence.id)")
             }
         }
     }
-
-    private func isSegmentActive(_ segment: TranscriptSegment) -> Bool {
-        guard let time = currentTime else { return false }
-        return time >= segment.startTime && time <= segment.endTime
-    }
 }
 
-// MARK: - Flowing Segment Text
+// MARK: - Sentence View (displays one sentence with segment highlighting)
 
-/// Individual segment rendered as flowing text with segment highlighting
-/// Word-level highlighting only active when enableWordHighlighting is true AND wordTimings exist
-struct FlowingSegmentText: View {
-    let segment: TranscriptSegment
-    let isActive: Bool
+/// Displays a single sentence with individual segment highlighting
+struct SentenceView: View {
+    let sentence: TranscriptSentence
     let currentTime: TimeInterval?
     let searchQuery: String
     let displayMode: SubtitleDisplayMode
     var showTimestamp: Bool = false
     var enableWordHighlighting: Bool = false
-    let onTap: () -> Void
+    let onSegmentTap: (TranscriptSegment) -> Void
+
+    /// The currently active segment within this sentence
+    private var activeSegment: TranscriptSegment? {
+        guard let time = currentTime else { return nil }
+        return sentence.activeSegment(at: time)
+    }
+
+    /// Whether any segment in this sentence is active
+    private var isSentenceActive: Bool {
+        guard let time = currentTime else { return false }
+        return sentence.containsTime(time)
+    }
 
     var body: some View {
-        let (primary, secondary) = segment.displayText(mode: displayMode)
-
-        Button(action: onTap) {
+        Button(action: {
+            // Tap seeks to the first segment of the sentence
+            if let firstSegment = sentence.segments.first {
+                onSegmentTap(firstSegment)
+            }
+        }) {
             HStack(alignment: .top, spacing: showTimestamp ? 12 : 0) {
                 // Timestamp (optional)
                 if showTimestamp {
-                    Text(segment.formattedStartTime)
+                    Text(sentence.formattedStartTime)
                         .font(.caption)
                         .fontWeight(.medium)
-                        .foregroundColor(isActive ? .blue : .secondary)
+                        .foregroundColor(isSentenceActive ? .blue : .secondary)
                         .frame(width: 50, alignment: .leading)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    // Primary text with highlighting
-                    buildHighlightedText(primary, isPrimary: true)
-                        .font(.system(size: 17, weight: isActive ? .medium : .regular))
+                    // Primary text with segment-level highlighting
+                    buildSentenceText(isPrimary: true)
+                        .font(.system(size: 17, weight: .regular))
                         .lineSpacing(4)
 
                     // Secondary text (translation) if in dual mode
-                    if let secondaryText = secondary {
-                        buildHighlightedText(secondaryText, isPrimary: false)
+                    if let translatedText = sentence.translatedText,
+                       displayMode == .dualOriginalFirst || displayMode == .dualTranslatedFirst {
+                        Text(translatedText)
                             .font(.system(size: 15, weight: .regular))
                             .foregroundColor(.secondary)
                             .lineSpacing(3)
@@ -189,41 +290,100 @@ struct FlowingSegmentText: View {
             .padding(.horizontal, 12)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(isActive ? Color.blue.opacity(0.15) : Color.clear)
+                    .fill(isSentenceActive ? Color.blue.opacity(0.08) : Color.clear)
             )
         }
         .buttonStyle(.plain)
     }
 
+    /// Builds the sentence text with segment-level highlighting
     @ViewBuilder
-    private func buildHighlightedText(_ text: String, isPrimary: Bool) -> some View {
-        // Use word-level highlighting only if:
-        // 1. This segment is active
-        // 2. It's the primary text
-        // 3. Word highlighting is enabled
-        // 4. Word timings exist and are accurate
-        if isActive, isPrimary, enableWordHighlighting, let timings = segment.wordTimings, !timings.isEmpty {
-            WordHighlightedText(
-                text: text,
-                wordTimings: timings,
-                currentTime: currentTime,
-                searchQuery: searchQuery
-            )
-        } else if !searchQuery.isEmpty {
-            // Search highlighting only
-            SearchHighlightedText(text: text, query: searchQuery)
+    private func buildSentenceText(isPrimary: Bool) -> some View {
+        // If searching, just show search highlighting
+        if !searchQuery.isEmpty {
+            SearchHighlightedText(text: sentence.text, query: searchQuery)
         } else {
-            // Plain text with segment-level styling
-            Text(text)
-                .foregroundColor(isActive && isPrimary ? .primary : (isPrimary ? .primary : .secondary))
+            // Build text with segment highlighting
+            Text(buildSegmentHighlightedAttributedString())
         }
+    }
+
+    /// Builds an AttributedString where the active segment is highlighted
+    private func buildSegmentHighlightedAttributedString() -> AttributedString {
+        var result = AttributedString()
+        let isCJK = CJKTextUtils.containsCJK(sentence.text)
+
+        for (index, segment) in sentence.segments.enumerated() {
+            let segmentText = segment.text.trimmingCharacters(in: .whitespaces)
+            var attrText = AttributedString(segmentText)
+
+            // Check if this segment is the active one
+            let isActiveSegment = activeSegment?.id == segment.id
+
+            if isActiveSegment {
+                // Highlight the active segment
+                attrText.foregroundColor = .blue
+                attrText.font = .system(size: 17, weight: .semibold)
+                attrText.backgroundColor = Color.blue.opacity(0.15)
+            } else if let time = currentTime, time > segment.endTime {
+                // Segment already played
+                attrText.foregroundColor = .blue.opacity(0.7)
+                attrText.font = .system(size: 17, weight: .medium)
+            } else {
+                // Segment not yet played
+                attrText.foregroundColor = .primary.opacity(0.7)
+                attrText.font = .system(size: 17, weight: .regular)
+            }
+
+            result.append(attrText)
+
+            // Add space between segments (not for CJK or last segment)
+            if index < sentence.segments.count - 1 && !isCJK {
+                result.append(AttributedString(" "))
+            }
+        }
+
+        return result
     }
 }
 
-// MARK: - Word Highlighted Text (Optional - for when accurate timings exist)
+// MARK: - Legacy FlowingTranscriptView (for backward compatibility)
+
+/// A flowing paragraph-style transcript view with segment-level highlighting
+/// NOTE: Consider using SentenceBasedTranscriptView for better sentence grouping
+struct FlowingTranscriptView: View {
+    let segments: [TranscriptSegment]
+    let currentTime: TimeInterval?
+    let searchQuery: String
+    let onSegmentTap: (TranscriptSegment) -> Void
+
+    var showTimestamps: Bool = false
+    var enableWordHighlighting: Bool = false
+
+    @State private var settings = SubtitleSettingsManager.shared
+
+    var body: some View {
+        // Use the new sentence-based view
+        SentenceBasedTranscriptView(
+            segments: segments,
+            currentTime: currentTime,
+            searchQuery: searchQuery,
+            onSegmentTap: onSegmentTap,
+            showTimestamps: showTimestamps,
+            enableWordHighlighting: enableWordHighlighting
+        )
+    }
+}
+
+// MARK: - Word Highlighted Text (Optional - for accurate word timings)
 
 /// Text view with word-by-word highlighting based on playback progress
-/// Only used when accurate word timings are available from the transcription
+/// Only used when accurate word timings are available from TranscriptService
+///
+/// enableWordHighlighting conditions:
+/// 1. The segment must have wordTimings array populated
+/// 2. wordTimings must come from TranscriptService.audioToSRTWithWordTimings()
+/// 3. This is typically only accurate for on-device transcription
 struct WordHighlightedText: View {
     let text: String
     let wordTimings: [WordTiming]
@@ -238,9 +398,7 @@ struct WordHighlightedText: View {
         var result = AttributedString()
         let isCJKText = CJKTextUtils.containsCJK(text)
 
-        // Use word timings for precise highlighting
         guard let time = currentTime else {
-            // No current time - show plain text
             return AttributedString(text)
         }
 
@@ -251,28 +409,23 @@ struct WordHighlightedText: View {
             let isSpeaking = time >= timing.startTime && time < timing.endTime
 
             if isSpeaking {
-                // Currently speaking this word
                 wordAttr.foregroundColor = .blue
                 wordAttr.font = .system(size: 17, weight: .bold)
                 wordAttr.backgroundColor = Color.blue.opacity(0.2)
             } else if isSpoken {
-                // Already spoken
                 wordAttr.foregroundColor = .blue
                 wordAttr.font = .system(size: 17, weight: .semibold)
             } else {
-                // Not yet spoken
                 wordAttr.foregroundColor = .primary.opacity(0.6)
                 wordAttr.font = .system(size: 17, weight: .regular)
             }
 
-            // Apply search highlighting if applicable
             if !searchQuery.isEmpty && timing.word.lowercased().contains(searchQuery.lowercased()) {
                 wordAttr.backgroundColor = .yellow.opacity(0.4)
             }
 
             result.append(wordAttr)
 
-            // Add space after word for non-CJK text
             if !isCJKText && index < wordTimings.count - 1 {
                 result.append(AttributedString(" "))
             }
@@ -284,7 +437,7 @@ struct WordHighlightedText: View {
 
 // MARK: - Compact Transcript Preview (for ExpandedPlayerView)
 
-/// A compact preview showing current segment and a few upcoming segments
+/// A compact preview showing current sentence and nearby segments
 struct TranscriptPreviewView: View {
     let segments: [TranscriptSegment]
     let currentSegmentId: Int?
@@ -292,8 +445,24 @@ struct TranscriptPreviewView: View {
     let onSegmentTap: (TranscriptSegment) -> Void
     let onExpandTap: () -> Void
 
-    /// Number of segments to show in preview
-    var previewCount: Int = 4
+    var previewCount: Int = 3
+
+    /// Sentences for display
+    private var sentences: [TranscriptSentence] {
+        TranscriptGrouping.groupIntoSentences(segments)
+    }
+
+    /// Current sentence based on playback time
+    private var currentSentence: TranscriptSentence? {
+        guard let time = currentTime else { return sentences.first }
+        return sentences.first { $0.containsTime(time) } ?? sentences.first
+    }
+
+    /// Active segment within current sentence
+    private var activeSegmentInSentence: TranscriptSegment? {
+        guard let time = currentTime else { return nil }
+        return currentSentence?.activeSegment(at: time)
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -320,11 +489,10 @@ struct TranscriptPreviewView: View {
             }
             .padding(.horizontal, 20)
 
-            // Current segment highlight
-            if let currentText = currentSegmentText {
-                Text(currentText)
+            // Current sentence with segment highlighting
+            if let sentence = currentSentence {
+                Text(buildPreviewAttributedString(for: sentence))
                     .font(.body)
-                    .foregroundColor(.primary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
@@ -334,19 +502,23 @@ struct TranscriptPreviewView: View {
                     .padding(.horizontal, 16)
             }
 
-            // Preview of nearby segments
+            // Preview of nearby sentences
             VStack(spacing: 0) {
-                ForEach(previewSegments, id: \.id) { segment in
-                    Button(action: { onSegmentTap(segment) }) {
+                ForEach(previewSentences) { sentence in
+                    Button(action: {
+                        if let firstSegment = sentence.segments.first {
+                            onSegmentTap(firstSegment)
+                        }
+                    }) {
                         HStack(alignment: .top, spacing: 10) {
-                            Text(segment.formattedStartTime)
+                            Text(sentence.formattedStartTime)
                                 .font(.caption)
                                 .foregroundColor(.blue)
                                 .frame(width: 50, alignment: .leading)
 
-                            Text(segment.text)
+                            Text(sentence.text)
                                 .font(.subheadline)
-                                .foregroundColor(currentSegmentId == segment.id ? .primary : .secondary)
+                                .foregroundColor(sentence.id == currentSentence?.id ? .primary : .secondary)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -354,7 +526,7 @@ struct TranscriptPreviewView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(
-                            currentSegmentId == segment.id
+                            sentence.id == currentSentence?.id
                             ? Color.blue.opacity(0.15)
                             : Color.clear
                         )
@@ -368,22 +540,49 @@ struct TranscriptPreviewView: View {
         }
     }
 
-    private var currentSegmentText: String? {
-        guard let id = currentSegmentId,
-              let segment = segments.first(where: { $0.id == id }) else {
-            return nil
-        }
-        return segment.text
+    private var previewSentences: [TranscriptSentence] {
+        guard !sentences.isEmpty else { return [] }
+
+        let currentIdx = sentences.firstIndex { $0.id == currentSentence?.id } ?? 0
+        let startIndex = max(0, currentIdx - 1)
+        let endIndex = min(sentences.count, startIndex + previewCount)
+
+        return Array(sentences[startIndex..<endIndex])
     }
 
-    private var previewSegments: [TranscriptSegment] {
-        guard !segments.isEmpty else { return [] }
+    /// Build attributed string for preview with segment highlighting
+    private func buildPreviewAttributedString(for sentence: TranscriptSentence) -> AttributedString {
+        var result = AttributedString()
+        let isCJK = CJKTextUtils.containsCJK(sentence.text)
 
-        let currentId = currentSegmentId ?? 0
-        let startIndex = max(0, currentId - 1)
-        let endIndex = min(segments.count, startIndex + previewCount)
+        for (index, segment) in sentence.segments.enumerated() {
+            let segmentText = segment.text.trimmingCharacters(in: .whitespaces)
+            var attrText = AttributedString(segmentText)
 
-        return Array(segments[startIndex..<endIndex])
+            let isActive = activeSegmentInSentence?.id == segment.id
+
+            if isActive {
+                // ACTIVE: blue, bold
+                attrText.foregroundColor = .blue
+                attrText.font = .system(size: 17, weight: .bold)
+            } else if let time = currentTime, time > segment.endTime {
+                // PAST: light blue, medium weight
+                attrText.foregroundColor = .blue.opacity(0.7)
+                attrText.font = .system(size: 17, weight: .medium)
+            } else {
+                // FUTURE: gray, regular weight
+                attrText.foregroundColor = .primary.opacity(0.6)
+                attrText.font = .system(size: 17, weight: .regular)
+            }
+
+            result.append(attrText)
+
+            if index < sentence.segments.count - 1 && !isCJK {
+                result.append(AttributedString(" "))
+            }
+        }
+
+        return result
     }
 }
 
@@ -397,6 +596,17 @@ struct FullTranscriptContent: View {
     @Binding var searchQuery: String
     let filteredSegments: [TranscriptSegment]
     let onSegmentTap: (TranscriptSegment) -> Void
+
+    /// Sentences for scroll tracking
+    private var sentences: [TranscriptSentence] {
+        TranscriptGrouping.groupIntoSentences(filteredSegments)
+    }
+
+    /// Current sentence ID based on time
+    private var currentSentenceId: Int? {
+        guard let time = currentTime else { return nil }
+        return sentences.first { $0.containsTime(time) }?.id
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -425,24 +635,24 @@ struct FullTranscriptContent: View {
 
             Divider()
 
-            // Transcript segments
+            // Transcript with sentence grouping
             ScrollViewReader { proxy in
                 ScrollView {
-                    FlowingTranscriptView(
+                    SentenceBasedTranscriptView(
                         segments: filteredSegments,
                         currentTime: currentTime,
                         searchQuery: searchQuery,
                         onSegmentTap: onSegmentTap,
                         showTimestamps: false,
-                        enableWordHighlighting: false  // Segment-level highlighting by default
+                        enableWordHighlighting: false
                     )
                     .padding(.horizontal, 20)
                     .padding(.vertical, 16)
                 }
-                .onChange(of: currentSegmentId) { _, newId in
+                .onChange(of: currentSentenceId) { _, newId in
                     if let id = newId, searchQuery.isEmpty {
                         withAnimation(.easeInOut(duration: 0.3)) {
-                            proxy.scrollTo("segment-\(id)", anchor: .center)
+                            proxy.scrollTo("sentence-\(id)", anchor: .center)
                         }
                     }
                 }
