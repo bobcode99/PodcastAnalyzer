@@ -331,6 +331,11 @@ final class EpisodeDetailViewModel {
         model.isCompleted = false
         try? modelContext?.save()
         startTime = 0
+
+        // Force new player if this is the same episode (AVPlayer may be at end-of-media)
+        if audioManager.currentEpisode?.id == episodeKey {
+          audioManager.stop()
+        }
       } else {
         startTime = model.lastPlaybackPosition
       }
@@ -639,13 +644,20 @@ final class EpisodeDetailViewModel {
 
     logger.debug("Translate requested to: \(language.displayName) (\(targetLang))")
 
+    // Always trigger title/description translation (works without transcript)
+    translationStatus = .preparingSession
+    descriptionTranslationTrigger.toggle()
+    episodeTitleTranslationTrigger.toggle()
+    podcastTitleTranslationTrigger.toggle()
+
+    // Skip transcript translation if no segments available
     guard !transcriptSegments.isEmpty else {
-      logger.warning("No transcript segments to translate")
+      logger.info("No transcript segments - translating title/description only")
       return
     }
 
     Task {
-      // Try to load existing translation first
+      // Try to load existing transcript translation first
       if let translated = await translationService.loadExistingTranslation(
         segments: transcriptSegments,
         episodeTitle: episode.title,
@@ -660,13 +672,9 @@ final class EpisodeDetailViewModel {
         return
       }
 
-      // No cached translation, trigger the translation tasks
+      // No cached translation, trigger the transcript translation task
       await MainActor.run {
-        self.translationStatus = .preparingSession
         self.transcriptTranslationTrigger.toggle()
-        self.descriptionTranslationTrigger.toggle()
-        self.episodeTitleTranslationTrigger.toggle()
-        self.podcastTitleTranslationTrigger.toggle()
       }
     }
   }
@@ -1219,29 +1227,26 @@ final class EpisodeDetailViewModel {
     cloudAnalysisCache.fullAnalysis != nil || !cloudAnalysisCache.questionAnswers.isEmpty
   }
 
-  /// Parses SRT content and returns clean text without timestamps
-  /// Each subtitle entry is separated by a newline for readability
+  /// Parses SRT content and returns clean text formatted in paragraphs
+  /// Groups segments into sentences, then combines 4 sentences per paragraph
   var cleanTranscriptText: String {
-    guard !transcriptText.isEmpty else { return "" }
+    guard !transcriptSegments.isEmpty else { return "" }
 
-    var cleanLines: [String] = []
-    let entries = transcriptText.components(separatedBy: "\n\n")
+    // Group segments into sentences using TranscriptGrouping
+    let sentences = TranscriptGrouping.groupIntoSentences(transcriptSegments)
 
-    for entry in entries {
-      let lines = entry.components(separatedBy: "\n")
-      // Skip index and timestamp lines, get text
-      if lines.count >= 3 {
-        let textLines = Array(lines[2...])
-        let combinedText = textLines.joined(separator: " ").trimmingCharacters(
-          in: .whitespaces)
-        if !combinedText.isEmpty {
-          cleanLines.append(combinedText)
-        }
-      }
+    // Combine 4 sentences per paragraph
+    let sentencesPerParagraph = 4
+    var paragraphs: [String] = []
+
+    for startIndex in stride(from: 0, to: sentences.count, by: sentencesPerParagraph) {
+      let endIndex = min(startIndex + sentencesPerParagraph, sentences.count)
+      let chunk = sentences[startIndex..<endIndex]
+      let paragraphText = chunk.map { $0.text }.joined(separator: " ")
+      paragraphs.append(paragraphText)
     }
 
-    // Join with newlines to preserve paragraph breaks
-    return cleanLines.joined(separator: "\n\n")
+    return paragraphs.joined(separator: "\n\n")
   }
 
   // MARK: - Live Captions Methods

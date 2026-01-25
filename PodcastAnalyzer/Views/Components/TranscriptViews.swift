@@ -67,6 +67,9 @@ enum TranscriptGrouping {
     /// Sentence-ending punctuation marks (English and CJK)
     private static let sentenceEndings: Set<Character> = [".", "!", "?", "。", "！", "？"]
 
+    /// Maximum segments per sentence to handle long unpunctuated streams
+    static let maxSegmentsPerSentence = 4
+
     /// Check if text ends with a sentence-ending punctuation
     static func isSentenceEnd(_ text: String) -> Bool {
         guard let lastChar = text.trimmingCharacters(in: .whitespaces).last else { return false }
@@ -75,6 +78,7 @@ enum TranscriptGrouping {
 
     /// Group segments into sentences
     /// Segments are accumulated until a segment ending with sentence punctuation is found
+    /// or until maxSegmentsPerSentence is reached (handles long unpunctuated content)
     static func groupIntoSentences(_ segments: [TranscriptSegment]) -> [TranscriptSentence] {
         var sentences: [TranscriptSentence] = []
         var currentGroup: [TranscriptSegment] = []
@@ -83,8 +87,11 @@ enum TranscriptGrouping {
         for segment in segments {
             currentGroup.append(segment)
 
-            // Check if this segment ends the sentence
-            if isSentenceEnd(segment.text) {
+            // Check if this segment ends the sentence OR we've reached max segments
+            let shouldEndSentence = isSentenceEnd(segment.text) ||
+                                    currentGroup.count >= maxSegmentsPerSentence
+
+            if shouldEndSentence {
                 sentences.append(TranscriptSentence(id: sentenceId, segments: currentGroup))
                 sentenceId += 1
                 currentGroup = []

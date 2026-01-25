@@ -71,18 +71,6 @@ struct LibraryView: View {
         }
       }
       .navigationTitle(Constants.libraryString)
-      .toolbar {
-        ToolbarItem(placement: .primaryAction) {
-          Button(action: {
-            Task {
-              await viewModel.refreshAllPodcasts()
-            }
-          }) {
-            Image(systemName: "arrow.clockwise")
-          }
-          .disabled(viewModel.isLoading)
-        }
-      }
       .platformToolbarTitleDisplayMode()
       .refreshable {
         await viewModel.refreshAllPodcasts()
@@ -201,6 +189,7 @@ struct LibraryView: View {
 
   private func updateSortedPodcasts() {
     sortedPodcasts = subscribedPodcasts.sorted { p1, p2 in
+      // p1.lastUpdated > p2.lastUpdated
       let date1 = p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
       let date2 = p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
       return date1 > date2
@@ -494,6 +483,9 @@ struct SavedEpisodesView: View {
     #endif
     .onAppear {
       viewModel.setModelContext(modelContext)
+      Task {
+        await viewModel.refreshSavedEpisodes()
+      }
     }
     .confirmationDialog(
       "Delete Download",
@@ -587,23 +579,54 @@ struct DownloadedEpisodesView: View {
 
   var body: some View {
     Group {
-      if viewModel.downloadedEpisodes.isEmpty {
+      if viewModel.downloadedEpisodes.isEmpty && viewModel.downloadingEpisodes.isEmpty {
         emptyStateView
       } else {
-        List(viewModel.filteredDownloadedEpisodes) { episode in
-          EpisodeRowView(
-            libraryEpisode: episode,
-            episodeModel: fetchEpisodeModel(for: episode),
-            showArtwork: settingsViewModel.showEpisodeArtwork,
-            onToggleStar: { toggleStar(episode) },
-            onDownload: { downloadEpisode(episode) },
-            onDeleteRequested: {
-              episodeToDelete = episode
-              showDeleteConfirmation = true
-            },
-            onTogglePlayed: { togglePlayed(episode) }
-          )
-          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        List {
+          // Downloading Section
+          if !viewModel.downloadingEpisodes.isEmpty {
+            Section {
+              ForEach(viewModel.downloadingEpisodes) { downloading in
+                DownloadingEpisodeRow(episode: downloading)
+                  .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+              }
+            } header: {
+              Text("Downloading")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+                .textCase(nil)
+            }
+          }
+
+          // Downloaded Section
+          if !viewModel.filteredDownloadedEpisodes.isEmpty {
+            Section {
+              ForEach(viewModel.filteredDownloadedEpisodes) { episode in
+                EpisodeRowView(
+                  libraryEpisode: episode,
+                  episodeModel: fetchEpisodeModel(for: episode),
+                  showArtwork: settingsViewModel.showEpisodeArtwork,
+                  onToggleStar: { toggleStar(episode) },
+                  onDownload: { downloadEpisode(episode) },
+                  onDeleteRequested: {
+                    episodeToDelete = episode
+                    showDeleteConfirmation = true
+                  },
+                  onTogglePlayed: { togglePlayed(episode) }
+                )
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+              }
+            } header: {
+              if !viewModel.downloadingEpisodes.isEmpty {
+                Text("Downloaded")
+                  .font(.subheadline)
+                  .fontWeight(.semibold)
+                  .foregroundColor(.primary)
+                  .textCase(nil)
+              }
+            }
+          }
         }
         .listStyle(.plain)
         .refreshable {
@@ -618,6 +641,9 @@ struct DownloadedEpisodesView: View {
     #endif
     .onAppear {
       viewModel.setModelContext(modelContext)
+      Task {
+        await viewModel.refreshDownloadedEpisodes()
+      }
     }
     .confirmationDialog(
       "Delete Download",
@@ -697,6 +723,84 @@ struct DownloadedEpisodesView: View {
       podcastTitle: episode.podcastTitle
     )
     viewModel.setModelContext(modelContext)
+  }
+}
+
+// MARK: - Downloading Episode Row
+
+struct DownloadingEpisodeRow: View {
+  let episode: DownloadingEpisode
+
+  private var statusText: String {
+    switch episode.state {
+    case .downloading(let progress):
+      return "\(Int(progress * 100))%"
+    case .finishing:
+      return "Finishing..."
+    default:
+      return ""
+    }
+  }
+
+  var body: some View {
+    HStack(spacing: 12) {
+      // Artwork
+      AsyncImage(url: URL(string: episode.imageURL ?? "")) { phase in
+        switch phase {
+        case .success(let image):
+          image
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+        case .failure, .empty:
+          Rectangle()
+            .fill(Color.gray.opacity(0.2))
+            .overlay(
+              Image(systemName: "music.note")
+                .foregroundColor(.gray)
+            )
+        @unknown default:
+          Rectangle()
+            .fill(Color.gray.opacity(0.2))
+        }
+      }
+      .frame(width: 56, height: 56)
+      .cornerRadius(8)
+
+      // Title and progress
+      VStack(alignment: .leading, spacing: 4) {
+        Text(episode.episodeTitle)
+          .font(.subheadline)
+          .fontWeight(.medium)
+          .lineLimit(2)
+
+        Text(episode.podcastTitle)
+          .font(.caption)
+          .foregroundColor(.secondary)
+          .lineLimit(1)
+
+        // Progress bar
+        GeometryReader { geo in
+          ZStack(alignment: .leading) {
+            Capsule()
+              .fill(Color.blue.opacity(0.2))
+              .frame(height: 4)
+            Capsule()
+              .fill(Color.blue)
+              .frame(width: geo.size.width * episode.progress, height: 4)
+          }
+        }
+        .frame(height: 4)
+      }
+
+      Spacer()
+
+      // Status
+      Text(statusText)
+        .font(.caption)
+        .foregroundColor(.blue)
+        .fontWeight(.medium)
+    }
+    .padding(.vertical, 4)
   }
 }
 

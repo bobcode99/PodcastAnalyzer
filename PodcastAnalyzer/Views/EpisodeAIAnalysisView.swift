@@ -126,7 +126,9 @@ struct EpisodeAIAnalysisView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.small)
       }
-      .padding()
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+      .frame(minHeight: 60)
       .background(Color.orange.opacity(0.1))
     } else if !viewModel.hasTranscript {
       // No transcript available
@@ -140,7 +142,9 @@ struct EpisodeAIAnalysisView: View {
 
         Spacer()
       }
-      .padding()
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+      .frame(minHeight: 60)
       .background(Color.blue.opacity(0.1))
     } else {
       // Ready to analyze
@@ -159,8 +163,9 @@ struct EpisodeAIAnalysisView: View {
             .font(.caption)
         }
       }
-      .padding(.horizontal)
-      .padding(.vertical, 8)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+      .frame(minHeight: 60)
       .background(Color.green.opacity(0.05))
     }
   }

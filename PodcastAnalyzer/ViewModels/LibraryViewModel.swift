@@ -34,6 +34,17 @@ struct LibraryEpisode: Identifiable {
   }
 }
 
+// MARK: - Downloading Episode Model
+
+struct DownloadingEpisode: Identifiable {
+  let id: String
+  let episodeTitle: String
+  let podcastTitle: String
+  let imageURL: String?
+  let progress: Double
+  let state: DownloadState
+}
+
 // MARK: - Library ViewModel
 
 @MainActor
@@ -42,6 +53,7 @@ final class LibraryViewModel {
   var podcastInfoModelList: [PodcastInfoModel] = []
   var savedEpisodes: [LibraryEpisode] = []
   var downloadedEpisodes: [LibraryEpisode] = []
+  var downloadingEpisodes: [DownloadingEpisode] = []
   var latestEpisodes: [LibraryEpisode] = []
   var isLoading = false
   var error: String?
@@ -123,6 +135,7 @@ final class LibraryViewModel {
   private var podcastTitleMap: [String: PodcastInfoModel] = [:]
 
   private var syncCompletionObserver: NSObjectProtocol?
+  private var downloadingPollTimer: Timer?
 
   init(modelContext: ModelContext?) {
     self.modelContext = modelContext
@@ -133,6 +146,7 @@ final class LibraryViewModel {
     }
     setupDownloadCompletionObserver()
     setupSyncCompletionObserver()
+    startDownloadingPollTimer()
   }
 
   /// Clean up resources. Call this from onDisappear.
@@ -145,6 +159,87 @@ final class LibraryViewModel {
       NotificationCenter.default.removeObserver(observer)
       syncCompletionObserver = nil
     }
+    stopDownloadingPollTimer()
+  }
+
+  // MARK: - Downloading Episodes Poll Timer
+
+  private func startDownloadingPollTimer() {
+    stopDownloadingPollTimer()
+    downloadingPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+      Task { @MainActor in
+        self?.updateDownloadingEpisodes()
+      }
+    }
+  }
+
+  private func stopDownloadingPollTimer() {
+    downloadingPollTimer?.invalidate()
+    downloadingPollTimer = nil
+  }
+
+  /// Update the list of currently downloading episodes from DownloadManager
+  private func updateDownloadingEpisodes() {
+    let downloadManager = DownloadManager.shared
+    var downloading: [DownloadingEpisode] = []
+
+    for (episodeKey, state) in downloadManager.downloadStates {
+      // Only include actively downloading or finishing episodes
+      let progressValue: Double
+      let isActive: Bool
+
+      switch state {
+      case .downloading(let progress):
+        progressValue = progress
+        isActive = true
+      case .finishing:
+        progressValue = 1.0
+        isActive = true
+      default:
+        progressValue = 0
+        isActive = false
+      }
+
+      if isActive {
+
+        // Parse episode key to get titles
+        if let (podcastTitle, episodeTitle) = parseDownloadEpisodeKey(episodeKey) {
+          // Try to find image URL from podcasts
+          let imageURL = podcastTitleMap[podcastTitle]?.podcastInfo.imageURL
+
+          downloading.append(DownloadingEpisode(
+            id: episodeKey,
+            episodeTitle: episodeTitle,
+            podcastTitle: podcastTitle,
+            imageURL: imageURL,
+            progress: progressValue,
+            state: state
+          ))
+        }
+      }
+    }
+
+    // Sort by progress (least progress first)
+    downloadingEpisodes = downloading.sorted { $0.progress < $1.progress }
+  }
+
+  /// Parse episode key for downloading episodes
+  private func parseDownloadEpisodeKey(_ episodeKey: String) -> (podcastTitle: String, episodeTitle: String)? {
+    // Try new format first (Unit Separator)
+    if let delimiterIndex = episodeKey.range(of: Self.episodeKeyDelimiter) {
+      let podcastTitle = String(episodeKey[..<delimiterIndex.lowerBound])
+      let episodeTitle = String(episodeKey[delimiterIndex.upperBound...])
+      return (podcastTitle, episodeTitle)
+    }
+
+    // Fall back to old format (|) for backward compatibility
+    if let lastPipeIndex = episodeKey.lastIndex(of: "|") {
+      let podcastTitle = String(episodeKey[..<lastPipeIndex])
+      let episodeTitle = String(episodeKey[episodeKey.index(after: lastPipeIndex)...])
+      return (podcastTitle, episodeTitle)
+    }
+
+    return nil
   }
 
   private func setupSyncCompletionObserver() {
@@ -339,6 +434,19 @@ final class LibraryViewModel {
     _ = await (savedTask, downloadedTask, latestTask)
 
     isLoading = false
+  }
+  // MARK: - Public Refresh Methods
+
+  func refreshSavedEpisodes() async {
+    isLoadingSaved = true
+    await loadSavedEpisodes()
+    isLoadingSaved = false
+  }
+
+  func refreshDownloadedEpisodes() async {
+    isLoadingDownloaded = true
+    await loadDownloadedSection() // This handles quick load + background sync
+    isLoadingDownloaded = false
   }
 
   // MARK: - Load All Podcasts (for episode lookups)

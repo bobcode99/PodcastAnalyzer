@@ -125,12 +125,12 @@ class BackgroundSyncManager {
 
   func scheduleBackgroundRefresh() {
     let request = BGAppRefreshTaskRequest(identifier: Self.backgroundTaskIdentifier)
-    // Schedule for 5 minutes from now (iOS may delay based on system conditions)
-    request.earliestBeginDate = Date(timeIntervalSinceNow: 5 * 60)
+    // Schedule for 4 hours from now (iOS may delay based on system conditions)
+    request.earliestBeginDate = Date(timeIntervalSinceNow: 4 * 60 * 60)
 
     do {
       try BGTaskScheduler.shared.submit(request)
-      logger.info("Background refresh scheduled for 5 minutes from now")
+      logger.info("Background refresh scheduled for 4 hours from now")
     } catch {
       logger.error("Failed to schedule background refresh: \(error.localizedDescription)")
     }
@@ -360,12 +360,12 @@ class BackgroundSyncManager {
     guard isBackgroundSyncEnabled else { return }
 
     stopForegroundSync()
-    foregroundTimer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { [weak self] _ in
+    foregroundTimer = Timer.scheduledTimer(withTimeInterval: 4 * 60 * 60, repeats: true) { [weak self] _ in
       Task { @MainActor in
         await self?.syncNow()
       }
     }
-    logger.info("Foreground sync timer started (5 min interval)")
+    logger.info("Foreground sync timer started (4 hour interval)")
   }
 
   func stopForegroundSync() {
