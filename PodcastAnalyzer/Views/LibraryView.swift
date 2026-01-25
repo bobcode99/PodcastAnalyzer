@@ -61,8 +61,8 @@ struct LibraryView: View {
           .padding(.bottom, 40)
         }
 
-        // Only show full-screen loading on first load when no cached data exists
-        if viewModel.isLoadingPodcasts && subscribedPodcasts.isEmpty
+        // Initial loading state only when truly empty
+        if viewModel.isLoading && subscribedPodcasts.isEmpty
             && viewModel.savedEpisodes.isEmpty && viewModel.downloadedEpisodes.isEmpty {
           ProgressView("Loading Library...")
             .scaleEffect(1.5)
@@ -129,7 +129,7 @@ struct LibraryView: View {
             iconColor: .yellow,
             title: "Saved",
             count: viewModel.savedEpisodes.count,
-            isLoading: viewModel.isLoadingSaved
+            isLoading: false
           )
         }
         .buttonStyle(.plain)
@@ -141,7 +141,7 @@ struct LibraryView: View {
             iconColor: .green,
             title: "Downloaded",
             count: viewModel.downloadedEpisodes.count,
-            isLoading: viewModel.isLoadingDownloaded
+            isLoading: false
           )
         }
         .buttonStyle(.plain)
@@ -163,17 +163,12 @@ struct LibraryView: View {
           Spacer()
 
           HStack(spacing: 4) {
-            if viewModel.isLoadingLatest {
-              ProgressView()
-                .scaleEffect(0.6)
-            } else {
-              Text("\(viewModel.latestEpisodes.count)")
-                .font(.caption)
-                .foregroundColor(.secondary)
-              Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            }
+             Text("\(viewModel.latestEpisodes.count)")
+               .font(.caption)
+               .foregroundColor(.secondary)
+             Image(systemName: "chevron.right")
+               .font(.caption)
+               .foregroundColor(.secondary)
           }
         }
         .padding(.horizontal, 16)
@@ -189,7 +184,6 @@ struct LibraryView: View {
 
   private func updateSortedPodcasts() {
     sortedPodcasts = subscribedPodcasts.sorted { p1, p2 in
-      // p1.lastUpdated > p2.lastUpdated
       let date1 = p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
       let date2 = p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
       return date1 > date2
@@ -246,14 +240,9 @@ struct LibraryView: View {
 
         Spacer()
 
-        if viewModel.isLoadingPodcasts {
-          ProgressView()
-            .scaleEffect(0.7)
-        } else {
           Text("\(sortedPodcasts.count)")
             .font(.subheadline)
             .foregroundColor(.secondary)
-        }
       }
 
       if sortedPodcasts.isEmpty {
@@ -536,7 +525,8 @@ struct SavedEpisodesView: View {
     if let model = fetchEpisodeModel(for: episode) {
       model.isStarred.toggle()
       try? modelContext.save()
-      viewModel.setModelContext(modelContext)
+      // Refresh only saved section
+      Task { await viewModel.refreshSavedEpisodes() }
     }
   }
 
@@ -547,7 +537,8 @@ struct SavedEpisodesView: View {
         model.lastPlaybackPosition = 0
       }
       try? modelContext.save()
-      viewModel.setModelContext(modelContext)
+      // Refresh to update UI state
+      Task { await viewModel.refreshSavedEpisodes() }
     }
   }
 
@@ -564,7 +555,15 @@ struct SavedEpisodesView: View {
       episodeTitle: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle
     )
-    viewModel.setModelContext(modelContext)
+    
+    // Update model immediately
+    if let model = fetchEpisodeModel(for: episode) {
+        model.localAudioPath = nil
+        try? modelContext.save()
+    }
+    
+    // Refresh list
+    Task { await viewModel.refreshSavedEpisodes() }
   }
 }
 
@@ -694,7 +693,7 @@ struct DownloadedEpisodesView: View {
     if let model = fetchEpisodeModel(for: episode) {
       model.isStarred.toggle()
       try? modelContext.save()
-      viewModel.setModelContext(modelContext)
+      Task { await viewModel.refreshDownloadedEpisodes() }
     }
   }
 
@@ -705,7 +704,7 @@ struct DownloadedEpisodesView: View {
         model.lastPlaybackPosition = 0
       }
       try? modelContext.save()
-      viewModel.setModelContext(modelContext)
+      Task { await viewModel.refreshDownloadedEpisodes() }
     }
   }
 
@@ -722,7 +721,15 @@ struct DownloadedEpisodesView: View {
       episodeTitle: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle
     )
-    viewModel.setModelContext(modelContext)
+    
+    // Update model immediately
+    if let model = fetchEpisodeModel(for: episode) {
+        model.localAudioPath = nil
+        try? modelContext.save()
+    }
+    
+    // Refresh list
+    Task { await viewModel.refreshDownloadedEpisodes() }
   }
 }
 

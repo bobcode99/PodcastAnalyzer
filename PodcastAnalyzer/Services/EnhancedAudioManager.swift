@@ -16,6 +16,7 @@ import AVFoundation
 import Foundation
 import MediaPlayer
 import os.log
+import WidgetKit
 
 #if os(iOS)
 import UIKit
@@ -304,6 +305,7 @@ private func handleAudioInterruption(_ notification: Notification) {
 
     savePlaybackState(imageURL: imageURL ?? episode.imageURL)
     loadCaptions(episode: episode)
+    updateWidgetPlaybackData()
   }
 
   // MARK: - Controls – always update Now Playing
@@ -313,6 +315,7 @@ private func handleAudioInterruption(_ notification: Notification) {
     updateNowPlayingPlaybackRate()
     savePlaybackState()
     postPlaybackPositionUpdate()
+    updateWidgetPlaybackData()
   }
 
   func resume() {
@@ -350,6 +353,9 @@ private func handleAudioInterruption(_ notification: Notification) {
 
     // Deactivate audio session so other apps can play
     deactivateAudioSession()
+
+    // Clear widget data
+    clearWidgetData()
 
     logger.info("Playback stopped and audio session deactivated")
   }
@@ -734,6 +740,36 @@ private func handleAudioInterruption(_ notification: Notification) {
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
   }
 
+  // MARK: - Widget Data Updates
+
+  /// Update widget with current playback state
+  private func updateWidgetPlaybackData() {
+    guard let episode = currentEpisode else {
+      WidgetDataManager.clearPlaybackData()
+      WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+      return
+    }
+
+    let data = WidgetPlaybackData(
+      episodeTitle: episode.title,
+      podcastTitle: episode.podcastTitle,
+      imageURL: episode.imageURL,
+      currentTime: currentTime,
+      duration: duration,
+      isPlaying: isPlaying,
+      lastUpdated: Date()
+    )
+
+    WidgetDataManager.writePlaybackData(data)
+    WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+  }
+
+  /// Clear widget data when playback stops
+  private func clearWidgetData() {
+    WidgetDataManager.clearPlaybackData()
+    WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+  }
+
   // MARK: - State Persistence
 
   /// Posts a notification with current playback position for SwiftData persistence
@@ -847,6 +883,7 @@ private func handleAudioInterruption(_ notification: Notification) {
         if Int(self.currentTime) % 5 == 0 {
           self.savePlaybackState()
           self.postPlaybackPositionUpdate()
+          self.updateWidgetPlaybackData()
         }
       }
     }

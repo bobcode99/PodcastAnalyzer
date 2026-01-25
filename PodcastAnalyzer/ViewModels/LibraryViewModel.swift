@@ -67,11 +67,13 @@ final class LibraryViewModel {
     let lastPlaybackPosition: TimeInterval
   }
 
-  // Separate loading states for progressive UI updates
-  var isLoadingPodcasts = false
-  var isLoadingSaved = false
-  var isLoadingDownloaded = false
-  var isLoadingLatest = false
+
+  // Simplified loading state
+  // We only track generally if background operations are happening, 
+  // but we don't block the UI with specific flags for each section anymore.
+  // The UI should show whatever data is available.
+  var isRefreshing = false
+
 
   // Search state for subpages
   var savedSearchText: String = ""
@@ -331,7 +333,7 @@ final class LibraryViewModel {
 
       // Reload downloaded episodes to update the UI
       Task {
-        await loadDownloadedEpisodes()
+        await loadDownloadedEpisodesQuick()
       }
     } catch {
       logger.error("Failed to update download model: \(error.localizedDescription)")
@@ -345,12 +347,9 @@ final class LibraryViewModel {
     }
     
     self.modelContext = context
-    // Start ALL loading in parallel - don't block UI at all
+    // Start loading in parallel without blocking UI flags
     // Each section loads independently and updates its own state
-    isLoadingPodcasts = true
-    isLoadingSaved = true
-    isLoadingDownloaded = true
-    isLoadingLatest = true
+    isRefreshing = true
 
     // Launch loading tasks
     // Chain podcasts -> latest to ensure dependencies are met without polling
@@ -364,6 +363,7 @@ final class LibraryViewModel {
     Task { await loadDownloadedSection() }
 
     isAlreadyLoaded = true
+    isRefreshing = false
   }
 
   /// Receive updated podcast list from View's @Query
@@ -380,21 +380,19 @@ final class LibraryViewModel {
     // We no longer load feeds manually here, they are injected via setPodcasts
     // Just load the full lookup map
     await loadAllPodcasts()
-    isLoadingPodcasts = false
+    await loadAllPodcasts()
   }
 
   /// Load saved episodes section independently
   private func loadSavedSection() async {
     // Load immediately - EpisodeDownloadModel has all the data we need
     await loadSavedEpisodes()
-    isLoadingSaved = false
   }
 
   /// Load downloaded episodes section independently
   private func loadDownloadedSection() async {
     // Load downloaded episodes immediately from SwiftData (fast)
     await loadDownloadedEpisodesQuick()
-    isLoadingDownloaded = false
 
     // Then sync with disk in background (slow, but doesn't block UI)
     Task.detached(priority: .background) { [weak self] in
@@ -410,27 +408,19 @@ final class LibraryViewModel {
     // This section depends heavily on podcastInfoModelList
     // We now await this AFTER loadPodcastsSection completes, so no need to poll
     await loadLatestEpisodes()
-    isLoadingLatest = false
   }
 
   /// Legacy loadAll for refresh operations that need to wait for completion
   private func loadAll() async {
     isLoading = true
-    isLoadingPodcasts = true
-    isLoadingSaved = true
-    isLoadingDownloaded = true
-    isLoadingLatest = true
-
+    
     // First, load all podcasts (needed by other loaders)
     await loadAllPodcasts()
 
-    // No need to load feeds here, they come from @Query
-    isLoadingPodcasts = false
-
     // Then load the rest using async let for parallelism while staying on MainActor
-    async let savedTask: () = loadSavedEpisodesWithState()
-    async let downloadedTask: () = loadDownloadedEpisodesWithState()
-    async let latestTask: () = loadLatestEpisodesWithState()
+    async let savedTask: () = loadSavedEpisodes()
+    async let downloadedTask: () = loadDownloadedEpisodes()
+    async let latestTask: () = loadLatestEpisodes()
     _ = await (savedTask, downloadedTask, latestTask)
 
     isLoading = false
@@ -438,15 +428,13 @@ final class LibraryViewModel {
   // MARK: - Public Refresh Methods
 
   func refreshSavedEpisodes() async {
-    isLoadingSaved = true
+    // Non-blocking refresh
     await loadSavedEpisodes()
-    isLoadingSaved = false
   }
 
   func refreshDownloadedEpisodes() async {
-    isLoadingDownloaded = true
+    // Non-blocking refresh
     await loadDownloadedSection() // This handles quick load + background sync
-    isLoadingDownloaded = false
   }
 
   // MARK: - Load All Podcasts (for episode lookups)
@@ -486,7 +474,7 @@ final class LibraryViewModel {
 
     // Fetch ALL and filter in memory to avoid predicate issues with Unicode
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      sortBy: [SortDescriptor(\.downloadedDate, order: .reverse)]
+      sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
     )
 
     do {
@@ -512,7 +500,7 @@ final class LibraryViewModel {
 
     // Fetch ALL EpisodeDownloadModel and filter in memory
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      sortBy: [SortDescriptor(\.downloadedDate, order: .reverse)]
+      sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
     )
 
     do {
@@ -546,7 +534,7 @@ final class LibraryViewModel {
     // Fetch ALL EpisodeDownloadModel and filter in memory
     // This avoids potential SwiftData predicate issues with Unicode strings
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      sortBy: [SortDescriptor(\.downloadedDate, order: .reverse)]
+      sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
     )
 
     do {
@@ -823,28 +811,7 @@ final class LibraryViewModel {
     logger.info("Updated auto-play candidates with \(playbackEpisodes.count) unplayed episodes")
   }
 
-  // MARK: - Loading with State Wrappers
 
-  /// Load saved episodes with loading state indicator
-  private func loadSavedEpisodesWithState() async {
-    isLoadingSaved = true
-    await loadSavedEpisodes()
-    isLoadingSaved = false
-  }
-
-  /// Load downloaded episodes with loading state indicator
-  private func loadDownloadedEpisodesWithState() async {
-    isLoadingDownloaded = true
-    await loadDownloadedEpisodes()
-    isLoadingDownloaded = false
-  }
-
-  /// Load latest episodes with loading state indicator
-  private func loadLatestEpisodesWithState() async {
-    isLoadingLatest = true
-    await loadLatestEpisodes()
-    isLoadingLatest = false
-  }
 
   // MARK: - Helper Methods
 

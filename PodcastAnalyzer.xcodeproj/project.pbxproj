@@ -10,9 +10,19 @@
 		155164762ED374440015567A /* ZMarkupParser in Frameworks */ = {isa = PBXBuildFile; productRef = 155164752ED374440015567A /* ZMarkupParser */; };
 		158240912ED303EC000ABA90 /* FeedKit in Frameworks */ = {isa = PBXBuildFile; productRef = 158240902ED303EC000ABA90 /* FeedKit */; };
 		158240932ED303EC000ABA90 /* XMLKit in Frameworks */ = {isa = PBXBuildFile; productRef = 158240922ED303EC000ABA90 /* XMLKit */; };
+		15AEEAE02F26464200D90D05 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 15AEEA152F2642D900D90D05 /* WidgetKit.framework */; };
+		15AEEAE12F26464200D90D05 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 15AEEA172F2642D900D90D05 /* SwiftUI.framework */; };
+		15AEEAEE2F26464500D90D05 /* PodcastAnalyzerWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 15AEEADF2F26464200D90D05 /* PodcastAnalyzerWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		15AEEAEC2F26464500D90D05 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 15ED5EE52EC44BC6001B6CD7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 15AEEADE2F26464200D90D05;
+			remoteInfo = PodcastAnalyzerWidgetExtension;
+		};
 		15ED5EFD2EC44BC9001B6CD7 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 15ED5EE52EC44BC6001B6CD7 /* Project object */;
@@ -29,13 +39,37 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		15AEEA2E2F2642DB00D90D05 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				15AEEAEE2F26464500D90D05 /* PodcastAnalyzerWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		15AEEA152F2642D900D90D05 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		15AEEA172F2642D900D90D05 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		15AEEADF2F26464200D90D05 /* PodcastAnalyzerWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PodcastAnalyzerWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		15ED5EED2EC44BC6001B6CD7 /* PodcastAnalyzer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PodcastAnalyzer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		15ED5EFC2EC44BC9001B6CD7 /* PodcastAnalyzerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PodcastAnalyzerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		15ED5F062EC44BC9001B6CD7 /* PodcastAnalyzerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PodcastAnalyzerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		15AEEAF22F26464500D90D05 /* Exceptions for "PodcastAnalyzerWidget" folder in "PodcastAnalyzerWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 15AEEADE2F26464200D90D05 /* PodcastAnalyzerWidgetExtension */;
+		};
 		15CA20872EF2E1FE000FF253 /* Exceptions for "PodcastAnalyzer" folder in "PodcastAnalyzer" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -46,6 +80,14 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		15AEEAE22F26464200D90D05 /* PodcastAnalyzerWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				15AEEAF22F26464500D90D05 /* Exceptions for "PodcastAnalyzerWidget" folder in "PodcastAnalyzerWidgetExtension" target */,
+			);
+			path = PodcastAnalyzerWidget;
+			sourceTree = "<group>";
+		};
 		15ED5EEF2EC44BC6001B6CD7 /* PodcastAnalyzer */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -67,6 +109,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		15AEEADC2F26464200D90D05 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				15AEEAE12F26464200D90D05 /* SwiftUI.framework in Frameworks */,
+				15AEEAE02F26464200D90D05 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		15ED5EEA2EC44BC6001B6CD7 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -97,6 +148,8 @@
 		155164742ED374440015567A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				15AEEA152F2642D900D90D05 /* WidgetKit.framework */,
+				15AEEA172F2642D900D90D05 /* SwiftUI.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -107,6 +160,7 @@
 				15ED5EEF2EC44BC6001B6CD7 /* PodcastAnalyzer */,
 				15ED5EFF2EC44BC9001B6CD7 /* PodcastAnalyzerTests */,
 				15ED5F092EC44BC9001B6CD7 /* PodcastAnalyzerUITests */,
+				15AEEAE22F26464200D90D05 /* PodcastAnalyzerWidget */,
 				155164742ED374440015567A /* Frameworks */,
 				15ED5EEE2EC44BC6001B6CD7 /* Products */,
 			);
@@ -118,6 +172,7 @@
 				15ED5EED2EC44BC6001B6CD7 /* PodcastAnalyzer.app */,
 				15ED5EFC2EC44BC9001B6CD7 /* PodcastAnalyzerTests.xctest */,
 				15ED5F062EC44BC9001B6CD7 /* PodcastAnalyzerUITests.xctest */,
+				15AEEADF2F26464200D90D05 /* PodcastAnalyzerWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -125,6 +180,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		15AEEADE2F26464200D90D05 /* PodcastAnalyzerWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 15AEEAF12F26464500D90D05 /* Build configuration list for PBXNativeTarget "PodcastAnalyzerWidgetExtension" */;
+			buildPhases = (
+				15AEEADB2F26464200D90D05 /* Sources */,
+				15AEEADC2F26464200D90D05 /* Frameworks */,
+				15AEEADD2F26464200D90D05 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				15AEEAE22F26464200D90D05 /* PodcastAnalyzerWidget */,
+			);
+			name = PodcastAnalyzerWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = PodcastAnalyzerWidgetExtension;
+			productReference = 15AEEADF2F26464200D90D05 /* PodcastAnalyzerWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		15ED5EEC2EC44BC6001B6CD7 /* PodcastAnalyzer */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 15ED5F102EC44BC9001B6CD7 /* Build configuration list for PBXNativeTarget "PodcastAnalyzer" */;
@@ -132,10 +209,12 @@
 				15ED5EE92EC44BC6001B6CD7 /* Sources */,
 				15ED5EEA2EC44BC6001B6CD7 /* Frameworks */,
 				15ED5EEB2EC44BC6001B6CD7 /* Resources */,
+				15AEEA2E2F2642DB00D90D05 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				15AEEAED2F26464500D90D05 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				15ED5EEF2EC44BC6001B6CD7 /* PodcastAnalyzer */,
@@ -203,9 +282,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2600;
+				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					15AEEADE2F26464200D90D05 = {
+						CreatedOnToolsVersion = 26.2;
+					};
 					15ED5EEC2EC44BC6001B6CD7 = {
 						CreatedOnToolsVersion = 26.0.1;
 					};
@@ -240,11 +322,19 @@
 				15ED5EEC2EC44BC6001B6CD7 /* PodcastAnalyzer */,
 				15ED5EFB2EC44BC9001B6CD7 /* PodcastAnalyzerTests */,
 				15ED5F052EC44BC9001B6CD7 /* PodcastAnalyzerUITests */,
+				15AEEADE2F26464200D90D05 /* PodcastAnalyzerWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		15AEEADD2F26464200D90D05 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		15ED5EEB2EC44BC6001B6CD7 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -269,6 +359,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		15AEEADB2F26464200D90D05 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		15ED5EE92EC44BC6001B6CD7 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -293,6 +390,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		15AEEAED2F26464500D90D05 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 15AEEADE2F26464200D90D05 /* PodcastAnalyzerWidgetExtension */;
+			targetProxy = 15AEEAEC2F26464500D90D05 /* PBXContainerItemProxy */;
+		};
 		15ED5EFE2EC44BC9001B6CD7 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 15ED5EEC2EC44BC6001B6CD7 /* PodcastAnalyzer */;
@@ -306,6 +408,92 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		15AEEAEF2F26464500D90D05 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = PodcastAnalyzerWidget/PodcastAnalyzerWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2S6SA3LUZR;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PodcastAnalyzerWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = PodcastAnalyzerWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jn.PodcastAnalyzer.PodcastAnalyzerWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				XROS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Debug;
+		};
+		15AEEAF02F26464500D90D05 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = PodcastAnalyzerWidget/PodcastAnalyzerWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2S6SA3LUZR;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PodcastAnalyzerWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = PodcastAnalyzerWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jn.PodcastAnalyzer.PodcastAnalyzerWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				XROS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Release;
+		};
 		15ED5F0E2EC44BC9001B6CD7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -429,6 +617,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PodcastAnalyzer/PodcastAnalyzer.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
@@ -473,8 +662,8 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				XROS_DEPLOYMENT_TARGET = 26.0;
@@ -486,6 +675,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PodcastAnalyzer/PodcastAnalyzer.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
@@ -530,8 +720,8 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				XROS_DEPLOYMENT_TARGET = 26.0;
@@ -545,6 +735,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 2S6SA3LUZR;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
@@ -556,8 +747,8 @@
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PodcastAnalyzer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PodcastAnalyzer";
@@ -572,6 +763,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 2S6SA3LUZR;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
@@ -583,8 +775,8 @@
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PodcastAnalyzer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PodcastAnalyzer";
@@ -598,6 +790,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 2S6SA3LUZR;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
@@ -609,8 +802,8 @@
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_TARGET_NAME = PodcastAnalyzer;
@@ -624,6 +817,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 2S6SA3LUZR;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
@@ -635,8 +829,8 @@
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_TARGET_NAME = PodcastAnalyzer;
@@ -647,6 +841,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		15AEEAF12F26464500D90D05 /* Build configuration list for PBXNativeTarget "PodcastAnalyzerWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				15AEEAEF2F26464500D90D05 /* Debug */,
+				15AEEAF02F26464500D90D05 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		15ED5EE82EC44BC6001B6CD7 /* Build configuration list for PBXProject "PodcastAnalyzer" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
