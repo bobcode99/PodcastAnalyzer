@@ -124,9 +124,32 @@ struct PodcastAnalyzerApp: App {
   private func handleIncomingURL(_ url: URL) {
     logger.info("Received URL: \(url.absoluteString)")
 
-    // Route to ShortcutsAIService for handling
-    Task { @MainActor in
-      ShortcutsAIService.shared.handleURL(url)
+    // Handle widget deep links
+    if url.scheme == "podcastanalyzer" {
+      Task { @MainActor in
+        switch url.host {
+        case "episode":
+          // Widget tap with audio URL: podcastanalyzer://episode?audio=<encoded_url>
+          if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+             let audioParam = components.queryItems?.first(where: { $0.name == "audio" })?.value {
+            NotificationNavigationManager.shared.navigateToEpisode(audioURL: audioParam)
+          }
+        case "nowplaying":
+          // Navigate to currently playing episode
+          NotificationNavigationManager.shared.navigateToNowPlaying()
+        case "library":
+          // Just open the app to library (no specific navigation needed)
+          break
+        default:
+          // Fall back to Shortcuts handling
+          ShortcutsAIService.shared.handleURL(url)
+        }
+      }
+    } else {
+      // Route to ShortcutsAIService for handling
+      Task { @MainActor in
+        ShortcutsAIService.shared.handleURL(url)
+      }
     }
   }
 }

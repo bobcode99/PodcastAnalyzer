@@ -15,6 +15,7 @@ struct WidgetPlaybackData: Codable {
   let episodeTitle: String
   let podcastTitle: String
   let imageURL: String?
+  let audioURL: String?
   let currentTime: TimeInterval
   let duration: TimeInterval
   let isPlaying: Bool
@@ -24,6 +25,15 @@ struct WidgetPlaybackData: Codable {
   var progress: Double {
     guard duration > 0 else { return 0 }
     return min(currentTime / duration, 1.0)
+  }
+
+  /// Deep link URL to open the episode in the app
+  var deepLinkURL: URL? {
+    guard let audioURL = audioURL,
+          let encoded = audioURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+      return URL(string: "podcastanalyzer://nowplaying")
+    }
+    return URL(string: "podcastanalyzer://episode?audio=\(encoded)")
   }
 
   /// Formatted current time string

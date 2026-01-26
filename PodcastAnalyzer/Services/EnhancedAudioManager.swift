@@ -754,6 +754,7 @@ private func handleAudioInterruption(_ notification: Notification) {
       episodeTitle: episode.title,
       podcastTitle: episode.podcastTitle,
       imageURL: episode.imageURL,
+      audioURL: episode.audioURL,
       currentTime: currentTime,
       duration: duration,
       isPlaying: isPlaying,

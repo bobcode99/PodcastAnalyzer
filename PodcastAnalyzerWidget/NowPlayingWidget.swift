@@ -21,6 +21,7 @@ struct NowPlayingEntry: TimelineEntry {
         episodeTitle: "Episode Title",
         podcastTitle: "Podcast Name",
         imageURL: nil,
+        audioURL: nil,
         currentTime: 300,
         duration: 1800,
         isPlaying: true,
@@ -103,26 +104,31 @@ struct SmallWidgetView: View {
 
   var body: some View {
     if let data = entry.playbackData {
-      VStack(alignment: .leading, spacing: 8) {
-        // Artwork
-        AsyncImage(url: URL(string: data.imageURL ?? "")) { phase in
-          switch phase {
-          case .success(let image):
-            image
-              .resizable()
-              .aspectRatio(contentMode: .fill)
-          default:
-            Rectangle()
-              .fill(Color.blue.opacity(0.3))
-              .overlay(
-                Image(systemName: "music.note")
-                  .font(.title)
-                  .foregroundColor(.blue)
-              )
+      VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: 8) {
+          // Artwork
+          AsyncImage(url: URL(string: data.imageURL ?? "")) { phase in
+            switch phase {
+            case .success(let image):
+              image
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+            default:
+              Rectangle()
+                .fill(Color.blue.opacity(0.3))
+                .overlay(
+                  Image(systemName: "music.note")
+                    .font(.title2)
+                    .foregroundColor(.blue)
+                )
+            }
           }
+          .frame(width: 50, height: 50)
+          .cornerRadius(8)
+
+          // Play button with progress
+          WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying)
         }
-        .frame(width: 60, height: 60)
-        .cornerRadius(8)
 
         // Title
         Text(data.episodeTitle)
@@ -131,19 +137,14 @@ struct SmallWidgetView: View {
           .lineLimit(2)
           .foregroundColor(.primary)
 
-        // Progress indicator
-        HStack(spacing: 4) {
-          Image(systemName: data.isPlaying ? "play.fill" : "pause.fill")
-            .font(.caption2)
-            .foregroundColor(.blue)
-          Text(data.formattedRemainingTime)
-            .font(.caption2)
-            .foregroundColor(.secondary)
-        }
+        // Duration: current / total
+        Text("\(data.formattedCurrentTime) / \(data.formattedDuration)")
+          .font(.caption2)
+          .foregroundColor(.secondary)
       }
       .padding(12)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-      .widgetURL(URL(string: "podcastanalyzer://nowplaying"))
+      .widgetURL(data.deepLinkURL)
     } else {
       EmptyWidgetView()
     }
@@ -175,10 +176,10 @@ struct MediumWidgetView: View {
               )
           }
         }
-        .frame(width: 100, height: 100)
+        .frame(width: 90, height: 90)
         .cornerRadius(12)
 
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
           // Episode title
           Text(data.episodeTitle)
             .font(.subheadline)
@@ -194,7 +195,7 @@ struct MediumWidgetView: View {
 
           Spacer()
 
-          // Progress bar
+          // Progress bar with times
           VStack(alignment: .leading, spacing: 4) {
             GeometryReader { geo in
               ZStack(alignment: .leading) {
@@ -208,35 +209,66 @@ struct MediumWidgetView: View {
             }
             .frame(height: 4)
 
-            // Time labels
+            // Time labels: current / total
             HStack {
-              Text(data.formattedCurrentTime)
+              Text("\(data.formattedCurrentTime) / \(data.formattedDuration)")
                 .font(.caption2)
                 .foregroundColor(.secondary)
               Spacer()
-              Text(data.formattedRemainingTime)
-                .font(.caption2)
-                .foregroundColor(.secondary)
             }
           }
 
-          // Play state
-          HStack(spacing: 4) {
-            Image(systemName: data.isPlaying ? "play.fill" : "pause.fill")
-              .font(.caption)
-              .foregroundColor(.blue)
+          // Play button row
+          HStack(spacing: 8) {
+            WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying)
+
             Text(data.isPlaying ? "Playing" : "Paused")
               .font(.caption)
               .foregroundColor(.blue)
+
+            Spacer()
+
+            Text(data.formattedRemainingTime)
+              .font(.caption)
+              .foregroundColor(.secondary)
           }
         }
         .padding(.vertical, 4)
       }
       .padding(12)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .widgetURL(URL(string: "podcastanalyzer://nowplaying"))
+      .widgetURL(data.deepLinkURL)
     } else {
       EmptyWidgetView()
+    }
+  }
+}
+
+// MARK: - Widget Play Button with Progress
+
+struct WidgetPlayButton: View {
+  let progress: Double
+  let isPlaying: Bool
+
+  var body: some View {
+    ZStack {
+      // Background circle
+      Circle()
+        .stroke(Color.blue.opacity(0.2), lineWidth: 3)
+        .frame(width: 36, height: 36)
+
+      // Progress arc
+      Circle()
+        .trim(from: 0, to: CGFloat(progress))
+        .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+        .frame(width: 36, height: 36)
+        .rotationEffect(.degrees(-90))
+
+      // Play/Pause icon
+      Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+        .font(.system(size: 14, weight: .bold))
+        .foregroundColor(.blue)
+        .offset(x: isPlaying ? 0 : 1) // Slight offset for play icon visual balance
     }
   }
 }
@@ -272,7 +304,7 @@ struct NowPlayingWidget: Widget {
         .containerBackground(.fill.tertiary, for: .widget)
     }
     .configurationDisplayName("Now Playing")
-    .description("Shows the currently playing podcast episode.")
+    .description("Shows the currently playing podcast episode with progress.")
     .supportedFamilies([.systemSmall, .systemMedium])
   }
 }
