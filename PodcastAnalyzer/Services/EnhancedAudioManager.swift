@@ -37,6 +37,53 @@ struct PlaybackPositionUpdate: Sendable {
   let audioURL: String  // Added: needed to create new models
 }
 
+// MARK: - Sleep Timer Options
+
+enum SleepTimerOption: Equatable, CaseIterable {
+  case off
+  case endOfEpisode
+  case minutes5
+  case minutes10
+  case minutes15
+  case minutes30
+  case minutes45
+  case hour1
+
+  var displayName: String {
+    switch self {
+    case .off: return "Off"
+    case .endOfEpisode: return "End of Episode"
+    case .minutes5: return "5 Minutes"
+    case .minutes10: return "10 Minutes"
+    case .minutes15: return "15 Minutes"
+    case .minutes30: return "30 Minutes"
+    case .minutes45: return "45 Minutes"
+    case .hour1: return "1 Hour"
+    }
+  }
+
+  var duration: TimeInterval? {
+    switch self {
+    case .off: return nil
+    case .endOfEpisode: return nil  // Special case - handled separately
+    case .minutes5: return 5 * 60
+    case .minutes10: return 10 * 60
+    case .minutes15: return 15 * 60
+    case .minutes30: return 30 * 60
+    case .minutes45: return 45 * 60
+    case .hour1: return 60 * 60
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .off: return "moon.zzz"
+    case .endOfEpisode: return "stop.circle"
+    default: return "timer"
+    }
+  }
+}
+
 @Observable
 class EnhancedAudioManager: NSObject {
   static let shared = EnhancedAudioManager()
@@ -58,6 +105,11 @@ class EnhancedAudioManager: NSObject {
 
   // Auto-play candidates (unplayed episodes that can be randomly selected)
   var autoPlayCandidates: [PlaybackEpisode] = []
+
+  // Sleep timer
+  var sleepTimerOption: SleepTimerOption = .off
+  var sleepTimerRemaining: TimeInterval = 0
+  private var sleepTimer: Timer?
 
   // Audio interruption handling - track if we should resume after interruption ends
   private var wasPlayingBeforeInterruption: Bool = false
@@ -523,6 +575,88 @@ private func handleAudioInterruption(_ notification: Notification) {
     logger.info("Skipped \(episodesToRemove.count) episodes in queue")
   }
 
+  // MARK: - Sleep Timer
+
+  /// Set the sleep timer option
+  func setSleepTimer(_ option: SleepTimerOption) {
+    // Cancel existing timer
+    sleepTimer?.invalidate()
+    sleepTimer = nil
+    sleepTimerOption = option
+
+    switch option {
+    case .off:
+      sleepTimerRemaining = 0
+      logger.info("Sleep timer disabled")
+
+    case .endOfEpisode:
+      sleepTimerRemaining = 0  // Will be calculated dynamically
+      logger.info("Sleep timer set to end of episode")
+
+    default:
+      if let timerDuration = option.duration {
+        sleepTimerRemaining = timerDuration
+        startSleepTimerCountdown()
+        logger.info("Sleep timer set for \(timerDuration / 60) minutes")
+      }
+    }
+  }
+
+  /// Start the countdown timer
+  private func startSleepTimerCountdown() {
+    sleepTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+      guard let self else { return }
+      Task { @MainActor in
+        self.updateSleepTimer()
+      }
+    }
+  }
+
+  /// Update sleep timer countdown
+  private func updateSleepTimer() {
+    guard sleepTimerOption != .off else { return }
+
+    if sleepTimerOption == .endOfEpisode {
+      // No countdown for end of episode - handled in handlePlaybackEnded
+      return
+    }
+
+    if sleepTimerRemaining > 0 {
+      sleepTimerRemaining -= 1
+    }
+
+    if sleepTimerRemaining <= 0 {
+      triggerSleepTimer()
+    }
+  }
+
+  /// Trigger the sleep timer (pause playback)
+  private func triggerSleepTimer() {
+    logger.info("Sleep timer triggered - pausing playback")
+    pause()
+    sleepTimer?.invalidate()
+    sleepTimer = nil
+    sleepTimerOption = .off
+    sleepTimerRemaining = 0
+  }
+
+  /// Format remaining time for display
+  var sleepTimerRemainingFormatted: String {
+    guard sleepTimerRemaining > 0 else { return "" }
+    let minutes = Int(sleepTimerRemaining) / 60
+    let seconds = Int(sleepTimerRemaining) % 60
+    if minutes > 0 {
+      return String(format: "%d:%02d", minutes, seconds)
+    } else {
+      return String(format: "0:%02d", seconds)
+    }
+  }
+
+  /// Check if sleep timer is active
+  var isSleepTimerActive: Bool {
+    sleepTimerOption != .off
+  }
+
   /// Restore the last played episode on app launch (without playing)
   func restoreLastEpisode() {
     guard !hasRestoredLastEpisode else { return }
@@ -920,6 +1054,15 @@ private func handleAudioInterruption(_ notification: Notification) {
     // Remove current episode from auto-play candidates (it's been fully played)
     if let currentId = currentEpisode?.id {
       removeFromAutoPlayCandidates(currentId)
+    }
+
+    // Check if sleep timer is set to "end of episode"
+    if sleepTimerOption == .endOfEpisode {
+      logger.info("Sleep timer: end of episode reached - stopping playback")
+      sleepTimerOption = .off
+      sleepTimerRemaining = 0
+      clearPlaybackState()
+      return
     }
 
     // Check if there's a next episode in queue

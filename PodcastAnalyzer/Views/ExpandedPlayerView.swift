@@ -20,6 +20,7 @@ struct ExpandedPlayerView: View {
   @State private var showQueue = false
   @State private var showEllipsisMenu = false
   @State private var showFullTranscript = false
+  @State private var showSleepTimerPicker = false
 
   // Scrubbing state for smooth slider interaction
   @State private var isScrubbing = false
@@ -316,13 +317,14 @@ struct ExpandedPlayerView: View {
             .fill(Color.gray.opacity(0.3))
             .frame(height: 6)
 
-          // Progress
+          // Progress - smooth animation when not scrubbing
           Capsule()
             .fill(Color.primary)
             .frame(
               width: geometry.size.width * CGFloat(displayProgress),
               height: 6
             )
+            .animation(isScrubbing ? nil : .linear(duration: 0.1), value: displayProgress)
 
           // Thumb - slightly larger when scrubbing for better feedback
           Circle()
@@ -334,8 +336,10 @@ struct ExpandedPlayerView: View {
                 min(geometry.size.width * CGFloat(displayProgress) - (isScrubbing ? 9 : 7), geometry.size.width - (isScrubbing ? 18 : 14))
               )
             )
-            .animation(.easeOut(duration: 0.1), value: isScrubbing)
+            .animation(isScrubbing ? nil : .easeOut(duration: 0.15), value: displayProgress)
+            .animation(.spring(response: 0.2, dampingFraction: 0.8), value: isScrubbing)
         }
+        .contentShape(Rectangle())
         .gesture(
           DragGesture(minimumDistance: 0)
             .onChanged { value in
@@ -343,7 +347,9 @@ struct ExpandedPlayerView: View {
               guard !viewModel.isDurationLoading else { return }
               // Start scrubbing - only update visual progress, don't seek yet
               if !isScrubbing {
-                isScrubbing = true
+                withAnimation(.easeOut(duration: 0.1)) {
+                  isScrubbing = true
+                }
                 scrubbingProgress = viewModel.progress
               }
               let progress = value.location.x / geometry.size.width
@@ -352,11 +358,18 @@ struct ExpandedPlayerView: View {
             .onEnded { value in
               // Only seek if duration is available
               guard !viewModel.isDurationLoading else { return }
-              // End scrubbing - now perform the actual seek
+              // End scrubbing - perform the actual seek
               let progress = value.location.x / geometry.size.width
               let finalProgress = min(max(0, progress), 1)
+
+              // First seek to the position
               viewModel.seekToProgress(finalProgress)
-              isScrubbing = false
+
+              // Then smoothly transition out of scrubbing mode
+              // Keep scrubbing progress at final value briefly to prevent snap-back
+              withAnimation(.easeOut(duration: 0.2)) {
+                isScrubbing = false
+              }
             }
         )
         .opacity(viewModel.isDurationLoading ? 0.5 : 1.0)
@@ -369,6 +382,7 @@ struct ExpandedPlayerView: View {
           .font(.caption)
           .foregroundColor(isScrubbing ? .primary : .secondary)
           .monospacedDigit()
+          .animation(.easeOut(duration: 0.15), value: isScrubbing)
 
         Spacer()
 
@@ -376,6 +390,7 @@ struct ExpandedPlayerView: View {
           .font(.caption)
           .foregroundColor(isScrubbing ? .primary : .secondary)
           .monospacedDigit()
+          .animation(.easeOut(duration: 0.15), value: isScrubbing)
       }
     }
   }
@@ -440,13 +455,41 @@ struct ExpandedPlayerView: View {
       Spacer()
 
       // Sleep timer button
-      Button(action: {}) {
-        Image(systemName: "moon.zzz")
-          .font(.system(size: 20))
-          .foregroundColor(.primary)
-          .frame(width: 44, height: 44)
-          .background(Color.gray.opacity(0.2))
-          .clipShape(Circle())
+      Menu {
+        ForEach(SleepTimerOption.allCases, id: \.self) { option in
+          Button(action: { viewModel.setSleepTimer(option) }) {
+            HStack {
+              Label(option.displayName, systemImage: option.systemImage)
+              if viewModel.sleepTimerOption == option {
+                Spacer()
+                Image(systemName: "checkmark")
+              }
+            }
+          }
+        }
+      } label: {
+        ZStack {
+          Circle()
+            .fill(viewModel.isSleepTimerActive ? Color.blue : Color.gray.opacity(0.2))
+            .frame(width: 44, height: 44)
+
+          if viewModel.isSleepTimerActive {
+            if viewModel.sleepTimerOption == .endOfEpisode {
+              Image(systemName: "stop.circle.fill")
+                .font(.system(size: 20))
+                .foregroundColor(.white)
+            } else {
+              Text(viewModel.sleepTimerRemainingFormatted)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.white)
+                .minimumScaleFactor(0.5)
+            }
+          } else {
+            Image(systemName: "moon.zzz")
+              .font(.system(size: 20))
+              .foregroundColor(.primary)
+          }
+        }
       }
     }
     .padding(.horizontal, 24)
