@@ -33,6 +33,15 @@ struct iOSContentView: View {
   @State private var notificationLanguage: String = "en"
   @State private var showNotificationEpisode: Bool = false
 
+  // Navigation state for expanded player navigation
+  @State private var expandedPlayerNavigation: ExpandedPlayerNavigation = .none
+  @State private var expandedPlayerEpisode: PodcastEpisodeInfo?
+  @State private var expandedPlayerPodcastTitle: String = ""
+  @State private var expandedPlayerImageURL: String?
+  @State private var showExpandedPlayerEpisode: Bool = false
+  @State private var expandedPlayerPodcastModel: PodcastInfoModel?
+  @State private var showExpandedPlayerPodcast: Bool = false
+
     private var showMiniPlayer: Bool {
         // Change this to true so it always shows even if empty
         return true
@@ -53,6 +62,20 @@ struct iOSContentView: View {
                 )
               }
             }
+            .navigationDestination(isPresented: $showExpandedPlayerEpisode) {
+              if let episode = expandedPlayerEpisode {
+                EpisodeDetailView(
+                  episode: episode,
+                  podcastTitle: expandedPlayerPodcastTitle,
+                  fallbackImageURL: expandedPlayerImageURL
+                )
+              }
+            }
+            .navigationDestination(isPresented: $showExpandedPlayerPodcast) {
+              if let podcastModel = expandedPlayerPodcastModel {
+                EpisodeListView(podcastModel: podcastModel)
+              }
+            }
         }
       }
 
@@ -70,8 +93,11 @@ struct iOSContentView: View {
     }
     .tabViewBottomAccessory {
       if showMiniPlayer {
-        MiniPlayerBar()
+        MiniPlayerBar(pendingNavigation: $expandedPlayerNavigation)
       }
+    }
+    .onChange(of: expandedPlayerNavigation) { _, newValue in
+      handleExpandedPlayerNavigation(newValue)
     }
     .tabBarMinimizeBehavior(.onScrollDown)
     .onAppear {
@@ -119,6 +145,29 @@ struct iOSContentView: View {
 
     // Clear the navigation state
     notificationManager.clearNavigation()
+  }
+
+  private func handleExpandedPlayerNavigation(_ navigation: ExpandedPlayerNavigation) {
+    switch navigation {
+    case .none:
+      break
+    case let .episodeDetail(episode, podcastTitle, imageURL):
+      // Small delay to allow sheet dismissal animation to complete
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        expandedPlayerEpisode = episode
+        expandedPlayerPodcastTitle = podcastTitle
+        expandedPlayerImageURL = imageURL
+        showExpandedPlayerEpisode = true
+        expandedPlayerNavigation = .none
+      }
+    case let .podcastEpisodeList(podcastModel):
+      // Small delay to allow sheet dismissal animation to complete
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        expandedPlayerPodcastModel = podcastModel
+        showExpandedPlayerPodcast = true
+        expandedPlayerNavigation = .none
+      }
+    }
   }
 }
 #endif

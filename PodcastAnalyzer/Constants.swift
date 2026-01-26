@@ -22,17 +22,32 @@ struct Constants {
   // Apple RSS Marketing API for top podcasts
   static let appleRSSBaseURL = "https://rss.marketingtools.apple.com/api/v2"
 
-  // Available regions for top podcasts
-  static let podcastRegions: [(code: String, name: String)] = [
-    ("us", "United States"),
-    ("tw", "Taiwan"),
-    ("jp", "Japan"),
-    ("gb", "United Kingdom"),
-    ("au", "Australia"),
-    ("ca", "Canada"),
-    ("de", "Germany"),
-    ("fr", "France"),
-    ("kr", "South Korea"),
-    ("hk", "Hong Kong")
+  // Available regions for top podcasts with flag emojis
+  static let podcastRegions: [(code: String, name: String, flag: String)] = [
+    ("us", "United States", "🇺🇸"),
+    ("tw", "Taiwan", "🇹🇼"),
+    ("jp", "Japan", "🇯🇵"),
+    ("gb", "United Kingdom", "🇬🇧"),
+    ("au", "Australia", "🇦🇺"),
+    ("ca", "Canada", "🇨🇦"),
+    ("de", "Germany", "🇩🇪"),
+    ("fr", "France", "🇫🇷"),
+    ("kr", "South Korea", "🇰🇷"),
+    ("hk", "Hong Kong", "🇭🇰"),
+    ("my", "Malaysia", "🇲🇾"),
+    ("in", "India", "🇮🇳"),
+    ("cn", "China", "🇨🇳"),
+    ("sg", "Singapore", "🇸🇬"),
+    ("id", "Indonesia", "🇮🇩"),
+    ("th", "Thailand", "🇹🇭"),
+    ("vn", "Vietnam", "🇻🇳"),
+    ("ph", "Philippines", "🇵🇭"),
+    ("nz", "New Zealand", "🇳🇿"),
+    ("es", "Spain", "🇪🇸"),
+    ("it", "Italy", "🇮🇹"),
+    ("br", "Brazil", "🇧🇷"),
+    ("mx", "Mexico", "🇲🇽"),
+    ("nl", "Netherlands", "🇳🇱"),
+    ("se", "Sweden", "🇸🇪")
   ]
 }

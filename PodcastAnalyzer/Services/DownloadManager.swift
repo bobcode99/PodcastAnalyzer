@@ -40,11 +40,26 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
     var activeDownloads: [String: URLSessionDownloadTask] = [:]
     var originalURLs: [String: URL] = [:]
     var episodeLanguages: [String: String] = [:]
+    var transcriptURLs: [String: String] = [:]
+    var transcriptTypes: [String: String] = [:]
 
-    func setDownload(_ task: URLSessionDownloadTask, for key: String, originalURL: URL, language: String) {
+    func setDownload(
+      _ task: URLSessionDownloadTask,
+      for key: String,
+      originalURL: URL,
+      language: String,
+      transcriptURL: String? = nil,
+      transcriptType: String? = nil
+    ) {
       activeDownloads[key] = task
       originalURLs[key] = originalURL
       episodeLanguages[key] = language
+      if let url = transcriptURL {
+        transcriptURLs[key] = url
+      }
+      if let type = transcriptType {
+        transcriptTypes[key] = type
+      }
     }
 
     func getDownloadKey(for task: URLSessionTask) -> String? {
@@ -59,10 +74,19 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
       episodeLanguages[key] ?? "en"
     }
 
+    func getTranscriptInfo(for key: String) -> (url: String, type: String)? {
+      guard let url = transcriptURLs[key], let type = transcriptTypes[key] else {
+        return nil
+      }
+      return (url, type)
+    }
+
     func removeDownload(for key: String) {
       activeDownloads.removeValue(forKey: key)
       originalURLs.removeValue(forKey: key)
       episodeLanguages.removeValue(forKey: key)
+      transcriptURLs.removeValue(forKey: key)
+      transcriptTypes.removeValue(forKey: key)
     }
 
     func cancelDownload(for key: String) -> URLSessionDownloadTask? {
@@ -70,6 +94,8 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
       activeDownloads.removeValue(forKey: key)
       originalURLs.removeValue(forKey: key)
       episodeLanguages.removeValue(forKey: key)
+      transcriptURLs.removeValue(forKey: key)
+      transcriptTypes.removeValue(forKey: key)
       return task
     }
   }
@@ -100,7 +126,15 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
 
   // MARK: - Public Methods (called from DownloadManager)
 
-  func startDownload(url: URL, episodeTitle: String, podcastTitle: String, language: String, session: URLSession) async -> URLSessionDownloadTask {
+  func startDownload(
+    url: URL,
+    episodeTitle: String,
+    podcastTitle: String,
+    language: String,
+    transcriptURL: String? = nil,
+    transcriptType: String? = nil,
+    session: URLSession
+  ) async -> URLSessionDownloadTask {
     let episodeKey = makeKey(episode: episodeTitle, podcast: podcastTitle)
 
     // Cancel existing download if any
@@ -109,7 +143,14 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
     }
 
     let task = session.downloadTask(with: url)
-    await downloadTracker.setDownload(task, for: episodeKey, originalURL: url, language: language)
+    await downloadTracker.setDownload(
+      task,
+      for: episodeKey,
+      originalURL: url,
+      language: language,
+      transcriptURL: transcriptURL,
+      transcriptType: transcriptType
+    )
     return task
   }
 
@@ -196,6 +237,9 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
         // Get language for auto-transcript
         let language = await downloadTracker.getLanguage(for: episodeKey)
 
+        // Get transcript info for auto-download
+        let transcriptInfo = await downloadTracker.getTranscriptInfo(for: episodeKey)
+
         // Remove from tracker
         await downloadTracker.removeDownload(for: episodeKey)
 
@@ -223,6 +267,25 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
               audioPath: destinationURL.path,
               language: language
             )
+          }
+        }
+
+        // Auto-download RSS transcript if enabled and available
+        if let info = transcriptInfo,
+           let url = URL(string: info.url) {
+          let settings = await MainActor.run { SubtitleSettingsManager.shared }
+          if await settings.autoDownloadTranscripts {
+            do {
+              _ = try await TranscriptDownloadService.shared.downloadTranscript(
+                from: url,
+                type: info.type,
+                episodeTitle: episodeTitle,
+                podcastTitle: podcastTitle
+              )
+              logger.info("Auto-downloaded RSS transcript for: \(episodeTitle)")
+            } catch {
+              logger.warning("Auto-download RSS transcript failed: \(error.localizedDescription)")
+            }
           }
         }
 
@@ -385,6 +448,8 @@ final class DownloadManager {
         episodeTitle: episode.title,
         podcastTitle: podcastTitle,
         language: language,
+        transcriptURL: episode.transcriptURL,
+        transcriptType: episode.transcriptType,
         session: urlSession
       )
       task.resume()

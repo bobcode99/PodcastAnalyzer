@@ -17,7 +17,9 @@ final class HomeViewModel {
   // Static cache shared across all instances to prevent duplicate API calls
   private static var cachedTopPodcasts: [AppleRSSPodcast] = []
   private static var cachedRegion: String = ""
-  private static var isLoadingTopPodcastsGlobally = false
+  // Replace boolean flag with Task to allow joining
+  private static var loadingTask: Task<[AppleRSSPodcast], Error>?
+  private static var loadingRegion: String?
 
   // Up Next episodes (unplayed from subscribed podcasts)
   var upNextEpisodes: [LibraryEpisode] = []
@@ -70,7 +72,14 @@ final class HomeViewModel {
   private static let episodeKeyDelimiter = "\u{1F}"
 
   var selectedRegionName: String {
-    Constants.podcastRegions.first { $0.code == selectedRegion }?.name ?? selectedRegion.uppercased()
+    if let region = Constants.podcastRegions.first(where: { $0.code == selectedRegion }) {
+      return "\(region.flag) \(region.name)"
+    }
+    return selectedRegion.uppercased()
+  }
+
+  var selectedRegionFlag: String {
+    Constants.podcastRegions.first { $0.code == selectedRegion }?.flag ?? "🌍"
   }
 
   init() {
@@ -242,37 +251,91 @@ final class HomeViewModel {
   // MARK: - Load Top Podcasts
 
   private func loadTopPodcasts(forceRefresh: Bool = false) async {
+    let regionToLoad = selectedRegion
+
     // Use cached data if available for this region (unless force refresh)
-    if !forceRefresh && !Self.cachedTopPodcasts.isEmpty && Self.cachedRegion == selectedRegion {
+    if !forceRefresh && !Self.cachedTopPodcasts.isEmpty && Self.cachedRegion == regionToLoad {
       // Sync instance property from cache (for UI updates)
       if topPodcasts.isEmpty {
         topPodcasts = Self.cachedTopPodcasts
       }
-      logger.debug("Using cached top podcasts for \(self.selectedRegion)")
+      logger.debug("Using cached top podcasts for \(regionToLoad)")
       return
     }
 
-    // Skip if already loading globally
-    guard !Self.isLoadingTopPodcastsGlobally else {
-      logger.debug("Already loading top podcasts, skipping")
+    // Always join existing task if it matches our region (prevents duplicate requests)
+    if let task = Self.loadingTask, Self.loadingRegion == regionToLoad {
+      logger.debug("Joining existing top podcasts load task for \(regionToLoad)")
+      isLoadingTopPodcasts = true
+      do {
+        let podcasts = try await task.value
+        if selectedRegion == regionToLoad {
+          topPodcasts = podcasts
+        }
+      } catch {
+        logger.error("Joined task failed: \(error.localizedDescription)")
+      }
+      isLoadingTopPodcasts = false
       return
     }
 
-    Self.isLoadingTopPodcastsGlobally = true
+    // Start new task
+    logger.info("Starting new top podcasts load for \(regionToLoad)")
     isLoadingTopPodcasts = true
+    Self.loadingRegion = regionToLoad
+
+    // Clean up old data if force refreshing or changing region
+    if forceRefresh || Self.cachedRegion != regionToLoad {
+      topPodcasts = []
+      Self.cachedTopPodcasts = []
+      Self.cachedRegion = ""
+    }
+
+    // Create shared task with retry logic for transient API failures
+    let task = Task { () -> [AppleRSSPodcast] in
+      var lastError: Error?
+      for attempt in 1...3 {
+        do {
+          return try await applePodcastService.fetchTopPodcasts(region: regionToLoad, limit: 25)
+        } catch {
+          lastError = error
+          // Only retry on server errors (5xx) or network errors
+          let nsError = error as NSError
+          let isServerError = nsError.domain == NSURLErrorDomain ||
+                              (error as? URLError)?.code == .badServerResponse
+          if isServerError && attempt < 3 {
+            logger.warning("Retry \(attempt)/3 for region \(regionToLoad) after error: \(error.localizedDescription)")
+            try? await Task.sleep(for: .milliseconds(500 * attempt))  // Exponential backoff
+            continue
+          }
+          throw error
+        }
+      }
+      throw lastError ?? URLError(.unknown)
+    }
+    Self.loadingTask = task
 
     do {
-      let podcasts = try await applePodcastService.fetchTopPodcasts(region: selectedRegion, limit: 25)
+      let podcasts = try await task.value
       // Update both static cache and observable instance property
       Self.cachedTopPodcasts = podcasts
-      Self.cachedRegion = selectedRegion
-      topPodcasts = podcasts  // This triggers SwiftUI update
-      logger.info("Loaded \(podcasts.count) top podcasts for \(self.selectedRegion)")
+      Self.cachedRegion = regionToLoad
+
+      // Update instance property only if region hasn't changed
+      if selectedRegion == regionToLoad {
+        topPodcasts = podcasts
+      }
+      logger.info("Loaded \(podcasts.count) top podcasts for \(regionToLoad)")
     } catch {
       logger.error("Failed to load top podcasts: \(error.localizedDescription)")
     }
 
-    Self.isLoadingTopPodcastsGlobally = false
+    // Cleanup static state if it's still ours
+    if Self.loadingRegion == regionToLoad {
+      Self.loadingRegion = nil
+      Self.loadingTask = nil
+    }
+
     isLoadingTopPodcasts = false
   }
 

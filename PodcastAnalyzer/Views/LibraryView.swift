@@ -20,6 +20,16 @@ struct LibraryView: View {
   @State private var viewModel = LibraryViewModel(modelContext: nil)
   @Environment(\.modelContext) private var modelContext
 
+  // Use @Query for instant persistence and automatic updates
+  @Query(
+    filter: #Predicate<PodcastInfoModel> { $0.isSubscribed },
+    sort: \.lastUpdated,
+    order: .reverse
+  ) private var subscribedPodcasts: [PodcastInfoModel]
+
+  // Cached sorted podcasts to avoid re-sorting on every render
+  @State private var sortedPodcasts: [PodcastInfoModel] = []
+
   // Grid layout: 2 columns
   private let columns = [
     GridItem(.flexible(), spacing: 12),
@@ -29,6 +39,10 @@ struct LibraryView: View {
   // Context menu state
   @State private var podcastToUnsubscribe: PodcastInfoModel?
   @State private var showUnsubscribeConfirmation = false
+
+  // Notification observers
+  @State private var syncObserver: NSObjectProtocol?
+  @State private var downloadObserver: NSObjectProtocol?
 
   var body: some View {
     NavigationStack {
@@ -47,7 +61,9 @@ struct LibraryView: View {
           .padding(.bottom, 40)
         }
 
-        if viewModel.isLoading && viewModel.podcastInfoModelList.isEmpty {
+        // Initial loading state only when truly empty
+        if viewModel.isLoading && subscribedPodcasts.isEmpty
+            && viewModel.savedEpisodes.isEmpty && viewModel.downloadedEpisodes.isEmpty {
           ProgressView("Loading Library...")
             .scaleEffect(1.5)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -55,29 +71,28 @@ struct LibraryView: View {
         }
       }
       .navigationTitle(Constants.libraryString)
-      .toolbar {
-        ToolbarItem(placement: .primaryAction) {
-          Button(action: {
-            Task {
-              await viewModel.refreshAllPodcasts()
-            }
-          }) {
-            Image(systemName: "arrow.clockwise")
-          }
-          .disabled(viewModel.isLoading)
-        }
-      }
       .platformToolbarTitleDisplayMode()
       .refreshable {
         await viewModel.refreshAllPodcasts()
       }
     }
     .onAppear {
-      // This is the key: set the context once
+      // Set the context and initial podcasts
       viewModel.setModelContext(modelContext)
+      viewModel.setPodcasts(subscribedPodcasts)
+      updateSortedPodcasts()
+      setupNotificationObservers()
+    }
+    .onChange(of: subscribedPodcasts) { _, newPodcasts in
+      viewModel.setPodcasts(newPodcasts)
+      // Update sorted cache with animation
+      withAnimation(.easeInOut(duration: 0.3)) {
+        updateSortedPodcasts()
+      }
     }
     .onDisappear {
       viewModel.cleanup()
+      removeNotificationObservers()
     }
     .confirmationDialog(
       "Unsubscribe from Podcast",
@@ -113,7 +128,8 @@ struct LibraryView: View {
             icon: "star.fill",
             iconColor: .yellow,
             title: "Saved",
-            count: viewModel.savedEpisodes.count
+            count: viewModel.savedEpisodes.count,
+            isLoading: false
           )
         }
         .buttonStyle(.plain)
@@ -124,7 +140,8 @@ struct LibraryView: View {
             icon: "arrow.down.circle.fill",
             iconColor: .green,
             title: "Downloaded",
-            count: viewModel.downloadedEpisodes.count
+            count: viewModel.downloadedEpisodes.count,
+            isLoading: false
           )
         }
         .buttonStyle(.plain)
@@ -146,12 +163,12 @@ struct LibraryView: View {
           Spacer()
 
           HStack(spacing: 4) {
-            Text("\(viewModel.latestEpisodes.count)")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            Image(systemName: "chevron.right")
-              .font(.caption)
-              .foregroundColor(.secondary)
+             Text("\(viewModel.latestEpisodes.count)")
+               .font(.caption)
+               .foregroundColor(.secondary)
+             Image(systemName: "chevron.right")
+               .font(.caption)
+               .foregroundColor(.secondary)
           }
         }
         .padding(.horizontal, 16)
@@ -160,6 +177,55 @@ struct LibraryView: View {
         .cornerRadius(12)
       }
       .buttonStyle(.plain)
+    }
+  }
+
+  // MARK: - Helper Methods
+
+  private func updateSortedPodcasts() {
+    sortedPodcasts = subscribedPodcasts.sorted { p1, p2 in
+      let date1 = p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      let date2 = p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      return date1 > date2
+    }
+  }
+
+  private func setupNotificationObservers() {
+    // Listen for sync completion to refresh data
+    syncObserver = NotificationCenter.default.addObserver(
+      forName: .podcastSyncCompleted,
+      object: nil,
+      queue: .main
+    ) { [self] _ in
+      Task { @MainActor in
+        // Refresh the view model data
+        viewModel.setModelContext(modelContext)
+        withAnimation(.easeInOut(duration: 0.3)) {
+          updateSortedPodcasts()
+        }
+      }
+    }
+
+    // Listen for download completion to update counts
+    downloadObserver = NotificationCenter.default.addObserver(
+      forName: .episodeDownloadCompleted,
+      object: nil,
+      queue: .main
+    ) { [self] _ in
+      Task { @MainActor in
+        viewModel.setModelContext(modelContext)
+      }
+    }
+  }
+
+  private func removeNotificationObservers() {
+    if let observer = syncObserver {
+      NotificationCenter.default.removeObserver(observer)
+      syncObserver = nil
+    }
+    if let observer = downloadObserver {
+      NotificationCenter.default.removeObserver(observer)
+      downloadObserver = nil
     }
   }
 
@@ -174,16 +240,16 @@ struct LibraryView: View {
 
         Spacer()
 
-        Text("\(viewModel.podcastsSortedByRecentUpdate.count)")
-          .font(.subheadline)
-          .foregroundColor(.secondary)
+          Text("\(sortedPodcasts.count)")
+            .font(.subheadline)
+            .foregroundColor(.secondary)
       }
 
-      if viewModel.podcastsSortedByRecentUpdate.isEmpty {
+      if sortedPodcasts.isEmpty {
         emptyPodcastsView
       } else {
         LazyVGrid(columns: columns, spacing: 16) {
-          ForEach(viewModel.podcastsSortedByRecentUpdate) { podcast in
+          ForEach(sortedPodcasts) { podcast in
             NavigationLink(destination: EpisodeListView(podcastModel: podcast)) {
               PodcastGridCell(podcast: podcast)
             }
@@ -278,6 +344,7 @@ struct QuickAccessCard: View {
   let iconColor: Color
   let title: String
   let count: Int
+  var isLoading: Bool = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -288,9 +355,14 @@ struct QuickAccessCard: View {
 
         Spacer()
 
-        Image(systemName: "chevron.right")
-          .font(.caption)
-          .foregroundColor(.secondary)
+        if isLoading {
+          ProgressView()
+            .scaleEffect(0.6)
+        } else {
+          Image(systemName: "chevron.right")
+            .font(.caption)
+            .foregroundColor(.secondary)
+        }
       }
 
       Spacer()
@@ -400,6 +472,9 @@ struct SavedEpisodesView: View {
     #endif
     .onAppear {
       viewModel.setModelContext(modelContext)
+      Task {
+        await viewModel.refreshSavedEpisodes()
+      }
     }
     .confirmationDialog(
       "Delete Download",
@@ -450,7 +525,8 @@ struct SavedEpisodesView: View {
     if let model = fetchEpisodeModel(for: episode) {
       model.isStarred.toggle()
       try? modelContext.save()
-      viewModel.setModelContext(modelContext)
+      // Refresh only saved section
+      Task { await viewModel.refreshSavedEpisodes() }
     }
   }
 
@@ -461,7 +537,8 @@ struct SavedEpisodesView: View {
         model.lastPlaybackPosition = 0
       }
       try? modelContext.save()
-      viewModel.setModelContext(modelContext)
+      // Refresh to update UI state
+      Task { await viewModel.refreshSavedEpisodes() }
     }
   }
 
@@ -478,7 +555,15 @@ struct SavedEpisodesView: View {
       episodeTitle: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle
     )
-    viewModel.setModelContext(modelContext)
+    
+    // Update model immediately
+    if let model = fetchEpisodeModel(for: episode) {
+        model.localAudioPath = nil
+        try? modelContext.save()
+    }
+    
+    // Refresh list
+    Task { await viewModel.refreshSavedEpisodes() }
   }
 }
 
@@ -493,23 +578,54 @@ struct DownloadedEpisodesView: View {
 
   var body: some View {
     Group {
-      if viewModel.downloadedEpisodes.isEmpty {
+      if viewModel.downloadedEpisodes.isEmpty && viewModel.downloadingEpisodes.isEmpty {
         emptyStateView
       } else {
-        List(viewModel.filteredDownloadedEpisodes) { episode in
-          EpisodeRowView(
-            libraryEpisode: episode,
-            episodeModel: fetchEpisodeModel(for: episode),
-            showArtwork: settingsViewModel.showEpisodeArtwork,
-            onToggleStar: { toggleStar(episode) },
-            onDownload: { downloadEpisode(episode) },
-            onDeleteRequested: {
-              episodeToDelete = episode
-              showDeleteConfirmation = true
-            },
-            onTogglePlayed: { togglePlayed(episode) }
-          )
-          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        List {
+          // Downloading Section
+          if !viewModel.downloadingEpisodes.isEmpty {
+            Section {
+              ForEach(viewModel.downloadingEpisodes) { downloading in
+                DownloadingEpisodeRow(episode: downloading)
+                  .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+              }
+            } header: {
+              Text("Downloading")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+                .textCase(nil)
+            }
+          }
+
+          // Downloaded Section
+          if !viewModel.filteredDownloadedEpisodes.isEmpty {
+            Section {
+              ForEach(viewModel.filteredDownloadedEpisodes) { episode in
+                EpisodeRowView(
+                  libraryEpisode: episode,
+                  episodeModel: fetchEpisodeModel(for: episode),
+                  showArtwork: settingsViewModel.showEpisodeArtwork,
+                  onToggleStar: { toggleStar(episode) },
+                  onDownload: { downloadEpisode(episode) },
+                  onDeleteRequested: {
+                    episodeToDelete = episode
+                    showDeleteConfirmation = true
+                  },
+                  onTogglePlayed: { togglePlayed(episode) }
+                )
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+              }
+            } header: {
+              if !viewModel.downloadingEpisodes.isEmpty {
+                Text("Downloaded")
+                  .font(.subheadline)
+                  .fontWeight(.semibold)
+                  .foregroundColor(.primary)
+                  .textCase(nil)
+              }
+            }
+          }
         }
         .listStyle(.plain)
         .refreshable {
@@ -524,6 +640,9 @@ struct DownloadedEpisodesView: View {
     #endif
     .onAppear {
       viewModel.setModelContext(modelContext)
+      Task {
+        await viewModel.refreshDownloadedEpisodes()
+      }
     }
     .confirmationDialog(
       "Delete Download",
@@ -574,7 +693,7 @@ struct DownloadedEpisodesView: View {
     if let model = fetchEpisodeModel(for: episode) {
       model.isStarred.toggle()
       try? modelContext.save()
-      viewModel.setModelContext(modelContext)
+      Task { await viewModel.refreshDownloadedEpisodes() }
     }
   }
 
@@ -585,7 +704,7 @@ struct DownloadedEpisodesView: View {
         model.lastPlaybackPosition = 0
       }
       try? modelContext.save()
-      viewModel.setModelContext(modelContext)
+      Task { await viewModel.refreshDownloadedEpisodes() }
     }
   }
 
@@ -602,7 +721,93 @@ struct DownloadedEpisodesView: View {
       episodeTitle: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle
     )
-    viewModel.setModelContext(modelContext)
+    
+    // Update model immediately
+    if let model = fetchEpisodeModel(for: episode) {
+        model.localAudioPath = nil
+        try? modelContext.save()
+    }
+    
+    // Refresh list
+    Task { await viewModel.refreshDownloadedEpisodes() }
+  }
+}
+
+// MARK: - Downloading Episode Row
+
+struct DownloadingEpisodeRow: View {
+  let episode: DownloadingEpisode
+
+  private var statusText: String {
+    switch episode.state {
+    case .downloading(let progress):
+      return "\(Int(progress * 100))%"
+    case .finishing:
+      return "Finishing..."
+    default:
+      return ""
+    }
+  }
+
+  var body: some View {
+    HStack(spacing: 12) {
+      // Artwork
+      AsyncImage(url: URL(string: episode.imageURL ?? "")) { phase in
+        switch phase {
+        case .success(let image):
+          image
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+        case .failure, .empty:
+          Rectangle()
+            .fill(Color.gray.opacity(0.2))
+            .overlay(
+              Image(systemName: "music.note")
+                .foregroundColor(.gray)
+            )
+        @unknown default:
+          Rectangle()
+            .fill(Color.gray.opacity(0.2))
+        }
+      }
+      .frame(width: 56, height: 56)
+      .cornerRadius(8)
+
+      // Title and progress
+      VStack(alignment: .leading, spacing: 4) {
+        Text(episode.episodeTitle)
+          .font(.subheadline)
+          .fontWeight(.medium)
+          .lineLimit(2)
+
+        Text(episode.podcastTitle)
+          .font(.caption)
+          .foregroundColor(.secondary)
+          .lineLimit(1)
+
+        // Progress bar
+        GeometryReader { geo in
+          ZStack(alignment: .leading) {
+            Capsule()
+              .fill(Color.blue.opacity(0.2))
+              .frame(height: 4)
+            Capsule()
+              .fill(Color.blue)
+              .frame(width: geo.size.width * episode.progress, height: 4)
+          }
+        }
+        .frame(height: 4)
+      }
+
+      Spacer()
+
+      // Status
+      Text(statusText)
+        .font(.caption)
+        .foregroundColor(.blue)
+        .fontWeight(.medium)
+    }
+    .padding(.vertical, 4)
   }
 }
 

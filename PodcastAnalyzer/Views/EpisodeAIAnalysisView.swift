@@ -24,6 +24,7 @@ struct EpisodeAIAnalysisView: View {
     #endif
   }
   @Bindable var viewModel: EpisodeDetailViewModel
+  var embedsOwnScroll: Bool = true  // When false, parent provides scrolling (for embedded mode)
 
   @State private var selectedTab: CloudAnalysisTab = .summary
   @State private var questionInput: String = ""
@@ -49,21 +50,15 @@ struct EpisodeAIAnalysisView: View {
 
       Divider()
 
-      // Content area
-      ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-          switch selectedTab {
-          case .summary: summaryTab
-          case .entities: entitiesTab
-          case .highlights: highlightsTab
-          case .fullAnalysis: fullAnalysisTab
-          case .askQuestion: questionAnswerTab
-          }
+      // Content area - conditionally wrap in ScrollView based on embedsOwnScroll
+      if embedsOwnScroll {
+        ScrollView {
+          aiContentView
         }
-        .padding()
+      } else {
+        aiContentView
       }
     }
-    .navigationTitle("AI Analysis")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif
@@ -87,6 +82,21 @@ struct EpisodeAIAnalysisView: View {
           }
       }
     }
+  }
+
+  // MARK: - AI Content View (shared between scrolled and non-scrolled modes)
+
+  private var aiContentView: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      switch selectedTab {
+      case .summary: summaryTab
+      case .entities: entitiesTab
+      case .highlights: highlightsTab
+      case .fullAnalysis: fullAnalysisTab
+      case .askQuestion: questionAnswerTab
+      }
+    }
+    .padding()
   }
 
   // MARK: - Configuration Banner
@@ -116,7 +126,9 @@ struct EpisodeAIAnalysisView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.small)
       }
-      .padding()
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+      .frame(minHeight: 60)
       .background(Color.orange.opacity(0.1))
     } else if !viewModel.hasTranscript {
       // No transcript available
@@ -130,7 +142,9 @@ struct EpisodeAIAnalysisView: View {
 
         Spacer()
       }
-      .padding()
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+      .frame(minHeight: 60)
       .background(Color.blue.opacity(0.1))
     } else {
       // Ready to analyze
@@ -149,8 +163,9 @@ struct EpisodeAIAnalysisView: View {
             .font(.caption)
         }
       }
-      .padding(.horizontal)
-      .padding(.vertical, 8)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+      .frame(minHeight: 60)
       .background(Color.green.opacity(0.05))
     }
   }
@@ -286,20 +301,45 @@ struct EpisodeAIAnalysisView: View {
         description: "Ask any question about the episode content"
       )
 
-      // Question input
-      HStack {
-        TextField("Enter your question...", text: $questionInput)
-          .textFieldStyle(.roundedBorder)
+      // Question input with X button and Enter to send
+      HStack(spacing: 8) {
+        HStack {
+          TextField("Enter your question...", text: $questionInput)
+            .textFieldStyle(.plain)
+            .onSubmit {
+              submitQuestion()
+            }
 
-        Button(action: {
-          viewModel.askCloudQuestion(questionInput)
-          questionInput = ""
-        }) {
+          // X button to clear input
+          if !questionInput.isEmpty {
+            Button(action: {
+              questionInput = ""
+              #if os(iOS)
+              // Hide keyboard when clearing
+              UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+              #endif
+            }) {
+              Image(systemName: "xmark.circle.fill")
+                .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+          }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.platformSystemGray6)
+        .cornerRadius(10)
+
+        Button(action: submitQuestion) {
           Image(systemName: "paperplane.fill")
+            .font(.system(size: 18))
         }
         .disabled(
           questionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !canAnalyze)
       }
+      #if os(iOS)
+      .submitLabel(.send)
+      #endif
 
       // Previous Q&A history
       if !viewModel.cloudAnalysisCache.questionAnswers.isEmpty {
@@ -335,6 +375,17 @@ struct EpisodeAIAnalysisView: View {
 
   private var canAnalyze: Bool {
     settings.hasConfiguredProvider && viewModel.hasTranscript
+  }
+
+  private func submitQuestion() {
+    let trimmed = questionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, canAnalyze else { return }
+    viewModel.askCloudQuestion(questionInput)
+    questionInput = ""
+    #if os(iOS)
+    // Hide keyboard after submitting
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    #endif
   }
 
   private func generateButton(title: String, action: @escaping () -> Void) -> some View {

@@ -39,8 +39,8 @@ struct HomeView: View {
         ToolbarItem(placement: .primaryAction) {
           Button(action: { showRegionPicker = true }) {
             HStack(spacing: 4) {
-              Text(viewModel.selectedRegionName)
-                .font(.caption)
+              Text(viewModel.selectedRegionFlag)
+                .font(.title3)
               Image(systemName: "chevron.down")
                 .font(.caption2)
             }
@@ -403,7 +403,7 @@ struct TopPodcastRow: View {
   var body: some View {
     NavigationLink(destination: EpisodeListView(
       podcastName: podcast.name,
-      podcastArtwork: podcast.artworkUrl100,
+      podcastArtwork: podcast.safeArtworkUrl,
       artistName: podcast.artistName,
       collectionId: podcast.id,
       applePodcastUrl: podcast.url
@@ -416,7 +416,7 @@ struct TopPodcastRow: View {
           .frame(width: 24)
 
         // Artwork - using CachedAsyncImage for better performance
-        CachedArtworkImage(urlString: podcast.artworkUrl100, size: 56, cornerRadius: 8)
+        CachedArtworkImage(urlString: podcast.safeArtworkUrl, size: 56, cornerRadius: 8)
 
         // Info
         VStack(alignment: .leading, spacing: 2) {
@@ -451,7 +451,7 @@ struct TopPodcastRow: View {
       // View episodes
       NavigationLink(destination: EpisodeListView(
         podcastName: podcast.name,
-        podcastArtwork: podcast.artworkUrl100,
+        podcastArtwork: podcast.safeArtworkUrl,
         artistName: podcast.artistName,
         collectionId: podcast.id,
         applePodcastUrl: podcast.url
@@ -514,6 +514,8 @@ struct RegionPickerSheet: View {
             isPresented = false
           }) {
             HStack {
+              Text(region.flag)
+                .font(.title2)
               Text(region.name)
                 .foregroundColor(.primary)
 
@@ -554,12 +556,10 @@ struct PodcastPreviewSheet: View {
       ScrollView {
         VStack(spacing: 20) {
           // Artwork
-          AsyncImage(url: URL(string: podcast.artworkUrl100.replacingOccurrences(of: "100x100", with: "600x600"))) { phase in
-            if let image = phase.image {
+          CachedAsyncImage(url: URL(string: podcast.safeArtworkUrl.replacingOccurrences(of: "100x100", with: "600x600"))) { image in
               image.resizable().scaledToFit()
-            } else {
+          } placeholder: {
               Color.gray
-            }
           }
           .frame(width: 200, height: 200)
           .cornerRadius(16)

@@ -355,7 +355,7 @@ struct MacHomeContentView: View {
                 NavigationLink(
                   destination: EpisodeListView(
                     podcastName: podcast.name,
-                    podcastArtwork: podcast.artworkUrl100,
+                    podcastArtwork: podcast.safeArtworkUrl,
                     artistName: podcast.artistName,
                     collectionId: podcast.id,
                     applePodcastUrl: podcast.url

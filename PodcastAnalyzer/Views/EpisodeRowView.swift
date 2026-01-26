@@ -233,12 +233,23 @@ struct EpisodeRowView: View {
     }
   }
 
+  /// Format episode date - relative for today, otherwise abbreviated
+  private func formatEpisodeDate(_ date: Date) -> String {
+    if Calendar.current.isDateInToday(date) {
+      let formatter = RelativeDateTimeFormatter()
+      formatter.unitsStyle = .abbreviated
+      return formatter.localizedString(for: date, relativeTo: Date())
+    } else {
+      return date.formatted(date: .abbreviated, time: .omitted)
+    }
+  }
+
   @ViewBuilder
   private var episodeInfo: some View {
     VStack(alignment: .leading, spacing: 6) {
       // Date row
       if let date = episode.pubDate {
-        Text(date.formatted(date: .abbreviated, time: .omitted))
+        Text(formatEpisodeDate(date))
           .font(.caption)
           .foregroundColor(.secondary)
       }

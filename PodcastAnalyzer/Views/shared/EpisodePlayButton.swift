@@ -9,6 +9,80 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+// MARK: - Live Episode Play Button
+
+/// Wrapper that provides live playback time updates when episode is currently playing
+/// Falls back to SwiftData values when episode is not playing
+struct LiveEpisodePlayButton: View {
+  let episodeTitle: String
+  let podcastTitle: String
+  let duration: Int?
+  let lastPlaybackPosition: TimeInterval
+  let isCompleted: Bool
+  let formattedDuration: String?
+  let isDisabled: Bool
+  let onPlay: () -> Void
+
+  @State private var audioManager = EnhancedAudioManager.shared
+
+  /// Unique key for this episode (matches episodeKey format)
+  private var episodeKey: String {
+    "\(podcastTitle)\u{1F}\(episodeTitle)"
+  }
+
+  /// Whether this episode is currently loaded in the audio manager
+  private var isCurrentEpisode: Bool {
+    audioManager.currentEpisode?.id == episodeKey
+  }
+
+  /// Current playback position - live if playing, otherwise from SwiftData
+  private var currentPosition: TimeInterval {
+    if isCurrentEpisode {
+      return audioManager.currentTime
+    }
+    return lastPlaybackPosition
+  }
+
+  /// Duration - live if this episode is playing, otherwise from SwiftData
+  private var currentDuration: TimeInterval? {
+    if isCurrentEpisode, audioManager.duration > 0 {
+      return audioManager.duration
+    }
+    return duration.map { TimeInterval($0) }
+  }
+
+  /// Progress - live if playing, otherwise calculated from SwiftData
+  private var currentProgress: Double {
+    if isCurrentEpisode, audioManager.duration > 0 {
+      return audioManager.currentTime / audioManager.duration
+    }
+    guard let d = duration, d > 0 else { return 0 }
+    return min(lastPlaybackPosition / Double(d), 1.0)
+  }
+
+  /// Whether playback is complete (always uses SwiftData value since audio manager doesn't track this)
+  private var playbackCompleted: Bool {
+    isCompleted
+  }
+
+  var body: some View {
+    EpisodePlayButton(
+      isPlaying: audioManager.isPlaying,
+      isPlayingThisEpisode: isCurrentEpisode,
+      isCompleted: playbackCompleted,
+      playbackProgress: currentProgress,
+      duration: currentDuration,
+      lastPlaybackPosition: currentPosition,
+      formattedDuration: formattedDuration,
+      isDisabled: isDisabled,
+      style: .compact,
+      action: onPlay
+    )
+  }
+}
+
+// MARK: - Episode Play Button
+
 /// Reusable play button with progress indicator
 /// Shows play/pause/replay icon, progress bar when partially played, and duration text
 struct EpisodePlayButton: View {
@@ -36,6 +110,7 @@ struct EpisodePlayButton: View {
   enum PlayButtonStyle {
     case compact      // For list rows (smaller, capsule shape)
     case standard     // For detail views (larger, bordered prominent)
+    case iconOnly     // Icon + duration only, capsule with semantic color
   }
 
   init(
@@ -127,6 +202,8 @@ struct EpisodePlayButton: View {
       compactButton
     case .standard:
       standardButton
+    case .iconOnly:
+      iconOnlyButton
     }
   }
 
@@ -184,6 +261,44 @@ struct EpisodePlayButton: View {
       .padding(.vertical, 8)
     }
     .buttonStyle(.borderedProminent)
+    .disabled(isDisabled)
+  }
+
+  // MARK: - Icon Only Style (capsule with icon, progress bar, and duration)
+
+  private var iconOnlyButton: some View {
+    Button(action: action) {
+      HStack(spacing: 6) {
+        playIcon(size: 14)
+
+        // Progress bar (only show when partially played)
+        if playbackProgress > 0 && playbackProgress < 1 {
+          GeometryReader { geo in
+            ZStack(alignment: .leading) {
+              Capsule()
+                .fill(Color.white.opacity(0.4))
+                .frame(height: 3)
+              Capsule()
+                .fill(Color.white)
+                .frame(width: geo.size.width * playbackProgress, height: 3)
+            }
+          }
+          .frame(width: 32, height: 3)
+        }
+
+        if let duration = durationText {
+          Text(duration)
+            .font(.caption)
+            .fontWeight(.medium)
+        }
+      }
+      .foregroundColor(.white)
+      .padding(.horizontal, 14)
+      .padding(.vertical, 10)
+      .background(Color.blue)
+      .clipShape(Capsule())
+    }
+    .buttonStyle(.plain)
     .disabled(isDisabled)
   }
 

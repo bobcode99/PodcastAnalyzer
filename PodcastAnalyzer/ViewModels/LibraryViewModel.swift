@@ -34,6 +34,17 @@ struct LibraryEpisode: Identifiable {
   }
 }
 
+// MARK: - Downloading Episode Model
+
+struct DownloadingEpisode: Identifiable {
+  let id: String
+  let episodeTitle: String
+  let podcastTitle: String
+  let imageURL: String?
+  let progress: Double
+  let state: DownloadState
+}
+
 // MARK: - Library ViewModel
 
 @MainActor
@@ -42,9 +53,27 @@ final class LibraryViewModel {
   var podcastInfoModelList: [PodcastInfoModel] = []
   var savedEpisodes: [LibraryEpisode] = []
   var downloadedEpisodes: [LibraryEpisode] = []
+  var downloadingEpisodes: [DownloadingEpisode] = []
   var latestEpisodes: [LibraryEpisode] = []
   var isLoading = false
   var error: String?
+
+  // Private DTO for background processing
+  private struct EpisodeDownloadData: Sendable {
+    let id: String
+    let isStarred: Bool
+    let localAudioPath: String?
+    let isCompleted: Bool
+    let lastPlaybackPosition: TimeInterval
+  }
+
+
+  // Simplified loading state
+  // We only track generally if background operations are happening, 
+  // but we don't block the UI with specific flags for each section anymore.
+  // The UI should show whatever data is available.
+  var isRefreshing = false
+
 
   // Search state for subpages
   var savedSearchText: String = ""
@@ -79,11 +108,12 @@ final class LibraryViewModel {
     }
   }
 
-  /// Podcasts sorted by most recent episode date (for Library grid)
+  /// Podcasts sorted by most recent update (combines lastUpdated and latest episode date)
   var podcastsSortedByRecentUpdate: [PodcastInfoModel] {
     podcastInfoModelList.sorted { p1, p2 in
-      let date1 = p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
-      let date2 = p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      // Use lastUpdated if available (set during sync), otherwise use latest episode date
+        let date1 = p1.lastUpdated
+        let date2 = p2.lastUpdated
       return date1 > date2
     }
   }
@@ -103,6 +133,12 @@ final class LibraryViewModel {
   // Use Unit Separator (U+001F) as delimiter
   private static let episodeKeyDelimiter = "\u{1F}"
 
+  // Cache for O(1) lookups
+  private var podcastTitleMap: [String: PodcastInfoModel] = [:]
+
+  private var syncCompletionObserver: NSObjectProtocol?
+  private var downloadingPollTimer: Timer?
+
   init(modelContext: ModelContext?) {
     self.modelContext = modelContext
     if modelContext != nil {
@@ -111,6 +147,8 @@ final class LibraryViewModel {
       }
     }
     setupDownloadCompletionObserver()
+    setupSyncCompletionObserver()
+    startDownloadingPollTimer()
   }
 
   /// Clean up resources. Call this from onDisappear.
@@ -118,6 +156,113 @@ final class LibraryViewModel {
     if let observer = downloadCompletionObserver {
       NotificationCenter.default.removeObserver(observer)
       downloadCompletionObserver = nil
+    }
+    if let observer = syncCompletionObserver {
+      NotificationCenter.default.removeObserver(observer)
+      syncCompletionObserver = nil
+    }
+    stopDownloadingPollTimer()
+  }
+
+  // MARK: - Downloading Episodes Poll Timer
+
+  private func startDownloadingPollTimer() {
+    stopDownloadingPollTimer()
+    downloadingPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+      Task { @MainActor in
+        self?.updateDownloadingEpisodes()
+      }
+    }
+  }
+
+  private func stopDownloadingPollTimer() {
+    downloadingPollTimer?.invalidate()
+    downloadingPollTimer = nil
+  }
+
+  /// Update the list of currently downloading episodes from DownloadManager
+  private func updateDownloadingEpisodes() {
+    let downloadManager = DownloadManager.shared
+    var downloading: [DownloadingEpisode] = []
+
+    for (episodeKey, state) in downloadManager.downloadStates {
+      // Only include actively downloading or finishing episodes
+      let progressValue: Double
+      let isActive: Bool
+
+      switch state {
+      case .downloading(let progress):
+        progressValue = progress
+        isActive = true
+      case .finishing:
+        progressValue = 1.0
+        isActive = true
+      default:
+        progressValue = 0
+        isActive = false
+      }
+
+      if isActive {
+
+        // Parse episode key to get titles
+        if let (podcastTitle, episodeTitle) = parseDownloadEpisodeKey(episodeKey) {
+          // Try to find image URL from podcasts
+          let imageURL = podcastTitleMap[podcastTitle]?.podcastInfo.imageURL
+
+          downloading.append(DownloadingEpisode(
+            id: episodeKey,
+            episodeTitle: episodeTitle,
+            podcastTitle: podcastTitle,
+            imageURL: imageURL,
+            progress: progressValue,
+            state: state
+          ))
+        }
+      }
+    }
+
+    // Sort by progress (least progress first)
+    downloadingEpisodes = downloading.sorted { $0.progress < $1.progress }
+  }
+
+  /// Parse episode key for downloading episodes
+  private func parseDownloadEpisodeKey(_ episodeKey: String) -> (podcastTitle: String, episodeTitle: String)? {
+    // Try new format first (Unit Separator)
+    if let delimiterIndex = episodeKey.range(of: Self.episodeKeyDelimiter) {
+      let podcastTitle = String(episodeKey[..<delimiterIndex.lowerBound])
+      let episodeTitle = String(episodeKey[delimiterIndex.upperBound...])
+      return (podcastTitle, episodeTitle)
+    }
+
+    // Fall back to old format (|) for backward compatibility
+    if let lastPipeIndex = episodeKey.lastIndex(of: "|") {
+      let podcastTitle = String(episodeKey[..<lastPipeIndex])
+      let episodeTitle = String(episodeKey[episodeKey.index(after: lastPipeIndex)...])
+      return (podcastTitle, episodeTitle)
+    }
+
+    return nil
+  }
+
+  private func setupSyncCompletionObserver() {
+    // Listen for background sync completion to reload data
+    syncCompletionObserver = NotificationCenter.default.addObserver(
+      forName: .podcastSyncCompleted,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let self = self else { return }
+
+      let newCount = notification.userInfo?["newEpisodeCount"] as? Int ?? 0
+      self.logger.info("Sync completed notification received, \(newCount) new episodes")
+
+      Task { @MainActor in
+        // Reload all data sections
+        await self.loadAllPodcasts()
+        await self.loadLatestEpisodes()
+        await self.loadSavedEpisodes()
+        await self.loadDownloadedEpisodesQuick()
+      }
     }
   }
 
@@ -164,8 +309,8 @@ final class LibraryViewModel {
         }
         try context.save()
       } else {
-        // Find the episode from allPodcasts
-        guard let podcast = allPodcasts.first(where: { $0.podcastInfo.title == podcastTitle }),
+        // Find the episode from allPodcasts using O(1) lookup
+        guard let podcast = podcastTitleMap[podcastTitle],
               let episode = podcast.podcastInfo.episodes.first(where: { $0.title == episodeTitle }),
               let audioURL = episode.audioURL else { return }
 
@@ -188,7 +333,7 @@ final class LibraryViewModel {
 
       // Reload downloaded episodes to update the UI
       Task {
-        await loadDownloadedEpisodes()
+        await loadDownloadedEpisodesQuick()
       }
     } catch {
       logger.error("Failed to update download model: \(error.localizedDescription)")
@@ -196,24 +341,81 @@ final class LibraryViewModel {
   }
 
   func setModelContext(_ context: ModelContext) {
+    // Prevent redundant reloading if context hasn't changed and data is loaded
+    if self.modelContext == context && isAlreadyLoaded {
+      return
+    }
+    
     self.modelContext = context
-    // Always reload data when context is set (e.g., when view appears or pull-to-refresh)
-    Task {
-      await loadAll()
-      isAlreadyLoaded = true
+    // Start loading in parallel without blocking UI flags
+    // Each section loads independently and updates its own state
+    isRefreshing = true
+
+    // Launch loading tasks
+    // Chain podcasts -> latest to ensure dependencies are met without polling
+    Task { 
+      await loadPodcastsSection()
+      await loadLatestSection()
+    }
+    
+    // Independent sections
+    Task { await loadSavedSection() }
+    Task { await loadDownloadedSection() }
+
+    isAlreadyLoaded = true
+    isRefreshing = false
+  }
+
+  /// Receive updated podcast list from View's @Query
+  func setPodcasts(_ podcasts: [PodcastInfoModel]) {
+    self.podcastInfoModelList = podcasts
+    // Update dependent sections
+    Task { await loadLatestSection() }
+  }
+
+  // MARK: - Independent Section Loaders
+
+  /// Load podcasts section independently
+  private func loadPodcastsSection() async {
+    // We no longer load feeds manually here, they are injected via setPodcasts
+    // Just load the full lookup map
+    await loadAllPodcasts()
+    await loadAllPodcasts()
+  }
+
+  /// Load saved episodes section independently
+  private func loadSavedSection() async {
+    // Load immediately - EpisodeDownloadModel has all the data we need
+    await loadSavedEpisodes()
+  }
+
+  /// Load downloaded episodes section independently
+  private func loadDownloadedSection() async {
+    // Load downloaded episodes immediately from SwiftData (fast)
+    await loadDownloadedEpisodesQuick()
+
+    // Then sync with disk in background (slow, but doesn't block UI)
+    Task.detached(priority: .background) { [weak self] in
+      guard let self else { return }
+      await self.syncDownloadedFilesWithSwiftData()
+      // Reload to pick up any newly synced episodes
+      await self.loadDownloadedEpisodesQuick()
     }
   }
 
-  // MARK: - Load All Data
+  /// Load latest episodes section independently
+  private func loadLatestSection() async {
+    // This section depends heavily on podcastInfoModelList
+    // We now await this AFTER loadPodcastsSection completes, so no need to poll
+    await loadLatestEpisodes()
+  }
 
+  /// Legacy loadAll for refresh operations that need to wait for completion
   private func loadAll() async {
     isLoading = true
-
+    
     // First, load all podcasts (needed by other loaders)
     await loadAllPodcasts()
-
-    // Load feeds first (other loaders depend on podcastInfoModelList)
-    await loadPodcastFeeds()
 
     // Then load the rest using async let for parallelism while staying on MainActor
     async let savedTask: () = loadSavedEpisodes()
@@ -222,6 +424,17 @@ final class LibraryViewModel {
     _ = await (savedTask, downloadedTask, latestTask)
 
     isLoading = false
+  }
+  // MARK: - Public Refresh Methods
+
+  func refreshSavedEpisodes() async {
+    // Non-blocking refresh
+    await loadSavedEpisodes()
+  }
+
+  func refreshDownloadedEpisodes() async {
+    // Non-blocking refresh
+    await loadDownloadedSection() // This handles quick load + background sync
   }
 
   // MARK: - Load All Podcasts (for episode lookups)
@@ -238,6 +451,12 @@ final class LibraryViewModel {
       let podcasts = try context.fetch(descriptor)
       // Since we're @MainActor, update directly
       self.allPodcasts = podcasts
+      
+      // Update lookup map
+      self.podcastTitleMap = Dictionary(uniqueKeysWithValues: 
+        podcasts.compactMap { ($0.podcastInfo.title, $0) }
+      )
+      
       logger.info("Loaded \(self.allPodcasts.count) total podcasts for episode lookups")
     } catch {
       logger.error("Failed to load all podcasts: \(error.localizedDescription)")
@@ -245,30 +464,9 @@ final class LibraryViewModel {
   }
 
   // MARK: - Load Podcasts
-
-  private func loadPodcastFeeds() async {
-    guard let context = modelContext else {
-      logger.warning("ModelContext is nil, cannot load feeds")
-      return
-    }
-
-    // Only load subscribed podcasts (not browsed/cached ones)
-    let descriptor = FetchDescriptor<PodcastInfoModel>(
-      predicate: #Predicate { $0.isSubscribed == true },
-      sortBy: [SortDescriptor(\.dateAdded, order: .reverse)]
-    )
-
-    do {
-      let podcasts = try context.fetch(descriptor)
-      // Since we're @MainActor, update directly
-      self.podcastInfoModelList = podcasts
-      logger.info("Loaded \(self.podcastInfoModelList.count) subscribed podcast feeds from database")
-    } catch {
-      self.error = "Failed to load feeds: \(error.localizedDescription)"
-      logger.error("Failed to load feeds: \(error.localizedDescription)")
-    }
-  }
-
+  
+  // Removed loadPodcastFeeds as it's replaced by @Query injection via setPodcasts
+  
   // MARK: - Load Saved Episodes
 
   private func loadSavedEpisodes() async {
@@ -276,7 +474,7 @@ final class LibraryViewModel {
 
     // Fetch ALL and filter in memory to avoid predicate issues with Unicode
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      sortBy: [SortDescriptor(\.downloadedDate, order: .reverse)]
+      sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
     )
 
     do {
@@ -296,6 +494,36 @@ final class LibraryViewModel {
 
   // MARK: - Load Downloaded Episodes
 
+  /// Quick load from SwiftData without disk sync (for responsive UI)
+  private func loadDownloadedEpisodesQuick() async {
+    guard let context = modelContext else { return }
+
+    // Fetch ALL EpisodeDownloadModel and filter in memory
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
+    )
+
+    do {
+      let allModels = try context.fetch(descriptor)
+
+      // Filter for downloaded episodes in memory (localAudioPath is not nil and not empty)
+      let downloadedModels = allModels.filter { model in
+        guard let path = model.localAudioPath else { return false }
+        return !path.isEmpty
+      }
+
+      // Map to LibraryEpisode
+      let results = downloadedModels.map { model in
+        self.createLibraryEpisode(from: model)
+      }
+      self.downloadedEpisodes = results
+      logger.info("Quick loaded \(self.downloadedEpisodes.count) downloaded episodes")
+    } catch {
+      logger.error("Download fetch failed: \(error)")
+    }
+  }
+
+  /// Full load with disk sync (for refresh operations)
   private func loadDownloadedEpisodes() async {
     guard let context = modelContext else { return }
 
@@ -306,7 +534,7 @@ final class LibraryViewModel {
     // Fetch ALL EpisodeDownloadModel and filter in memory
     // This avoids potential SwiftData predicate issues with Unicode strings
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      sortBy: [SortDescriptor(\.downloadedDate, order: .reverse)]
+      sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
     )
 
     do {
@@ -336,56 +564,153 @@ final class LibraryViewModel {
   private func syncDownloadedFilesWithSwiftData() async {
     guard let context = modelContext else { return }
 
-    var syncedCount = 0
+    // 1. Gather data on MainActor
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+    let existingModelsDict: [String: EpisodeDownloadModel]
+    do {
+      let allModels = try context.fetch(descriptor)
+      existingModelsDict = Dictionary(uniqueKeysWithValues: allModels.map { ($0.id, $0) })
+    } catch {
+      logger.error("Failed to fetch existing models for sync: \(error)")
+      return
+    }
 
-    // Check each episode from all podcasts
+    // Prepare episode data for background processing (Sendable)
+    struct EpisodeCheckItem: Sendable {
+      let episodeTitle: String
+      let podcastTitle: String
+      let audioURL: String?
+      let imageURL: String
+      let pubDate: Date?
+      let episodeKey: String
+    }
+
+    let delimiter = Self.episodeKeyDelimiter
+    var itemsToCheck: [EpisodeCheckItem] = []
     for podcast in allPodcasts {
       let podcastInfo = podcast.podcastInfo
-
       for episode in podcastInfo.episodes {
-        // Ask DownloadManager if this episode has a file on disk
-        let state = downloadManager.getDownloadState(
+        let episodeKey = "\(podcastInfo.title)\(delimiter)\(episode.title)"
+        itemsToCheck.append(EpisodeCheckItem(
           episodeTitle: episode.title,
-          podcastTitle: podcastInfo.title
-        )
+          podcastTitle: podcastInfo.title,
+          audioURL: episode.audioURL,
+          imageURL: episode.imageURL ?? podcastInfo.imageURL,
+          pubDate: episode.pubDate,
+          episodeKey: episodeKey
+        ))
+      }
+    }
 
-        // If downloaded on disk, ensure SwiftData is synced
-        if case .downloaded(let localPath) = state {
-          let episodeKey = "\(podcastInfo.title)\(Self.episodeKeyDelimiter)\(episode.title)"
+    // 2. Perform file system checks in background (this is the slow part)
+    struct SyncResult: Sendable {
+      let episodeKey: String
+      let localPath: String
+      let episodeTitle: String
+      let podcastTitle: String
+      let audioURL: String
+      let imageURL: String
+      let pubDate: Date?
+      let needsUpdate: Bool
+      let needsInsert: Bool
+    }
 
-          // Check if SwiftData entry exists and has correct path
-          let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-            predicate: #Predicate { $0.id == episodeKey }
-          )
+    let existingKeys = Set(existingModelsDict.keys)
+    let existingPaths: [String: String?] = Dictionary(uniqueKeysWithValues: 
+      existingModelsDict.map { ($0.key, $0.value.localAudioPath) }
+    )
 
-          do {
-            if let existingModel = try context.fetch(descriptor).first {
-              // Update if localAudioPath is missing or different
-              if existingModel.localAudioPath != localPath {
-                existingModel.localAudioPath = localPath
-                existingModel.downloadedDate = existingModel.downloadedDate ?? Date()
-                syncedCount += 1
-              }
-            } else {
-              // Create new SwiftData entry for this downloaded file
-              guard let audioURL = episode.audioURL else { continue }
-
-              let model = EpisodeDownloadModel(
-                episodeTitle: episode.title,
-                podcastTitle: podcastInfo.title,
-                audioURL: audioURL,
-                localAudioPath: localPath,
-                downloadedDate: Date(),
-                imageURL: episode.imageURL ?? podcastInfo.imageURL,
-                pubDate: episode.pubDate
-              )
-              context.insert(model)
-              syncedCount += 1
-            }
-          } catch {
-            logger.error("Failed to sync episode \(episode.title): \(error.localizedDescription)")
+    let syncResults = await Task.detached(priority: .background) { () -> [SyncResult] in
+      var results: [SyncResult] = []
+      let fm = FileManager.default
+      
+      // Get audio directory path (same logic as DownloadManager.checkAudioFileExistsSynchronously)
+      #if os(macOS)
+      let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      let audioDir = appSupport.appendingPathComponent("PodcastAnalyzer/Audio", isDirectory: true)
+      #else
+      let libraryDir = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+      let audioDir = libraryDir.appendingPathComponent("Audio", isDirectory: true)
+      #endif
+      
+      let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
+      let possibleExtensions = ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"]
+      
+      for item in itemsToCheck {
+        // Direct file system check (same logic as DownloadManager)
+        let baseFileName = "\(item.podcastTitle)_\(item.episodeTitle)"
+          .components(separatedBy: invalidCharacters)
+          .joined(separator: "_")
+          .trimmingCharacters(in: .whitespaces)
+        
+        var localPath: String? = nil
+        for ext in possibleExtensions {
+          let path = audioDir.appendingPathComponent("\(baseFileName).\(ext)")
+          if fm.fileExists(atPath: path.path) {
+            localPath = path.path
+            break
           }
         }
+        
+        guard let foundPath = localPath else { continue }
+        
+        let existsInDB = existingKeys.contains(item.episodeKey)
+        let currentPath = existingPaths[item.episodeKey] ?? nil
+        
+        if existsInDB {
+          // Check if path needs update
+          if currentPath != foundPath {
+            results.append(SyncResult(
+              episodeKey: item.episodeKey,
+              localPath: foundPath,
+              episodeTitle: item.episodeTitle,
+              podcastTitle: item.podcastTitle,
+              audioURL: item.audioURL ?? "",
+              imageURL: item.imageURL,
+              pubDate: item.pubDate,
+              needsUpdate: true,
+              needsInsert: false
+            ))
+          }
+        } else if item.audioURL != nil {
+          // Needs insert
+          results.append(SyncResult(
+            episodeKey: item.episodeKey,
+            localPath: foundPath,
+            episodeTitle: item.episodeTitle,
+            podcastTitle: item.podcastTitle,
+            audioURL: item.audioURL!,
+            imageURL: item.imageURL,
+            pubDate: item.pubDate,
+            needsUpdate: false,
+            needsInsert: true
+          ))
+        }
+      }
+      return results
+    }.value
+
+    // 3. Apply results on MainActor
+    var syncedCount = 0
+    for result in syncResults {
+      if result.needsUpdate {
+        if let existingModel = existingModelsDict[result.episodeKey] {
+          existingModel.localAudioPath = result.localPath
+          existingModel.downloadedDate = existingModel.downloadedDate ?? Date()
+          syncedCount += 1
+        }
+      } else if result.needsInsert {
+        let model = EpisodeDownloadModel(
+          episodeTitle: result.episodeTitle,
+          podcastTitle: result.podcastTitle,
+          audioURL: result.audioURL,
+          localAudioPath: result.localPath,
+          downloadedDate: Date(),
+          imageURL: result.imageURL,
+          pubDate: result.pubDate
+        )
+        context.insert(model)
+        syncedCount += 1
       }
     }
 
@@ -398,42 +723,70 @@ final class LibraryViewModel {
   // MARK: - Load Latest Episodes
 
   private func loadLatestEpisodes() async {
-    // Since we're @MainActor, access podcastInfoModelList directly
-    let pods = podcastInfoModelList
-    var allEpisodes: [LibraryEpisode] = []
+    guard let context = modelContext else { return }
 
-    for podcast in pods {
-      let podcastInfo = podcast.podcastInfo
-      // Get latest 5 episodes from each podcast
-      for episode in podcastInfo.episodes.prefix(5) {
-        let episodeKey = "\(podcastInfo.title)\(Self.episodeKeyDelimiter)\(episode.title)"
-        // Since we're @MainActor, access getEpisodeModel directly
-        let model = getEpisodeModel(for: episodeKey)
-
-        allEpisodes.append(LibraryEpisode(
-          id: episodeKey,
-          podcastTitle: podcastInfo.title,
-          imageURL: episode.imageURL ?? podcastInfo.imageURL,
-          language: podcastInfo.language,
-          episodeInfo: episode,
-          isStarred: model?.isStarred ?? false,
-          isDownloaded: model?.localAudioPath != nil,
-          isCompleted: model?.isCompleted ?? false,
-          lastPlaybackPosition: model?.lastPlaybackPosition ?? 0
+    // 1. Gather all necessary data on MainActor (where ModelContext lives)
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+    let episodeDataDict: [String: EpisodeDownloadData]
+    do {
+      let allModels = try context.fetch(descriptor)
+      // Map to Sendable DTOs
+      let keyValues = allModels.map { model in
+        (model.id, EpisodeDownloadData(
+          id: model.id,
+          isStarred: model.isStarred,
+          localAudioPath: model.localAudioPath,
+          isCompleted: model.isCompleted,
+          lastPlaybackPosition: model.lastPlaybackPosition
         ))
       }
+      episodeDataDict = Dictionary(uniqueKeysWithValues: keyValues)
+    } catch {
+      logger.error("Failed to fetch episode models: \(error)")
+      return
     }
 
-    // Sort by date and take latest 50
-    let sorted = allEpisodes
-      .sorted { ($0.episodeInfo.pubDate ?? .distantPast) > ($1.episodeInfo.pubDate ?? .distantPast) }
-      .prefix(50)
+    // Capture the podcast info structs (already Sendable)
+    let podcasts = self.podcastInfoModelList.map { $0.podcastInfo }
 
-    // Since we're @MainActor, update directly
-    self.latestEpisodes = Array(sorted)
-    logger.info("Loaded \(self.latestEpisodes.count) latest episodes")
+    // 2. Perform heavy processing in background
+    let delimiter = Self.episodeKeyDelimiter
+    
+    let sortedEpisodes = await Task.detached(priority: .userInitiated) { () -> [LibraryEpisode] in
+      var allEpisodes: [LibraryEpisode] = []
 
-    // Update auto-play candidates (only episodes that haven't been completed)
+      for podcastInfo in podcasts {
+        // Get latest 5 episodes from each podcast
+        for episode in podcastInfo.episodes.prefix(5) {
+          let episodeKey = "\(podcastInfo.title)\(delimiter)\(episode.title)"
+          let data = episodeDataDict[episodeKey]
+
+          allEpisodes.append(LibraryEpisode(
+            id: episodeKey,
+            podcastTitle: podcastInfo.title,
+            imageURL: episode.imageURL ?? podcastInfo.imageURL,
+            language: podcastInfo.language,
+            episodeInfo: episode,
+            isStarred: data?.isStarred ?? false,
+            isDownloaded: data?.localAudioPath != nil,
+            isCompleted: data?.isCompleted ?? false,
+            lastPlaybackPosition: data?.lastPlaybackPosition ?? 0
+          ))
+        }
+      }
+
+      // Sort by date and take latest 50
+      return allEpisodes
+        .sorted { ($0.episodeInfo.pubDate ?? .distantPast) > ($1.episodeInfo.pubDate ?? .distantPast) }
+        .prefix(50)
+        .map { $0 } // Convert SubSequence back to Array
+    }.value
+
+    // 3. Update UI on MainActor
+    self.latestEpisodes = sortedEpisodes
+    logger.info("Loaded \(self.latestEpisodes.count) latest episodes (background processed)")
+
+    // Update auto-play candidates
     updateAutoPlayCandidates()
   }
 
@@ -458,6 +811,8 @@ final class LibraryViewModel {
     logger.info("Updated auto-play candidates with \(playbackEpisodes.count) unplayed episodes")
   }
 
+
+
   // MARK: - Helper Methods
 
   /// Create a LibraryEpisode from EpisodeDownloadModel - always succeeds using stored data
@@ -466,8 +821,8 @@ final class LibraryViewModel {
     if let (podcastTitle, episodeTitle) = parseEpisodeKey(model.id) {
       // Verify parsed titles match stored titles (catches mis-parsing due to | in episode titles)
       if podcastTitle == model.podcastTitle && episodeTitle == model.episodeTitle {
-        // Try to find full podcast info for richer data
-        if let podcast = allPodcasts.first(where: { $0.podcastInfo.title == podcastTitle }),
+        // Try to find full podcast info for richer data using O(1) lookup
+        if let podcast = podcastTitleMap[podcastTitle],
            let episode = podcast.podcastInfo.episodes.first(where: { $0.title == episodeTitle }) {
           return LibraryEpisode(
             id: model.id,
@@ -537,9 +892,8 @@ final class LibraryViewModel {
       return createFallbackLibraryEpisode(from: model)
     }
 
-    // Find the podcast from ALL podcasts (subscribed + browsed)
-    let podcasts = allPodcasts
-    if let podcast = podcasts.first(where: { $0.podcastInfo.title == podcastTitle }),
+    // Find the podcast using O(1) lookup
+    if let podcast = podcastTitleMap[podcastTitle],
        let episode = podcast.podcastInfo.episodes.first(where: { $0.title == episodeTitle }) {
       // Found the full episode info
       return LibraryEpisode(
@@ -634,12 +988,14 @@ final class LibraryViewModel {
       return collected
     }
 
-    // Update models
+    // Update models and set lastUpdated timestamp
     var successCount = 0
+    let now = Date()
     for (id, updatedPodcast) in results {
       if let podcast = updatedPodcast,
          let model = self.podcastInfoModelList.first(where: { $0.id == id }) {
         model.podcastInfo = podcast
+        model.lastUpdated = now  // Update timestamp for proper sorting
         successCount += 1
         logger.info("Updated \(podcast.title) with \(podcast.episodes.count) episodes")
       }

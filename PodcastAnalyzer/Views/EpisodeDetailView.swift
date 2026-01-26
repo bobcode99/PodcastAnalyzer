@@ -2,13 +2,17 @@
 //  EpisodeDetailView.swift
 //  PodcastAnalyzer
 //
-//  Fixed: Added Regenerate option to live view and fixed state visibility
-//  Fixed: Memory leaks from static timer and proper cleanup on macOS
+//  Redesigned with simpler architecture: single ScrollView + sticky tabs
 //
 
 import Foundation
+import NaturalLanguage
 import SwiftData
 import SwiftUI
+
+#if canImport(Translation)
+@preconcurrency import Translation
+#endif
 
 #if os(iOS)
 import UIKit
@@ -30,9 +34,22 @@ struct EpisodeDetailView: View {
     @State private var selectedTab = 0
     @State private var showCopySuccess = false
     @State private var showDeleteConfirmation = false
+    @State private var showSubtitleSettings = false
+    @State private var showTranslationLanguagePicker = false
+
+    // Translation error alert
+    @State private var showTranslationError = false
+    @State private var translationErrorMessage = ""
 
     // Timer state for transcript highlighting during playback (managed by .task modifier)
     @State private var playbackTimerActive = false
+    @State private var currentPlaybackTime: TimeInterval = 0
+
+    // Translation configuration for .translationTask
+    @State private var transcriptTranslationConfig: TranslationSession.Configuration?
+    @State private var descriptionTranslationConfig: TranslationSession.Configuration?
+    @State private var titleTranslationConfig: TranslationSession.Configuration?
+    @State private var podcastTitleTranslationConfig: TranslationSession.Configuration?
 
     init(
         episode: PodcastEpisodeInfo,
@@ -71,30 +88,26 @@ struct EpisodeDetailView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            headerSection
-            Divider()
-            tabSelector
-            Divider()
+        ScrollView {
+            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                // Header scrolls away naturally
+                headerSection
+                    .padding(.bottom, 8)
 
-            #if os(iOS)
-            TabView(selection: $selectedTab) {
-                summaryTab.tag(0)
-                transcriptTab.tag(1)
-                keywordsTab.tag(2)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            #else
-            // macOS: Use simple view switching to avoid default tab bar
-            Group {
-                switch selectedTab {
-                case 0: summaryTab
-                case 1: transcriptTab
-                case 2: keywordsTab
-                default: summaryTab
+                Divider()
+
+                // Sticky tabs + content
+                Section {
+                    tabContentView
+                        .frame(minHeight: 400)
+                } header: {
+                    tabSelector
+                        .background(.regularMaterial)
                 }
             }
-            #endif
+        }
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 80)
         }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -102,7 +115,7 @@ struct EpisodeDetailView: View {
         .toolbar {
             ToolbarItem(placement: toolbarPlacement) {
                 HStack(spacing: 16) {
-                    Button(action: { viewModel.translateDescription() }) {
+                    Button(action: { showTranslationLanguagePicker = true }) {
                         Image(systemName: "translate")
                     }
                     Menu {
@@ -140,6 +153,17 @@ struct EpisodeDetailView: View {
         } message: {
             Text("Transcript copied to clipboard")
         }
+        .alert("Translation Failed", isPresented: $showTranslationError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(translationErrorMessage)
+        }
+        .onChange(of: viewModel.translationStatus) { _, newStatus in
+            if case .failed(let error) = newStatus {
+                translationErrorMessage = error
+                showTranslationError = true
+            }
+        }
         .confirmationDialog(
             "Delete Download",
             isPresented: $showDeleteConfirmation,
@@ -154,9 +178,24 @@ struct EpisodeDetailView: View {
                 "Are you sure you want to delete this downloaded episode? You can download it again later."
             )
         }
+        .sheet(isPresented: $showSubtitleSettings) {
+            SubtitleSettingsSheet()
+        }
+        .sheet(isPresented: $showTranslationLanguagePicker) {
+            TranslationLanguagePickerSheet(
+                availableTranslations: viewModel.availableTranslationLanguages,
+                translationStatus: viewModel.translationStatus,
+                onSelectLanguage: { language in
+                    viewModel.translateTo(language)
+                }
+            )
+        }
         .onAppear {
             viewModel.setModelContext(modelContext)
             viewModel.checkTranscriptStatus()
+            // Try to load existing translations and check available ones
+            viewModel.loadExistingTranslations()
+            viewModel.checkAvailableTranslations()
         }
         .onDisappear {
             // Clean up subscriptions to prevent memory leaks
@@ -164,6 +203,84 @@ struct EpisodeDetailView: View {
             playbackTimerActive = false
             viewModel.cleanup()
         }
+        .onChange(of: viewModel.transcriptTranslationTrigger) { _, _ in
+            triggerTranscriptTranslation()
+        }
+        .onChange(of: viewModel.descriptionTranslationTrigger) { _, _ in
+            triggerDescriptionTranslation()
+        }
+        .onChange(of: viewModel.episodeTitleTranslationTrigger) { _, _ in
+            triggerTitleTranslation()
+        }
+        .onChange(of: viewModel.podcastTitleTranslationTrigger) { _, _ in
+            triggerPodcastTitleTranslation()
+        }
+        .translationTask(transcriptTranslationConfig) { session in
+            await viewModel.performTranscriptTranslation(using: session)
+        }
+        .translationTask(descriptionTranslationConfig) { session in
+            await viewModel.performDescriptionTranslation(using: session)
+        }
+        .translationTask(titleTranslationConfig) { session in
+            await viewModel.performTitleTranslation(using: session)
+        }
+        .translationTask(podcastTitleTranslationConfig) { session in
+            await viewModel.performPodcastTitleTranslation(using: session)
+        }
+    }
+
+    // MARK: - Tab Content View
+
+    @ViewBuilder
+    private var tabContentView: some View {
+        switch selectedTab {
+        case 0: summaryContent
+        case 1: transcriptContent
+        case 2: EpisodeAIAnalysisView(viewModel: viewModel, embedsOwnScroll: false)
+        default: EmptyView()
+        }
+    }
+
+    // MARK: - Translation Helpers
+
+    private func triggerTranscriptTranslation() {
+        guard let targetLang = viewModel.selectedTranslationLanguage?.localeLanguage else { return }
+
+        let sourceLang = TranslationService.shared.detectSourceLanguage(from: viewModel.podcastLanguage)
+        transcriptTranslationConfig = TranslationService.shared.makeConfiguration(
+            sourceLanguage: sourceLang,
+            targetLanguage: targetLang
+        )
+    }
+
+    private func triggerDescriptionTranslation() {
+        guard let targetLang = viewModel.selectedTranslationLanguage?.localeLanguage else { return }
+
+        let sourceLang = TranslationService.shared.detectSourceLanguage(from: viewModel.podcastLanguage)
+        descriptionTranslationConfig = TranslationService.shared.makeConfiguration(
+            sourceLanguage: sourceLang,
+            targetLanguage: targetLang
+        )
+    }
+
+    private func triggerTitleTranslation() {
+        guard let targetLang = viewModel.selectedTranslationLanguage?.localeLanguage else { return }
+
+        let sourceLang = TranslationService.shared.detectSourceLanguage(from: viewModel.podcastLanguage)
+        titleTranslationConfig = TranslationService.shared.makeConfiguration(
+            sourceLanguage: sourceLang,
+            targetLanguage: targetLang
+        )
+    }
+
+    private func triggerPodcastTitleTranslation() {
+        guard let targetLang = viewModel.selectedTranslationLanguage?.localeLanguage else { return }
+
+        let sourceLang = TranslationService.shared.detectSourceLanguage(from: viewModel.podcastLanguage)
+        podcastTitleTranslationConfig = TranslationService.shared.makeConfiguration(
+            sourceLanguage: sourceLang,
+            targetLanguage: targetLang
+        )
     }
 
     // MARK: - Header Section (Updated)
@@ -172,14 +289,10 @@ struct EpisodeDetailView: View {
             HStack(alignment: .top, spacing: 12) {
                 // Artwork
                 if let url = URL(string: viewModel.imageURLString) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFit()
-                        case .failure: Color.gray
-                        case .empty: ProgressView()
-                        @unknown default: Color.gray
-                        }
+                    CachedAsyncImage(url: url) { image in
+                        image.resizable().scaledToFit()
+                    } placeholder: {
+                        Color.gray.overlay(ProgressView())
                     }
                     .frame(width: 80, height: 80)
                     .cornerRadius(10)
@@ -190,19 +303,52 @@ struct EpisodeDetailView: View {
 
                 VStack(alignment: .leading, spacing: 6) {
                     // FULL TITLE – no lineLimit, multiline, selectable
-                    Text(viewModel.title)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .multilineTextAlignment(.leading)
-                        .textSelection(.enabled)  // Can select and copy
-                        .fixedSize(horizontal: false, vertical: true)  // Allows wrapping
+                    // Show translated title if available, with disclosure for original
+                    if let translatedTitle = viewModel.translatedEpisodeTitle {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(translatedTitle)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .multilineTextAlignment(.leading)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            DisclosureGroup("Original") {
+                                Text(viewModel.title)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.leading)
+                                    .textSelection(.enabled)
+                            }
+                            .font(.caption2)
+                            .foregroundColor(.blue)
+                        }
+                    } else {
+                        Text(viewModel.title)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .multilineTextAlignment(.leading)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     // Tappable podcast title - navigates to show
                     NavigationLink(destination: podcastDestination) {
                         HStack(spacing: 4) {
-                            Text(viewModel.podcastTitle)
-                                .font(.caption)
-                                .foregroundColor(.blue)
+                            if let translatedTitle = viewModel.translatedPodcastTitle {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(translatedTitle)
+                                        .font(.caption)
+                                        .foregroundColor(.blue)
+                                    Text(viewModel.podcastTitle)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            } else {
+                                Text(viewModel.podcastTitle)
+                                    .font(.caption)
+                                    .foregroundColor(.blue)
+                            }
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 8))
                                 .foregroundColor(.blue)
@@ -264,28 +410,13 @@ struct EpisodeDetailView: View {
                             }
                         }
                     }
-
-                    // Playback progress (unchanged)
-                    if viewModel.playbackProgress > 0
-                        && viewModel.playbackProgress < 1
-                    {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ProgressView(value: viewModel.playbackProgress)
-                                .tint(.blue)
-                            if let remaining = viewModel.remainingTimeString {
-                                Text(remaining)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
                 }
                 Spacer()
             }
 
-            // Play + Download + AI Analysis buttons
+            // Play + Download buttons (icon-only capsules)
             HStack(spacing: 8) {
-                // Play button with progress (using reusable component)
+                // Play button with progress (icon-only style)
                 EpisodePlayButton(
                     isPlaying: viewModel.audioManager.isPlaying,
                     isPlayingThisEpisode: viewModel.isPlayingThisEpisode,
@@ -295,31 +426,11 @@ struct EpisodeDetailView: View {
                     lastPlaybackPosition: viewModel.lastPlaybackPosition,
                     formattedDuration: viewModel.formattedDuration,
                     isDisabled: viewModel.isPlayDisabled,
-                    style: .standard,
+                    style: .iconOnly,
                     action: { viewModel.playAction() }
                 )
 
-                downloadButton
-
-                // AI Analysis button (iOS 26+)
-                if #available(iOS 26.0, macOS 26.0, *) {
-                    NavigationLink(
-                        destination: EpisodeAIAnalysisView(viewModel: viewModel)
-                    ) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 12))
-                            Text("AI")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.purple)
-                    .disabled(!viewModel.hasTranscript)
-                }
+                downloadButtonIconOnly
 
                 Spacer()
             }
@@ -337,226 +448,302 @@ struct EpisodeDetailView: View {
         .padding(.horizontal)
         .padding(.vertical, 10)
     }
-    // MARK: - Download Button
+    // MARK: - Download Button (Icon-Only Capsule)
     @ViewBuilder
-    private var downloadButton: some View {
+    private var downloadButtonIconOnly: some View {
         switch viewModel.downloadState {
         case .notDownloaded:
             Button(action: { viewModel.startDownload() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.down.circle").font(
-                        .system(size: 12)
-                    )
-                    Text("Download").font(.caption).fontWeight(.medium)
-                }
-                .padding(.horizontal, 12).padding(.vertical, 8)
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.gray)
+                    .clipShape(Capsule())
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
+
         case .downloading(let progress):
             Button(action: { viewModel.cancelDownload() }) {
-                HStack(spacing: 4) {
-                    ProgressView().scaleEffect(0.6)
-                    Text("\(Int(progress * 100))%").font(.caption).fontWeight(
-                        .medium
-                    )
+                HStack(spacing: 6) {
+                    // Circular progress indicator
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                            .frame(width: 16, height: 16)
+                        Circle()
+                            .trim(from: 0, to: CGFloat(progress))
+                            .stroke(Color.white, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .frame(width: 16, height: 16)
+                            .rotationEffect(.degrees(-90))
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.white)
                 }
-                .padding(.horizontal, 12).padding(.vertical, 8)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.orange)
+                .clipShape(Capsule())
             }
-            .buttonStyle(.bordered).tint(.orange)
+            .buttonStyle(.plain)
+
         case .finishing:
-            HStack(spacing: 4) {
-                ProgressView().scaleEffect(0.6)
-                Text("Saving...").font(.caption).fontWeight(.medium)
+            HStack(spacing: 6) {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .tint(.white)
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(Color.blue.opacity(0.1))
-            .cornerRadius(8)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
-            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.blue)
+            .clipShape(Capsule())
+
         case .downloaded:
             Button(action: { showDeleteConfirmation = true }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill").font(
-                        .system(size: 12)
-                    )
-                    Text("Downloaded").font(.caption).fontWeight(.medium)
-                }
-                .padding(.horizontal, 12).padding(.vertical, 8)
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.green)
+                    .clipShape(Capsule())
             }
-            .buttonStyle(.bordered).tint(.green)
+            .buttonStyle(.plain)
+
         case .failed:
             Button(action: { viewModel.startDownload() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.circle").font(
-                        .system(size: 12)
-                    )
-                    Text("Retry").font(.caption).fontWeight(.medium)
-                }
-                .padding(.horizontal, 12).padding(.vertical, 8)
+                Image(systemName: "exclamationmark.circle")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.red)
+                    .clipShape(Capsule())
             }
-            .buttonStyle(.bordered).tint(.red)
+            .buttonStyle(.plain)
         }
     }
 
     // MARK: - Tab Selector
     private var tabSelector: some View {
-        HStack(spacing: 0) {
-            TabButton(title: "Summary", isSelected: selectedTab == 0) {
-                withAnimation { selectedTab = 0 }
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                TabButton(title: "Summary", isSelected: selectedTab == 0) {
+                    withAnimation { selectedTab = 0 }
+                }
+                TabButton(title: "Transcript", isSelected: selectedTab == 1) {
+                    withAnimation { selectedTab = 1 }
+                }
+                TabButton(title: "AI", isSelected: selectedTab == 2) {
+                    withAnimation { selectedTab = 2 }
+                }
             }
-            TabButton(title: "Transcript", isSelected: selectedTab == 1) {
-                withAnimation { selectedTab = 1 }
-            }
-            TabButton(title: "Keywords", isSelected: selectedTab == 2) {
-                withAnimation { selectedTab = 2 }
-            }
+            Divider()
         }
-        .background(Color.platformBackground)
     }
 
-    // MARK: - Summary Tab
-    private var summaryTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+    // MARK: - Summary Content (no ScrollView - parent provides scrolling)
+    private var summaryContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Show translated description if available
+            if let translated = viewModel.translatedDescription {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Translated text
+                    Text(translated)
+                        .font(.body)
+                        .textSelection(.enabled)
+
+                    Divider()
+
+                    // Original description (collapsed by default)
+                    DisclosureGroup("Original") {
+                        viewModel.descriptionView
+                            .textSelection(.enabled)
+                    }
+                    .foregroundColor(.secondary)
+                }
+                .padding(.horizontal)
+            } else {
+                // Original description only
                 viewModel.descriptionView
                     .textSelection(.enabled)
                     .padding(.horizontal)
             }
-            .padding(.vertical)
         }
+        .padding(.vertical)
     }
 
-    // MARK: - Transcript Tab (FIXED)
-    private var transcriptTab: some View {
+    // MARK: - Transcript Content (no ScrollView wrapper - parent provides scrolling)
+    private var transcriptContent: some View {
         VStack(spacing: 0) {
             if viewModel.hasTranscript && !viewModel.isTranscriptProcessing {
                 // Case 1: Transcript exists and we are idle - show live captions
-                liveCaptionsView
+                liveCaptionsContent
             } else {
-                // Case 2: Processing or no transcript - wrap in ScrollView for consistent layout
-                ScrollView {
-                    transcriptStatusSection
-                        .padding(.vertical)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                // Case 2: Processing or no transcript
+                transcriptStatusSection
+                    .padding(.vertical)
+                    .frame(maxWidth: .infinity)
             }
         }
         .task(id: playbackTimerActive) {
             // Task-based timer for playback updates - automatically cancelled when view disappears
             guard playbackTimerActive else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(500))
-                guard !Task.isCancelled, viewModel.isPlayingThisEpisode else { continue }
-                // The view updates automatically via @Observable
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { break }
+                // Always update when this episode is current (playing or paused)
+                if viewModel.isCurrentEpisode {
+                    await MainActor.run {
+                        currentPlaybackTime = viewModel.audioManager.currentTime
+                    }
+                }
             }
         }
         .onAppear {
             playbackTimerActive = true
+            // Initialize immediately to avoid delay
+            if viewModel.isCurrentEpisode {
+                currentPlaybackTime = viewModel.audioManager.currentTime
+            }
         }
         .onDisappear {
             playbackTimerActive = false
         }
     }
 
-    // MARK: - Live Captions View (Redesigned - Clean Full Page)
-    private var liveCaptionsView: some View {
+    // MARK: - Live Captions Content (Apple Podcasts Style - Flowing Text)
+    private var liveCaptionsContent: some View {
         VStack(spacing: 0) {
             // Compact header with search and menu
-            HStack(spacing: 12) {
-                // Search bar
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
-                        .font(.system(size: 14))
-                    TextField(
-                        "Search transcript...",
-                        text: $viewModel.transcriptSearchQuery
-                    )
-                    .textFieldStyle(.plain)
-                    .font(.subheadline)
-                    if !viewModel.transcriptSearchQuery.isEmpty {
-                        Button(action: { viewModel.transcriptSearchQuery = "" }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.secondary)
-                                .font(.system(size: 14))
-                        }
+            transcriptHeader
+
+            // Flowing transcript content (no ScrollView - parent provides scrolling)
+            // Always pass currentTime when this is the current episode (like ExpandedPlayerView)
+            FlowingTranscriptView(
+                segments: viewModel.filteredTranscriptSegments,
+                currentTime: viewModel.isCurrentEpisode ? currentPlaybackTime : nil,
+                searchQuery: viewModel.transcriptSearchQuery,
+                onSegmentTap: { segment in
+                    viewModel.seekToSegment(segment)
+                }
+            )
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+        }
+    }
+
+    // MARK: - Transcript Header
+    private var transcriptHeader: some View {
+        HStack(spacing: 12) {
+            // Search bar
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                    .font(.system(size: 14))
+                TextField(
+                    "Search transcript...",
+                    text: $viewModel.transcriptSearchQuery
+                )
+                .textFieldStyle(.plain)
+                .font(.subheadline)
+                if !viewModel.transcriptSearchQuery.isEmpty {
+                    Button(action: { viewModel.transcriptSearchQuery = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 14))
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.platformSystemGray6)
-                .cornerRadius(10)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.platformSystemGray6)
+            .cornerRadius(10)
 
-                // Options menu
-                Menu {
-                    // Info section
-                    Section {
-                        if let date = viewModel.cachedTranscriptDate {
-                            Label(
-                                "Generated \(date.formatted(date: .abbreviated, time: .shortened))",
-                                systemImage: "clock"
-                            )
-                        }
+            // Translate button with circular progress - shows language picker
+            Button {
+                showTranslationLanguagePicker = true
+            } label: {
+                if viewModel.translationStatus.isTranslating {
+                    TranslationProgressCircle(status: viewModel.translationStatus)
+                        .frame(width: 28, height: 28)
+                } else if case .failed = viewModel.translationStatus {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(.red)
+                } else {
+                    Image(systemName: viewModel.hasExistingTranslation ? "translate.fill" : "translate")
+                        .font(.system(size: 20))
+                        .foregroundColor(viewModel.hasExistingTranslation ? .blue : .secondary)
+                }
+            }
+            .disabled(viewModel.translationStatus.isTranslating)
+
+            // Settings button
+            Button {
+                showSubtitleSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 20))
+                    .foregroundColor(.secondary)
+            }
+
+            // Options menu
+            Menu {
+                Section {
+                    if let date = viewModel.cachedTranscriptDate {
                         Label(
-                            "\(viewModel.filteredTranscriptSegments.count) segments",
-                            systemImage: "text.alignleft"
+                            "Generated \(date.formatted(date: .abbreviated, time: .shortened))",
+                            systemImage: "clock"
                         )
                     }
+                    Label(
+                        "\(viewModel.filteredTranscriptSegments.count) segments",
+                        systemImage: "text.alignleft"
+                    )
+                }
 
-                    Divider()
+                Divider()
 
+                // Copy options section
+                Section("Copy") {
                     Button(action: {
                         viewModel.copyTranscriptToClipboard()
                         showCopySuccess = true
                     }) {
-                        Label("Copy All", systemImage: "doc.on.doc")
+                        Label("Copy All (with timestamps)", systemImage: "doc.on.doc")
                     }
 
-                    Button(
-                        role: .destructive,
-                        action: {
-                            viewModel.generateTranscript()
-                        }
-                    ) {
-                        Label("Regenerate", systemImage: "arrow.clockwise")
+                    Button(action: {
+                        PlatformClipboard.string = viewModel.cleanTranscriptText
+                        showCopySuccess = true
+                    }) {
+                        Label("Copy Text Only", systemImage: "text.alignleft")
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 22))
-                        .foregroundColor(.secondary)
                 }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
 
-            // Full page transcript segments
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(viewModel.filteredTranscriptSegments) { segment in
-                            TranscriptSegmentRow(
-                                segment: segment,
-                                isCurrentSegment: viewModel.currentSegmentId == segment.id,
-                                searchQuery: viewModel.transcriptSearchQuery,
-                                showTimestamp: true,
-                                onTap: { viewModel.seekToSegment(segment) }
-                            )
-                            .id(segment.id)
-                        }
+                Button(
+                    role: .destructive,
+                    action: {
+                        viewModel.generateTranscript()
                     }
-                    .padding(.vertical, 4)
+                ) {
+                    Label("Regenerate", systemImage: "arrow.clockwise")
                 }
-                .onChange(of: viewModel.currentSegmentId) { _, newId in
-                    if let id = newId, viewModel.transcriptSearchQuery.isEmpty {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            proxy.scrollTo(id, anchor: .center)
-                        }
-                    }
-                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 22))
+                    .foregroundColor(.secondary)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Transcript Status Section
@@ -565,7 +752,31 @@ struct EpisodeDetailView: View {
         VStack(spacing: 16) {
             switch viewModel.transcriptState {
             case .idle:
-                if viewModel.hasLocalAudio {
+                // Check RSS transcript availability first
+                if viewModel.hasRSSTranscriptAvailable {
+                    VStack(spacing: 12) {
+                        Image(systemName: "captions.bubble")
+                            .font(.system(size: 50))
+                            .foregroundColor(.blue)
+                        Text("Transcript Available").font(.headline)
+                        Text("This episode has a transcript from the podcast feed.")
+                            .font(.caption).foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button(action: { viewModel.downloadRSSTranscript() }) {
+                            Label("Download Transcript", systemImage: "arrow.down.circle")
+                                .font(.subheadline)
+                                .padding(.horizontal, 20).padding(.vertical, 10)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                } else if viewModel.isDownloadingRSSTranscript {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Downloading Transcript").font(.headline)
+                            .padding(.top, 8)
+                    }
+                } else if viewModel.hasLocalAudio {
                     VStack(spacing: 12) {
                         Image(systemName: "waveform")
                             .font(.system(size: 50))
@@ -671,246 +882,39 @@ struct EpisodeDetailView: View {
         .padding(.horizontal)
     }
 
-    // MARK: - Keywords Tab
-    private var keywordsTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // On-device AI availability check
-                if #available(iOS 26.0, macOS 26.0, *) {
-                    onDeviceKeywordsContent
-                } else {
-                    // Fallback for older iOS versions
-                    VStack(spacing: 12) {
-                        Image(systemName: "apple.intelligence")
-                            .font(.system(size: 48))
-                            .foregroundColor(.secondary)
-                        Text("Requires iOS 26+")
-                            .font(.headline)
-                        Text(
-                            "On-device AI keywords require iOS 26 or later with Apple Intelligence."
-                        )
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                }
-            }
-            .padding()
-        }
-        .onAppear {
-            viewModel.checkOnDeviceAIAvailability()
-        }
-    }
+}
 
-    @available(iOS 26.0, macOS 26.0, *)
-    @ViewBuilder
-    private var onDeviceKeywordsContent: some View {
-        // Header
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: "apple.intelligence")
+// MARK: - Translation Progress Circle
+
+/// A circular progress indicator for translation status
+struct TranslationProgressCircle: View {
+    let status: TranslationStatus
+
+    var body: some View {
+        ZStack {
+            // Background circle
+            Circle()
+                .stroke(Color.gray.opacity(0.2), lineWidth: 3)
+
+            // Progress arc
+            if case .translating(let progress, let completed, _) = status {
+                Circle()
+                    .trim(from: 0, to: CGFloat(progress))
+                    .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 0.2), value: progress)
+
+                // Small text showing count
+                Text("\(completed)")
+                    .font(.system(size: 8, weight: .bold))
                     .foregroundColor(.blue)
-                Text("Quick Tags")
-                    .font(.title2)
-                    .bold()
+            } else if case .preparingSession = status {
+                // Indeterminate spinning indicator
+                Circle()
+                    .trim(from: 0, to: 0.3)
+                    .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
             }
-            Text("AI-generated tags from episode metadata (on-device, private)")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-
-        // Availability banner if not available
-        if !viewModel.onDeviceAIAvailability.isAvailable {
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                Text(
-                    viewModel.onDeviceAIAvailability.message
-                        ?? "On-device AI unavailable"
-                )
-                .font(.caption)
-                .foregroundColor(.secondary)
-                Spacer()
-            }
-            .padding()
-            .background(Color.orange.opacity(0.1))
-            .cornerRadius(8)
-        }
-
-        // Quick tags content
-        if let tags = viewModel.quickTagsCache.tags {
-            // Tags card
-            VStack(alignment: .leading, spacing: 12) {
-                // Category
-                HStack {
-                    categoryBadge(tags.primaryCategory, isPrimary: true)
-                    if let secondary = tags.secondaryCategory {
-                        categoryBadge(secondary, isPrimary: false)
-                    }
-                }
-
-                Divider()
-
-                // Tags as chips
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Tags")
-                        .font(.headline)
-                    FlowLayout(spacing: 8) {
-                        ForEach(tags.tags, id: \.self) { tag in
-                            tagChip(tag)
-                        }
-                    }
-                }
-
-                Divider()
-
-                // Content type and difficulty
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Content Type")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(tags.contentType.capitalized)
-                            .font(.subheadline)
-                    }
-
-                    Spacer()
-
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("Difficulty")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        difficultyBadge(tags.difficulty)
-                    }
-                }
-
-                // Regenerate button
-                Button(action: {
-                    viewModel.quickTagsCache.tags = nil
-                    viewModel.generateQuickTags()
-                }) {
-                    Label("Regenerate", systemImage: "arrow.clockwise")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding()
-            .background(Color.platformSystemGray6)
-            .cornerRadius(12)
-        } else {
-            // Generate button
-            Button(action: { viewModel.generateQuickTags() }) {
-                HStack {
-                    Image(systemName: "sparkles")
-                    Text("Generate Quick Tags")
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(
-                    viewModel.onDeviceAIAvailability.isAvailable
-                        ? Color.blue : Color.gray
-                )
-                .foregroundColor(.white)
-                .cornerRadius(12)
-            }
-            .disabled(!viewModel.onDeviceAIAvailability.isAvailable)
-        }
-
-        // Analysis state feedback
-        keywordsAnalysisStateView
-    }
-
-    @ViewBuilder
-    private var keywordsAnalysisStateView: some View {
-        switch viewModel.quickTagsState {
-        case .idle, .completed:
-            EmptyView()
-
-        case .analyzing(let progress, let message):
-            VStack(spacing: 12) {
-                if progress < 0 {
-                    ProgressView()
-                        .scaleEffect(1.2)
-                } else {
-                    ProgressView(value: progress)
-                        .progressViewStyle(.linear)
-                }
-
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .foregroundColor(.blue)
-                    Text(message)
-                        .font(.subheadline)
-                }
-
-                if progress >= 0 {
-                    Text("\(Int(progress * 100))%")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding()
-            .background(Color.blue.opacity(0.05))
-            .cornerRadius(12)
-
-        case .error(let message):
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.red)
-                Text(message)
-                    .font(.caption)
-                    .foregroundColor(.red)
-            }
-            .padding()
-            .background(Color.red.opacity(0.1))
-            .cornerRadius(8)
-        }
-    }
-
-    // MARK: - Helper Views for Keywords Tab
-
-    private func categoryBadge(_ category: String, isPrimary: Bool) -> some View
-    {
-        Text(category)
-            .font(.caption)
-            .fontWeight(isPrimary ? .bold : .regular)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                isPrimary ? Color.blue.opacity(0.2) : Color.gray.opacity(0.1)
-            )
-            .foregroundColor(isPrimary ? .blue : .secondary)
-            .cornerRadius(8)
-    }
-
-    private func tagChip(_ tag: String) -> some View {
-        Text("#\(tag)")
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.blue.opacity(0.1))
-            .foregroundColor(.blue)
-            .cornerRadius(6)
-    }
-
-    private func difficultyBadge(_ level: String) -> some View {
-        Text(level.capitalized)
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(difficultyColor(level).opacity(0.2))
-            .foregroundColor(difficultyColor(level))
-            .cornerRadius(8)
-    }
-
-    private func difficultyColor(_ level: String) -> Color {
-        switch level.lowercased() {
-        case "beginner": return .green
-        case "intermediate": return .orange
-        case "advanced": return .red
-        default: return .gray
         }
     }
 }
@@ -948,6 +952,9 @@ struct TranscriptSegmentRow: View {
     let showTimestamp: Bool
     let onTap: () -> Void
 
+    // Access subtitle settings for display mode
+    @State private var settings = SubtitleSettingsManager.shared
+
     init(
         segment: TranscriptSegment,
         isCurrentSegment: Bool,
@@ -963,6 +970,8 @@ struct TranscriptSegmentRow: View {
     }
 
     var body: some View {
+        let (primary, secondary) = segment.displayText(mode: settings.displayMode)
+
         Button(action: onTap) {
             HStack(alignment: .top, spacing: showTimestamp ? 12 : 0) {
                 // Timestamp (optional)
@@ -974,13 +983,25 @@ struct TranscriptSegmentRow: View {
                         .frame(width: 50, alignment: .leading)
                 }
 
-                // Text content with highlighted search terms
-                highlightedText
-                    .font(.body)
-                    .foregroundColor(isCurrentSegment ? .white : .primary)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+                // Text content with dual subtitle support
+                VStack(alignment: .leading, spacing: 4) {
+                    // Primary text with search highlighting
+                    highlightedText(primary)
+                        .font(.body)
+                        .foregroundColor(isCurrentSegment ? .white : .primary)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // Secondary text (for dual modes)
+                    if let secondaryText = secondary {
+                        highlightedText(secondaryText)
+                            .font(.subheadline)
+                            .foregroundColor(isCurrentSegment ? .white.opacity(0.8) : .secondary)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .textSelection(.enabled)
 
                 // Play indicator for current segment
                 if isCurrentSegment {
@@ -1001,11 +1022,11 @@ struct TranscriptSegmentRow: View {
     }
 
     @ViewBuilder
-    private var highlightedText: some View {
+    private func highlightedText(_ text: String) -> some View {
         if searchQuery.isEmpty {
-            Text(segment.text)
+            Text(text)
         } else {
-            highlightMatches(in: segment.text, query: searchQuery)
+            highlightMatches(in: text, query: searchQuery)
         }
     }
 
@@ -1114,4 +1135,6 @@ struct TranscriptSegmentRow: View {
     }
 }
 
-// (Existing Helper Components: TabButton, TranscriptSegmentRow remain unchanged)
+// NOTE: CJKTextUtils, FlowingTranscriptView, FlowingSegmentText, WordHighlightedText,
+// SearchHighlightedText are now in Views/Components/TranscriptViews.swift
+

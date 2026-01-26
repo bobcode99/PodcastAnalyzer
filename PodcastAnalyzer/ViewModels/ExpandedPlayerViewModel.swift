@@ -35,10 +35,15 @@ final class ExpandedPlayerViewModel {
   var downloadState: DownloadState = .notDownloaded
   var podcastModel: PodcastInfoModel?
 
+  // Sleep timer properties
+  var sleepTimerOption: SleepTimerOption = .off
+  var sleepTimerRemaining: TimeInterval = 0
+
   // Transcript properties
   var hasTranscript: Bool = false
   var transcriptSegments: [TranscriptSegment] = []
   var transcriptSearchQuery: String = ""
+  var displayMode: SubtitleDisplayMode = .originalOnly
 
   @ObservationIgnored
   private let audioManager = EnhancedAudioManager.shared
@@ -48,6 +53,9 @@ final class ExpandedPlayerViewModel {
 
   @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
+
+  @ObservationIgnored
+  private let subtitleSettings = SubtitleSettingsManager.shared
 
   @ObservationIgnored
   private var updateTimer: Timer?
@@ -119,6 +127,13 @@ final class ExpandedPlayerViewModel {
         episodeTitle: episode.title,
         podcastTitle: episode.podcastTitle
       )
+
+      // Sync display mode from settings
+      displayMode = subtitleSettings.displayMode
+
+      // Sync sleep timer state
+      sleepTimerOption = audioManager.sleepTimerOption
+      sleepTimerRemaining = audioManager.sleepTimerRemaining
 
       // Reload episode state when episode changes
       if previousEpisodeId != episode.id {
@@ -269,6 +284,20 @@ final class ExpandedPlayerViewModel {
       model.lastPlaybackPosition = 0
     }
     try? modelContext?.save()
+  }
+
+  // MARK: - Sleep Timer
+
+  func setSleepTimer(_ option: SleepTimerOption) {
+    audioManager.setSleepTimer(option)
+  }
+
+  var isSleepTimerActive: Bool {
+    audioManager.isSleepTimerActive
+  }
+
+  var sleepTimerRemainingFormatted: String {
+    audioManager.sleepTimerRemainingFormatted
   }
 
   func shareEpisode() {
