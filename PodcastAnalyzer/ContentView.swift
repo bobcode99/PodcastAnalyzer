@@ -52,30 +52,6 @@ struct iOSContentView: View {
       Tab(Constants.homeString, systemImage: Constants.homeIconName) {
         NavigationStack {
           HomeView()
-            .navigationDestination(isPresented: $showNotificationEpisode) {
-              if let episode = notificationEpisode {
-                EpisodeDetailView(
-                  episode: episode,
-                  podcastTitle: notificationPodcastTitle,
-                  fallbackImageURL: notificationImageURL,
-                  podcastLanguage: notificationLanguage
-                )
-              }
-            }
-            .navigationDestination(isPresented: $showExpandedPlayerEpisode) {
-              if let episode = expandedPlayerEpisode {
-                EpisodeDetailView(
-                  episode: episode,
-                  podcastTitle: expandedPlayerPodcastTitle,
-                  fallbackImageURL: expandedPlayerImageURL
-                )
-              }
-            }
-            .navigationDestination(isPresented: $showExpandedPlayerPodcast) {
-              if let podcastModel = expandedPlayerPodcastModel {
-                EpisodeListView(podcastModel: podcastModel)
-              }
-            }
         }
       }
 
@@ -89,6 +65,60 @@ struct iOSContentView: View {
 
       Tab(role: .search) {
         PodcastSearchView()
+      }
+    }
+    // Full-screen cover for episode detail navigation (works from any tab)
+    .fullScreenCover(isPresented: $showExpandedPlayerEpisode) {
+      if let episode = expandedPlayerEpisode {
+        NavigationStack {
+          EpisodeDetailView(
+            episode: episode,
+            podcastTitle: expandedPlayerPodcastTitle,
+            fallbackImageURL: expandedPlayerImageURL
+          )
+          .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+              Button("Done") {
+                showExpandedPlayerEpisode = false
+              }
+            }
+          }
+        }
+      }
+    }
+    // Full-screen cover for podcast episode list navigation (works from any tab)
+    .fullScreenCover(isPresented: $showExpandedPlayerPodcast) {
+      if let podcastModel = expandedPlayerPodcastModel {
+        NavigationStack {
+          EpisodeListView(podcastModel: podcastModel)
+            .toolbar {
+              ToolbarItem(placement: .cancellationAction) {
+                Button("Done") {
+                  showExpandedPlayerPodcast = false
+                }
+              }
+            }
+        }
+      }
+    }
+    // Full-screen cover for notification navigation (works from any tab)
+    .fullScreenCover(isPresented: $showNotificationEpisode) {
+      if let episode = notificationEpisode {
+        NavigationStack {
+          EpisodeDetailView(
+            episode: episode,
+            podcastTitle: notificationPodcastTitle,
+            fallbackImageURL: notificationImageURL,
+            podcastLanguage: notificationLanguage
+          )
+          .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+              Button("Done") {
+                showNotificationEpisode = false
+              }
+            }
+          }
+        }
       }
     }
     .tabViewBottomAccessory {
