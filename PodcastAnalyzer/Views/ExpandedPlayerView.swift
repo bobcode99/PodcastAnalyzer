@@ -225,16 +225,17 @@ struct ExpandedPlayerView: View {
         // This ensures the title doesn't overlap the button
         .padding(.leading, 44)
 
-        // 2. Enhanced Ellipsis Button
+        // 2. Enhanced Ellipsis Button - larger touch target
         Menu {
           ellipsisMenuContent
         } label: {
           Image(systemName: "ellipsis.circle.fill")
-            .font(.system(size: 24))
-            .foregroundColor(.secondary.opacity(0.5))
-            .frame(width: 44, height: 44)  // Large touch target
-            .contentShape(Rectangle())  // Makes the whole 44x44 area tappable
+            .font(.system(size: 28))
+            .symbolRenderingMode(.hierarchical)
+            .foregroundColor(.secondary)
         }
+        .frame(width: 48, height: 48)
+        .contentShape(Rectangle())
       }
       .padding(.horizontal, 20)
 
@@ -412,7 +413,7 @@ struct ExpandedPlayerView: View {
   // MARK: - Controls Section
   private var controlsSection: some View {
     HStack(spacing: 0) {
-      // Speed button
+      // Speed button - larger touch target
       Button(action: {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
           showSpeedPicker = true
@@ -421,10 +422,12 @@ struct ExpandedPlayerView: View {
         Text(formatSpeed(viewModel.playbackSpeed))
           .font(.system(size: 16, weight: .medium))
           .foregroundColor(.primary)
-          .frame(width: 44, height: 44)
+          .frame(width: 48, height: 48)
           .background(Color.gray.opacity(0.2))
           .clipShape(Circle())
       }
+      .frame(width: 56, height: 56)
+      .contentShape(Rectangle())
 
       Spacer()
 
@@ -454,7 +457,7 @@ struct ExpandedPlayerView: View {
 
       Spacer()
 
-      // Sleep timer button
+      // Sleep timer button - larger touch target
       Menu {
         ForEach(SleepTimerOption.allCases, id: \.self) { option in
           Button(action: { viewModel.setSleepTimer(option) }) {
@@ -471,25 +474,27 @@ struct ExpandedPlayerView: View {
         ZStack {
           Circle()
             .fill(viewModel.isSleepTimerActive ? Color.blue : Color.gray.opacity(0.2))
-            .frame(width: 44, height: 44)
+            .frame(width: 48, height: 48)
 
           if viewModel.isSleepTimerActive {
             if viewModel.sleepTimerOption == .endOfEpisode {
               Image(systemName: "stop.circle.fill")
-                .font(.system(size: 20))
+                .font(.system(size: 22))
                 .foregroundColor(.white)
             } else {
               Text(viewModel.sleepTimerRemainingFormatted)
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 11, weight: .bold))
                 .foregroundColor(.white)
                 .minimumScaleFactor(0.5)
             }
           } else {
             Image(systemName: "moon.zzz")
-              .font(.system(size: 20))
+              .font(.system(size: 22))
               .foregroundColor(.primary)
           }
         }
+        .frame(width: 56, height: 56) // Larger touch target
+        .contentShape(Rectangle())
       }
     }
     .padding(.horizontal, 24)
