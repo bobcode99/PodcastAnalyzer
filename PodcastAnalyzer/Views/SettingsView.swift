@@ -15,8 +15,7 @@ struct SettingsView: View {
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
   var body: some View {
-    NavigationStack {
-      List {
+    List {
         // MARK: - Sync & Notifications Section
         Section {
           Toggle(isOn: Binding(get: { syncManager.isBackgroundSyncEnabled }, set: { syncManager.isBackgroundSyncEnabled = $0 })) {
@@ -316,7 +315,6 @@ struct SettingsView: View {
         viewModel.loadFeeds(modelContext: modelContext)
         viewModel.checkTranscriptModelStatus()
       }
-    }
   }
 
   // MARK: - Notification Status Text

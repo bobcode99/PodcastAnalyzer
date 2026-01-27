@@ -22,45 +22,43 @@ struct HomeView: View {
   @State private var showSubscribeSheet = false
 
   var body: some View {
-    NavigationStack {
-      ScrollView {
-        VStack(alignment: .leading, spacing: 24) {
-          // Up Next Section
-          upNextSection
+    ScrollView {
+      VStack(alignment: .leading, spacing: 24) {
+        // Up Next Section
+        upNextSection
 
-          // Popular Shows Section
-          popularShowsSection
-        }
-        .padding(.vertical)
+        // Popular Shows Section
+        popularShowsSection
       }
-      .navigationTitle(Constants.homeString)
-      .platformToolbarTitleDisplayMode()
-      .toolbar {
-        ToolbarItem(placement: .primaryAction) {
-          Button(action: { showRegionPicker = true }) {
-            HStack(spacing: 4) {
-              Text(viewModel.selectedRegionFlag)
-                .font(.title3)
-              Image(systemName: "chevron.down")
-                .font(.caption2)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.gray.opacity(0.15))
-            .cornerRadius(12)
+      .padding(.vertical)
+    }
+    .navigationTitle(Constants.homeString)
+    .platformToolbarTitleDisplayMode()
+    .toolbar {
+      ToolbarItem(placement: .primaryAction) {
+        Button(action: { showRegionPicker = true }) {
+          HStack(spacing: 4) {
+            Text(viewModel.selectedRegionFlag)
+              .font(.title3)
+            Image(systemName: "chevron.down")
+              .font(.caption2)
           }
+          .padding(.horizontal, 8)
+          .padding(.vertical, 4)
+          .background(Color.gray.opacity(0.15))
+          .cornerRadius(12)
         }
       }
-      .sheet(isPresented: $showRegionPicker) {
-        RegionPickerSheet(
-          selectedRegion: $viewModel.selectedRegion,
-          isPresented: $showRegionPicker
-        )
-        .presentationDetents([.medium])
-      }
-      .refreshable {
-        await viewModel.refresh()
-      }
+    }
+    .sheet(isPresented: $showRegionPicker) {
+      RegionPickerSheet(
+        selectedRegion: $viewModel.selectedRegion,
+        isPresented: $showRegionPicker
+      )
+      .presentationDetents([.medium])
+    }
+    .refreshable {
+      await viewModel.refresh()
     }
     .onAppear {
       // This is the key: set the context once

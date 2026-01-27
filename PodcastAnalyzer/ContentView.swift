@@ -52,72 +52,76 @@ struct iOSContentView: View {
       Tab(Constants.homeString, systemImage: Constants.homeIconName) {
         NavigationStack {
           HomeView()
+            .playerNavigationDestinations(
+              showNotificationEpisode: $showNotificationEpisode,
+              notificationEpisode: notificationEpisode,
+              notificationPodcastTitle: notificationPodcastTitle,
+              notificationImageURL: notificationImageURL,
+              notificationLanguage: notificationLanguage,
+              showEpisodeDetail: $showExpandedPlayerEpisode,
+              episodeDetail: expandedPlayerEpisode,
+              episodePodcastTitle: expandedPlayerPodcastTitle,
+              episodeImageURL: expandedPlayerImageURL,
+              showPodcastList: $showExpandedPlayerPodcast,
+              podcastModel: expandedPlayerPodcastModel
+            )
         }
       }
 
       Tab(Constants.libraryString, systemImage: Constants.libraryIconName) {
-        LibraryView()
+        NavigationStack {
+          LibraryView()
+            .playerNavigationDestinations(
+              showNotificationEpisode: $showNotificationEpisode,
+              notificationEpisode: notificationEpisode,
+              notificationPodcastTitle: notificationPodcastTitle,
+              notificationImageURL: notificationImageURL,
+              notificationLanguage: notificationLanguage,
+              showEpisodeDetail: $showExpandedPlayerEpisode,
+              episodeDetail: expandedPlayerEpisode,
+              episodePodcastTitle: expandedPlayerPodcastTitle,
+              episodeImageURL: expandedPlayerImageURL,
+              showPodcastList: $showExpandedPlayerPodcast,
+              podcastModel: expandedPlayerPodcastModel
+            )
+        }
       }
 
       Tab(Constants.settingsString, systemImage: Constants.settingsIconName) {
-        SettingsView()
+        NavigationStack {
+          SettingsView()
+            .playerNavigationDestinations(
+              showNotificationEpisode: $showNotificationEpisode,
+              notificationEpisode: notificationEpisode,
+              notificationPodcastTitle: notificationPodcastTitle,
+              notificationImageURL: notificationImageURL,
+              notificationLanguage: notificationLanguage,
+              showEpisodeDetail: $showExpandedPlayerEpisode,
+              episodeDetail: expandedPlayerEpisode,
+              episodePodcastTitle: expandedPlayerPodcastTitle,
+              episodeImageURL: expandedPlayerImageURL,
+              showPodcastList: $showExpandedPlayerPodcast,
+              podcastModel: expandedPlayerPodcastModel
+            )
+        }
       }
 
       Tab(role: .search) {
-        PodcastSearchView()
-      }
-    }
-    // Full-screen cover for episode detail navigation (works from any tab)
-    .fullScreenCover(isPresented: $showExpandedPlayerEpisode) {
-      if let episode = expandedPlayerEpisode {
         NavigationStack {
-          EpisodeDetailView(
-            episode: episode,
-            podcastTitle: expandedPlayerPodcastTitle,
-            fallbackImageURL: expandedPlayerImageURL
-          )
-          .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-              Button("Done") {
-                showExpandedPlayerEpisode = false
-              }
-            }
-          }
-        }
-      }
-    }
-    // Full-screen cover for podcast episode list navigation (works from any tab)
-    .fullScreenCover(isPresented: $showExpandedPlayerPodcast) {
-      if let podcastModel = expandedPlayerPodcastModel {
-        NavigationStack {
-          EpisodeListView(podcastModel: podcastModel)
-            .toolbar {
-              ToolbarItem(placement: .cancellationAction) {
-                Button("Done") {
-                  showExpandedPlayerPodcast = false
-                }
-              }
-            }
-        }
-      }
-    }
-    // Full-screen cover for notification navigation (works from any tab)
-    .fullScreenCover(isPresented: $showNotificationEpisode) {
-      if let episode = notificationEpisode {
-        NavigationStack {
-          EpisodeDetailView(
-            episode: episode,
-            podcastTitle: notificationPodcastTitle,
-            fallbackImageURL: notificationImageURL,
-            podcastLanguage: notificationLanguage
-          )
-          .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-              Button("Done") {
-                showNotificationEpisode = false
-              }
-            }
-          }
+          PodcastSearchView()
+            .playerNavigationDestinations(
+              showNotificationEpisode: $showNotificationEpisode,
+              notificationEpisode: notificationEpisode,
+              notificationPodcastTitle: notificationPodcastTitle,
+              notificationImageURL: notificationImageURL,
+              notificationLanguage: notificationLanguage,
+              showEpisodeDetail: $showExpandedPlayerEpisode,
+              episodeDetail: expandedPlayerEpisode,
+              episodePodcastTitle: expandedPlayerPodcastTitle,
+              episodeImageURL: expandedPlayerImageURL,
+              showPodcastList: $showExpandedPlayerPodcast,
+              podcastModel: expandedPlayerPodcastModel
+            )
         }
       }
     }
@@ -323,6 +327,52 @@ struct PodcastImportSheet: View {
       }
       .interactiveDismissDisabled(importManager.isImporting)
     }
+  }
+}
+
+// MARK: - Player Navigation Destinations
+
+extension View {
+  /// Attaches navigationDestination modifiers for expanded player / notification navigation.
+  /// Must be called on a view that is inside a NavigationStack.
+  func playerNavigationDestinations(
+    showNotificationEpisode: Binding<Bool>,
+    notificationEpisode: PodcastEpisodeInfo?,
+    notificationPodcastTitle: String,
+    notificationImageURL: String?,
+    notificationLanguage: String,
+    showEpisodeDetail: Binding<Bool>,
+    episodeDetail: PodcastEpisodeInfo?,
+    episodePodcastTitle: String,
+    episodeImageURL: String?,
+    showPodcastList: Binding<Bool>,
+    podcastModel: PodcastInfoModel?
+  ) -> some View {
+    self
+      .navigationDestination(isPresented: showNotificationEpisode) {
+        if let episode = notificationEpisode {
+          EpisodeDetailView(
+            episode: episode,
+            podcastTitle: notificationPodcastTitle,
+            fallbackImageURL: notificationImageURL,
+            podcastLanguage: notificationLanguage
+          )
+        }
+      }
+      .navigationDestination(isPresented: showEpisodeDetail) {
+        if let episode = episodeDetail {
+          EpisodeDetailView(
+            episode: episode,
+            podcastTitle: episodePodcastTitle,
+            fallbackImageURL: episodeImageURL
+          )
+        }
+      }
+      .navigationDestination(isPresented: showPodcastList) {
+        if let podcastModel = podcastModel {
+          EpisodeListView(podcastModel: podcastModel)
+        }
+      }
   }
 }
 

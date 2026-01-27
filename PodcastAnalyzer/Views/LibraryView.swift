@@ -45,36 +45,34 @@ struct LibraryView: View {
   @State private var downloadObserver: NSObjectProtocol?
 
   var body: some View {
-    NavigationStack {
-      ZStack {
-        ScrollView {
-          VStack(spacing: 24) {
-            // Quick access cards
-            quickAccessSection
-              .padding(.horizontal, 16)
+    ZStack {
+      ScrollView {
+        VStack(spacing: 24) {
+          // Quick access cards
+          quickAccessSection
+            .padding(.horizontal, 16)
 
-            // Subscribed Podcasts Grid
-            podcastsGridSection
-              .padding(.horizontal, 16)
-          }
-          .padding(.top, 8)
-          .padding(.bottom, 40)
+          // Subscribed Podcasts Grid
+          podcastsGridSection
+            .padding(.horizontal, 16)
         }
+        .padding(.top, 8)
+        .padding(.bottom, 40)
+      }
 
-        // Initial loading state only when truly empty
-        if viewModel.isLoading && subscribedPodcasts.isEmpty
-            && viewModel.savedEpisodes.isEmpty && viewModel.downloadedEpisodes.isEmpty {
-          ProgressView("Loading Library...")
-            .scaleEffect(1.5)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.platformBackground)
-        }
+      // Initial loading state only when truly empty
+      if viewModel.isLoading && subscribedPodcasts.isEmpty
+          && viewModel.savedEpisodes.isEmpty && viewModel.downloadedEpisodes.isEmpty {
+        ProgressView("Loading Library...")
+          .scaleEffect(1.5)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .background(Color.platformBackground)
       }
-      .navigationTitle(Constants.libraryString)
-      .platformToolbarTitleDisplayMode()
-      .refreshable {
-        await viewModel.refreshAllPodcasts()
-      }
+    }
+    .navigationTitle(Constants.libraryString)
+    .platformToolbarTitleDisplayMode()
+    .refreshable {
+      await viewModel.refreshAllPodcasts()
     }
     .onAppear {
       // Set the context and initial podcasts

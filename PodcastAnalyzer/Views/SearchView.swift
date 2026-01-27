@@ -32,44 +32,42 @@ struct PodcastSearchView: View {
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Tab selector
-                tabSelector
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
+        VStack(spacing: 0) {
+            // Tab selector
+            tabSelector
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
 
-                // Search results
-                if searchText.isEmpty {
-                    emptySearchView
-                } else {
-                    switch selectedTab {
-                    case .applePodcasts:
-                        applePodcastsResultsView
-                    case .library:
-                        libraryResultsView
-                    }
+            // Search results
+            if searchText.isEmpty {
+                emptySearchView
+            } else {
+                switch selectedTab {
+                case .applePodcasts:
+                    applePodcastsResultsView
+                case .library:
+                    libraryResultsView
                 }
             }
-            .navigationTitle("Search")
-            .searchable(text: $searchText, prompt: "Podcasts & Episodes")
-            .onSubmit(of: .search) {
-                if selectedTab == .applePodcasts {
-                    viewModel.searchText = searchText
-                    viewModel.performSearch()
-                }
+        }
+        .navigationTitle("Search")
+        .searchable(text: $searchText, prompt: "Podcasts & Episodes")
+        .onSubmit(of: .search) {
+            if selectedTab == .applePodcasts {
+                viewModel.searchText = searchText
+                viewModel.performSearch()
             }
-            .onChange(of: searchText) { _, newValue in
-                viewModel.searchText = newValue
-                if selectedTab == .applePodcasts && !newValue.isEmpty {
-                    viewModel.performSearch()
-                }
+        }
+        .onChange(of: searchText) { _, newValue in
+            viewModel.searchText = newValue
+            if selectedTab == .applePodcasts && !newValue.isEmpty {
+                viewModel.performSearch()
             }
-            .onChange(of: selectedTab) { _, newTab in
-                if newTab == .applePodcasts && !searchText.isEmpty {
-                    viewModel.searchText = searchText
-                    viewModel.performSearch()
-                }
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            if newTab == .applePodcasts && !searchText.isEmpty {
+                viewModel.searchText = searchText
+                viewModel.performSearch()
             }
         }
     }
