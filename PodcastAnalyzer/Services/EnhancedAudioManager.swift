@@ -551,14 +551,18 @@ private func handleAudioInterruption(_ notification: Notification) {
     }
 
     let nextEpisode = queue.removeFirst()
+    let savedPosition = PlaybackStateCoordinator.savedPlaybackPosition(
+      podcastTitle: nextEpisode.podcastTitle,
+      episodeTitle: nextEpisode.title
+    )
     play(
       episode: nextEpisode,
       audioURL: nextEpisode.audioURL,
-      startTime: 0,
+      startTime: savedPosition,
       imageURL: nextEpisode.imageURL,
-      useDefaultSpeed: false
+      useDefaultSpeed: savedPosition == 0
     )
-    logger.info("Playing next in queue: \(nextEpisode.title)")
+    logger.info("Playing next in queue: \(nextEpisode.title) at \(Int(savedPosition))s")
   }
 
   /// Skip to a specific episode in the queue
@@ -1076,13 +1080,17 @@ private func handleAudioInterruption(_ notification: Notification) {
         // Pick a random episode from candidates
         let randomIndex = Int.random(in: 0..<autoPlayCandidates.count)
         let nextEpisode = autoPlayCandidates[randomIndex]
-        logger.info("Auto-playing random episode: \(nextEpisode.title)")
+        let savedPosition = PlaybackStateCoordinator.savedPlaybackPosition(
+          podcastTitle: nextEpisode.podcastTitle,
+          episodeTitle: nextEpisode.title
+        )
+        logger.info("Auto-playing random episode: \(nextEpisode.title) at \(Int(savedPosition))s")
         play(
           episode: nextEpisode,
           audioURL: nextEpisode.audioURL,
-          startTime: 0,
+          startTime: savedPosition,
           imageURL: nextEpisode.imageURL,
-          useDefaultSpeed: false
+          useDefaultSpeed: savedPosition == 0
         )
       } else {
         clearPlaybackState()
