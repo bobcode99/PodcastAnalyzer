@@ -265,6 +265,13 @@ private func handleAudioInterruption(_ notification: Notification) {
   private func setupRemoteControls() {
     let commandCenter = MPRemoteCommandCenter.shared()
 
+    // Remove any existing targets before adding to prevent handler accumulation
+    commandCenter.playCommand.removeTarget(nil)
+    commandCenter.pauseCommand.removeTarget(nil)
+    commandCenter.skipForwardCommand.removeTarget(nil)
+    commandCenter.skipBackwardCommand.removeTarget(nil)
+    commandCenter.changePlaybackPositionCommand.removeTarget(nil)
+
     commandCenter.playCommand.isEnabled = true
     commandCenter.playCommand.addTarget { [weak self] _ in
       self?.resume()
@@ -1122,7 +1129,7 @@ private func handleAudioInterruption(_ notification: Notification) {
 
 // MARK: - Supporting Models
 
-struct PlaybackEpisode: Identifiable, Codable, Sendable {
+struct PlaybackEpisode: Identifiable, Codable, Sendable, Equatable {
   let id: String
   let title: String
   let podcastTitle: String

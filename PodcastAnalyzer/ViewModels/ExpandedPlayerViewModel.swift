@@ -88,7 +88,7 @@ final class ExpandedPlayerViewModel {
   }
 
   private func setupUpdateTimer() {
-    updateTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+    updateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
       guard let self else { return }
       Task { @MainActor in
         self.updateState()
@@ -99,41 +99,48 @@ final class ExpandedPlayerViewModel {
   private func updateState() {
     if let episode = audioManager.currentEpisode {
       let previousEpisodeId = currentEpisode?.id
-      currentEpisode = episode
-      isPlaying = audioManager.isPlaying
-      episodeTitle = episode.title
-      podcastTitle = episode.podcastTitle
+
+      // Only write properties when values actually changed to avoid unnecessary SwiftUI re-renders
+      if currentEpisode?.id != episode.id { currentEpisode = episode }
+      if isPlaying != audioManager.isPlaying { isPlaying = audioManager.isPlaying }
+      if episodeTitle != episode.title { episodeTitle = episode.title }
+      if podcastTitle != episode.podcastTitle { podcastTitle = episode.podcastTitle }
 
       if let imageURLString = episode.imageURL {
-        imageURL = URL(string: imageURLString)
+        let newURL = URL(string: imageURLString)
+        if imageURL != newURL { imageURL = newURL }
       }
 
-      // Update episode date from current episode
-      episodeDate = episode.pubDate
+      if episodeDate != episode.pubDate { episodeDate = episode.pubDate }
 
-      currentTime = audioManager.currentTime
-      duration = audioManager.duration
-      playbackSpeed = audioManager.playbackRate
+      let newCurrentTime = audioManager.currentTime
+      let newDuration = audioManager.duration
+      if currentTime != newCurrentTime { currentTime = newCurrentTime }
+      if duration != newDuration { duration = newDuration }
+      if playbackSpeed != audioManager.playbackRate { playbackSpeed = audioManager.playbackRate }
 
-      if duration > 0 {
-        progress = currentTime / duration
+      if newDuration > 0 {
+        let newProgress = newCurrentTime / newDuration
+        if progress != newProgress { progress = newProgress }
       }
 
       // Update queue
-      queue = audioManager.queue
+      let newQueue = audioManager.queue
+      if queue != newQueue { queue = newQueue }
 
       // Update download state
-      downloadState = downloadManager.getDownloadState(
+      let newDownloadState = downloadManager.getDownloadState(
         episodeTitle: episode.title,
         podcastTitle: episode.podcastTitle
       )
+      if downloadState != newDownloadState { downloadState = newDownloadState }
 
       // Sync display mode from settings
-      displayMode = subtitleSettings.displayMode
+      if displayMode != subtitleSettings.displayMode { displayMode = subtitleSettings.displayMode }
 
       // Sync sleep timer state
-      sleepTimerOption = audioManager.sleepTimerOption
-      sleepTimerRemaining = audioManager.sleepTimerRemaining
+      if sleepTimerOption != audioManager.sleepTimerOption { sleepTimerOption = audioManager.sleepTimerOption }
+      if sleepTimerRemaining != audioManager.sleepTimerRemaining { sleepTimerRemaining = audioManager.sleepTimerRemaining }
 
       // Reload episode state when episode changes
       if previousEpisodeId != episode.id {

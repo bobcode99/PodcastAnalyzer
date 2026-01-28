@@ -663,7 +663,6 @@ struct PodcastPreviewSheet: View {
 struct UpNextListView: View {
   let episodes: [LibraryEpisode]
   @Environment(\.modelContext) private var modelContext
-  @State private var viewModel = HomeViewModel()
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
 
@@ -687,9 +686,6 @@ struct UpNextListView: View {
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif
-    .onAppear {
-      viewModel.setModelContext(modelContext)
-    }
     .confirmationDialog(
       "Delete Download",
       isPresented: $showDeleteConfirmation,
