@@ -538,10 +538,15 @@ private func handleAudioInterruption(_ notification: Notification) {
   }
 
   /// Add episodes to auto-play candidates (avoids duplicates)
+  /// Caps the list at maxQueueSize to prevent unbounded memory growth
   func addToAutoPlayCandidates(_ episodes: [PlaybackEpisode]) {
     let existingIds = Set(autoPlayCandidates.map { $0.id })
     let newEpisodes = episodes.filter { !existingIds.contains($0.id) }
     autoPlayCandidates.append(contentsOf: newEpisodes)
+    // Trim to max size to prevent unbounded memory growth
+    if autoPlayCandidates.count > maxQueueSize {
+      autoPlayCandidates = Array(autoPlayCandidates.suffix(maxQueueSize))
+    }
     logger.info("Added \(newEpisodes.count) to auto-play candidates (total: \(self.autoPlayCandidates.count))")
   }
 

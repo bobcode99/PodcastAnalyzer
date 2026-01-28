@@ -21,9 +21,10 @@ struct ContentView: View {
 
 #if os(iOS)
 struct iOSContentView: View {
-  @State private var audioManager = EnhancedAudioManager.shared
-  @State private var importManager = PodcastImportManager.shared
-  @State private var notificationManager = NotificationNavigationManager.shared
+  // Access singletons directly without @State to avoid unnecessary observation overhead
+  private var audioManager: EnhancedAudioManager { .shared }
+  private var importManager: PodcastImportManager { .shared }
+  private var notificationManager: NotificationNavigationManager { .shared }
   @Environment(\.modelContext) private var modelContext
 
   // Navigation state for notification-triggered navigation

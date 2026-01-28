@@ -64,6 +64,10 @@ struct HomeView: View {
       // This is the key: set the context once
       viewModel.setModelContext(modelContext)
     }
+    .onDisappear {
+      // Cleanup region observer task to prevent memory leaks
+      viewModel.cleanup()
+    }
   }
 
   // MARK: - Up Next Section

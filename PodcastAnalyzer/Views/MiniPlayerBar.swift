@@ -31,7 +31,8 @@ enum ExpandedPlayerNavigation: Equatable {
 struct MiniPlayerBar: View {
   @Environment(\.tabViewBottomAccessoryPlacement) var placement
   @Environment(\.modelContext) private var modelContext
-  @State private var audioManager = EnhancedAudioManager.shared
+  // Access singleton directly without @State to avoid unnecessary observation overhead
+  private var audioManager: EnhancedAudioManager { .shared }
   @State private var showExpandedPlayer = false
 
   // Pending navigation after expanded player dismisses

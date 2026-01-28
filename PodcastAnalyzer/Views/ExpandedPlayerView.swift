@@ -164,14 +164,13 @@ struct ExpandedPlayerView: View {
 
     return Group {
       if let imageURL = viewModel.imageURL {
-        AsyncImage(url: imageURL) { phase in
-          if let image = phase.image {
-            image
-              .resizable()
-              .aspectRatio(contentMode: .fill)
-          } else {
-            artworkPlaceholder
-          }
+        // Use CachedAsyncImage for better memory management
+        CachedAsyncImage(url: imageURL) { image in
+          image
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+        } placeholder: {
+          artworkPlaceholder
         }
         .frame(width: baseSize, height: baseSize)
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -963,14 +962,12 @@ struct TranscriptFullScreenView: View {
   // Mini player bar inside transcript sheet
   private var miniPlayerBar: some View {
     HStack(spacing: 12) {
-      // Small artwork
+      // Small artwork - use CachedAsyncImage for better memory management
       if let imageURL = viewModel.imageURL {
-        AsyncImage(url: imageURL) { phase in
-          if let image = phase.image {
-            image.resizable().aspectRatio(contentMode: .fill)
-          } else {
-            Color.gray.opacity(0.3)
-          }
+        CachedAsyncImage(url: imageURL) { image in
+          image.resizable().aspectRatio(contentMode: .fill)
+        } placeholder: {
+          Color.gray.opacity(0.3)
         }
         .frame(width: 44, height: 44)
         .cornerRadius(6)

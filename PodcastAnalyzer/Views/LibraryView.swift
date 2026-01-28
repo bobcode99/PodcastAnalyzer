@@ -398,18 +398,16 @@ struct PodcastGridCell: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       // Artwork - using CachedAsyncImage for better performance
-      GeometryReader { geo in
-        CachedAsyncImage(url: URL(string: podcast.podcastInfo.imageURL)) { image in
-          image.resizable().aspectRatio(contentMode: .fill)
-        } placeholder: {
-          Color.gray.opacity(0.2)
-            .overlay(ProgressView().scaleEffect(0.5))
-        }
-        .frame(width: geo.size.width, height: geo.size.width)
-        .cornerRadius(10)
-        .clipped()
+      // Fixed aspect ratio instead of GeometryReader to prevent excessive re-evaluation
+      CachedAsyncImage(url: URL(string: podcast.podcastInfo.imageURL)) { image in
+        image.resizable().aspectRatio(contentMode: .fill)
+      } placeholder: {
+        Color.gray.opacity(0.2)
+          .overlay(ProgressView().scaleEffect(0.5))
       }
       .aspectRatio(1, contentMode: .fit)
+      .cornerRadius(10)
+      .clipped()
 
       // Podcast title
       Text(podcast.podcastInfo.title)
@@ -749,24 +747,18 @@ struct DownloadingEpisodeRow: View {
 
   var body: some View {
     HStack(spacing: 12) {
-      // Artwork
-      AsyncImage(url: URL(string: episode.imageURL ?? "")) { phase in
-        switch phase {
-        case .success(let image):
-          image
-            .resizable()
-            .aspectRatio(contentMode: .fill)
-        case .failure, .empty:
-          Rectangle()
-            .fill(Color.gray.opacity(0.2))
-            .overlay(
-              Image(systemName: "music.note")
-                .foregroundColor(.gray)
-            )
-        @unknown default:
-          Rectangle()
-            .fill(Color.gray.opacity(0.2))
-        }
+      // Artwork - use CachedAsyncImage for better memory management
+      CachedAsyncImage(url: URL(string: episode.imageURL ?? "")) { image in
+        image
+          .resizable()
+          .aspectRatio(contentMode: .fill)
+      } placeholder: {
+        Rectangle()
+          .fill(Color.gray.opacity(0.2))
+          .overlay(
+            Image(systemName: "music.note")
+              .foregroundColor(.gray)
+          )
       }
       .frame(width: 56, height: 56)
       .cornerRadius(8)
