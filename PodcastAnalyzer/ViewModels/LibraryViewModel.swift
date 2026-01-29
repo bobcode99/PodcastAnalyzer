@@ -344,29 +344,48 @@ final class LibraryViewModel {
   }
 
   func setModelContext(_ context: ModelContext) {
-    // Prevent redundant reloading if context hasn't changed and data is loaded
-    if self.modelContext == context && isAlreadyLoaded {
+    self.modelContext = context
+
+    // Always ensure observers and timer are running (they may have been cleaned up)
+    ensureObserversAndTimerRunning()
+
+    // Prevent redundant reloading if data is already loaded
+    if isAlreadyLoaded {
       return
     }
-    
-    self.modelContext = context
+
     // Start loading in parallel without blocking UI flags
     // Each section loads independently and updates its own state
     isRefreshing = true
 
     // Launch loading tasks
     // Chain podcasts -> latest to ensure dependencies are met without polling
-    Task { 
+    Task {
       await loadPodcastsSection()
       await loadLatestSection()
     }
-    
+
     // Independent sections
     Task { await loadSavedSection() }
     Task { await loadDownloadedSection() }
 
     isAlreadyLoaded = true
     isRefreshing = false
+  }
+
+  /// Ensure observers and timer are running - safe to call multiple times
+  private func ensureObserversAndTimerRunning() {
+    // Re-setup observers if they were cleaned up
+    if downloadCompletionObserver == nil {
+      setupDownloadCompletionObserver()
+    }
+    if syncCompletionObserver == nil {
+      setupSyncCompletionObserver()
+    }
+    // Restart timer if it was stopped
+    if downloadingPollTimer == nil {
+      startDownloadingPollTimer()
+    }
   }
 
   /// Receive updated podcast list from View's @Query
@@ -439,8 +458,10 @@ final class LibraryViewModel {
   }
 
   func refreshDownloadedEpisodes() async {
-    // Non-blocking refresh
-    await loadDownloadedSection() // This handles quick load + background sync
+    // Always run the full sync when explicitly refreshing
+    // This discovers any downloaded files that exist but aren't tracked in SwiftData
+    await syncDownloadedFilesWithSwiftData()
+    await loadDownloadedEpisodesQuick()
   }
 
   // MARK: - Load All Podcasts (for episode lookups)
@@ -458,9 +479,10 @@ final class LibraryViewModel {
       // Since we're @MainActor, update directly
       self.allPodcasts = podcasts
       
-      // Update lookup map
-      self.podcastTitleMap = Dictionary(uniqueKeysWithValues: 
-        podcasts.compactMap { ($0.podcastInfo.title, $0) }
+      // Update lookup map (keep latest on duplicate titles)
+      self.podcastTitleMap = Dictionary(
+        podcasts.map { ($0.podcastInfo.title, $0) },
+        uniquingKeysWith: { _, latest in latest }
       )
       
       logger.info("Loaded \(self.allPodcasts.count) total podcasts for episode lookups")
@@ -485,8 +507,11 @@ final class LibraryViewModel {
 
     do {
       let allModels = try context.fetch(descriptor)
-      // Filter for starred episodes in memory
-      let starredModels = allModels.filter { $0.isStarred }
+      // Filter for starred episodes in memory, deduplicate by ID
+      var seenIds = Set<String>()
+      let starredModels = allModels.filter { model in
+        model.isStarred && seenIds.insert(model.id).inserted
+      }
       // Map to LibraryEpisode - always succeeds due to fallback
       let results = starredModels.map { model in
         self.createLibraryEpisode(from: model)
@@ -512,10 +537,11 @@ final class LibraryViewModel {
     do {
       let allModels = try context.fetch(descriptor)
 
-      // Filter for downloaded episodes in memory (localAudioPath is not nil and not empty)
+      // Filter for downloaded episodes in memory, deduplicate by ID
+      var seenIds = Set<String>()
       let downloadedModels = allModels.filter { model in
-        guard let path = model.localAudioPath else { return false }
-        return !path.isEmpty
+        guard let path = model.localAudioPath, !path.isEmpty else { return false }
+        return seenIds.insert(model.id).inserted
       }
 
       // Map to LibraryEpisode
@@ -566,59 +592,146 @@ final class LibraryViewModel {
   }
 
   /// Syncs SwiftData with actual downloaded files on disk
-  /// Only verifies existing downloads still exist - does NOT scan all episodes
+  /// 1. Verifies existing downloads still exist
+  /// 2. Discovers downloaded files that exist but aren't tracked in SwiftData
   private func syncDownloadedFilesWithSwiftData() async {
     guard let context = modelContext else { return }
 
-    // 1. Get only episodes that claim to have a local file
+    // 1. Get all EpisodeDownloadModel entries
     let descriptor = FetchDescriptor<EpisodeDownloadModel>()
-    let modelsWithPaths: [(id: String, path: String, model: EpisodeDownloadModel)]
+    let allModels: [EpisodeDownloadModel]
     do {
-      let allModels = try context.fetch(descriptor)
-      // Only check models that have a localAudioPath set
-      modelsWithPaths = allModels.compactMap { model -> (String, String, EpisodeDownloadModel)? in
-        guard let path = model.localAudioPath, !path.isEmpty else { return nil }
-        return (model.id, path, model)
-      }
+      allModels = try context.fetch(descriptor)
     } catch {
       logger.error("Failed to fetch models for sync: \(error)")
       return
     }
 
-    // If no downloads to verify, we're done
-    guard !modelsWithPaths.isEmpty else {
-      logger.info("No downloaded episodes to verify")
-      return
+    // Create lookup for existing models by ID (keep last occurrence on duplicates)
+    let modelsById = Dictionary(allModels.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+
+    // 1b. Remove duplicate entries (keep the one in modelsById, delete others)
+    if modelsById.count < allModels.count {
+      let duplicateCount = allModels.count - modelsById.count
+      let keptIds = Set(modelsById.values.map { ObjectIdentifier($0) })
+      for model in allModels where !keptIds.contains(ObjectIdentifier(model)) {
+        context.delete(model)
+      }
+      try? context.save()
+      logger.warning("Removed \(duplicateCount) duplicate EpisodeDownloadModel entries")
     }
 
-    // 2. Check file existence in background (only for episodes with claimed downloads)
-    let pathsToCheck = modelsWithPaths.map { ($0.id, $0.path) }
-    let missingFiles = await Task.detached(priority: .background) { () -> Set<String> in
-      let fm = FileManager.default
-      var missing = Set<String>()
-      for (id, path) in pathsToCheck {
-        if !fm.fileExists(atPath: path) {
-          missing.insert(id)
+    // 2. Verify existing downloads still exist
+    let modelsWithPaths = allModels.compactMap { model -> (String, String, EpisodeDownloadModel)? in
+      guard let path = model.localAudioPath, !path.isEmpty else { return nil }
+      return (model.id, path, model)
+    }
+
+    if !modelsWithPaths.isEmpty {
+      let pathsToCheck = modelsWithPaths.map { ($0.0, $0.1) }
+      let missingFiles = await Task.detached(priority: .background) { () -> Set<String> in
+        let fm = FileManager.default
+        var missing = Set<String>()
+        for (id, path) in pathsToCheck {
+          if !fm.fileExists(atPath: path) {
+            missing.insert(id)
+          }
+        }
+        return missing
+      }.value
+
+      var clearedCount = 0
+      for (id, _, model) in modelsWithPaths {
+        if missingFiles.contains(id) {
+          model.localAudioPath = nil
+          clearedCount += 1
         }
       }
-      return missing
-    }.value
 
-    // 3. Clear localAudioPath for files that no longer exist
-    var clearedCount = 0
-    for (id, _, model) in modelsWithPaths {
-      if missingFiles.contains(id) {
-        model.localAudioPath = nil
-        clearedCount += 1
+      if clearedCount > 0 {
+        logger.info("Cleared \(clearedCount) stale download paths")
       }
     }
 
-    if clearedCount > 0 {
-      try? context.save()
-      logger.info("Cleared \(clearedCount) stale download paths")
-    } else {
-      logger.info("Verified \(modelsWithPaths.count) downloads - all files present")
+    // 3. Discover downloaded files that aren't tracked
+    // Check episodes from subscribed podcasts for existing downloads
+    let delimiter = Self.episodeKeyDelimiter
+    var discoveredCount = 0
+
+    for podcast in allPodcasts {
+      let podcastTitle = podcast.podcastInfo.title
+      let podcastImageURL = podcast.podcastInfo.imageURL
+
+      for episode in podcast.podcastInfo.episodes {
+        let episodeKey = "\(podcastTitle)\(delimiter)\(episode.title)"
+
+        // Skip if already has localAudioPath
+        if let model = modelsById[episodeKey], model.localAudioPath != nil {
+          continue
+        }
+
+        // Check if file exists on disk
+        if let localPath = await checkAudioFileExists(episodeTitle: episode.title, podcastTitle: podcastTitle) {
+          if let existingModel = modelsById[episodeKey] {
+            // Update existing model
+            existingModel.localAudioPath = localPath
+            existingModel.downloadedDate = Date()
+          } else {
+            // Create new model
+            guard let audioURL = episode.audioURL else { continue }
+            let newModel = EpisodeDownloadModel(
+              episodeTitle: episode.title,
+              podcastTitle: podcastTitle,
+              audioURL: audioURL,
+              localAudioPath: localPath,
+              downloadedDate: Date(),
+              imageURL: episode.imageURL ?? podcastImageURL,
+              pubDate: episode.pubDate
+            )
+            context.insert(newModel)
+          }
+          discoveredCount += 1
+        }
+      }
     }
+
+    if discoveredCount > 0 {
+      try? context.save()
+      logger.info("Discovered \(discoveredCount) untracked downloads on disk")
+    } else {
+      logger.info("No untracked downloads found")
+    }
+  }
+
+  /// Check if audio file exists on disk for an episode
+  private func checkAudioFileExists(episodeTitle: String, podcastTitle: String) async -> String? {
+    await Task.detached(priority: .background) {
+      let fm = FileManager.default
+
+      #if os(macOS)
+      let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      let audioDir = appSupport.appendingPathComponent("PodcastAnalyzer/Audio", isDirectory: true)
+      #else
+      let libraryDir = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+      let audioDir = libraryDir.appendingPathComponent("Audio", isDirectory: true)
+      #endif
+
+      let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
+      let baseFileName = "\(podcastTitle)_\(episodeTitle)"
+        .components(separatedBy: invalidCharacters)
+        .joined(separator: "_")
+        .trimmingCharacters(in: .whitespaces)
+
+      let possibleExtensions = ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"]
+
+      for ext in possibleExtensions {
+        let path = audioDir.appendingPathComponent("\(baseFileName).\(ext)")
+        if fm.fileExists(atPath: path.path) {
+          return path.path
+        }
+      }
+      return nil
+    }.value
   }
 
   // MARK: - Load Latest Episodes
@@ -641,7 +754,7 @@ final class LibraryViewModel {
           lastPlaybackPosition: model.lastPlaybackPosition
         ))
       }
-      episodeDataDict = Dictionary(uniqueKeysWithValues: keyValues)
+      episodeDataDict = Dictionary(keyValues, uniquingKeysWith: { _, latest in latest })
     } catch {
       logger.error("Failed to fetch episode models: \(error)")
       return

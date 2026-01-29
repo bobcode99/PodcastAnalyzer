@@ -80,6 +80,11 @@ struct LibraryView: View {
       viewModel.setPodcasts(subscribedPodcasts)
       updateSortedPodcasts()
       setupNotificationObservers()
+      // Refresh saved/downloaded counts in case they changed while view was off-screen
+      Task {
+        await viewModel.refreshSavedEpisodes()
+        await viewModel.refreshDownloadedEpisodes()
+      }
     }
     .onChange(of: subscribedPodcasts) { _, newPodcasts in
       viewModel.setPodcasts(newPodcasts)
@@ -132,13 +137,13 @@ struct LibraryView: View {
         }
         .buttonStyle(.plain)
 
-        // Downloaded card
+        // Downloaded card - include actively downloading episodes in the count
         NavigationLink(destination: DownloadedEpisodesView(viewModel: viewModel)) {
           QuickAccessCard(
             icon: "arrow.down.circle.fill",
             iconColor: .green,
             title: "Downloaded",
-            count: viewModel.downloadedEpisodes.count,
+            count: viewModel.downloadedEpisodes.count + viewModel.downloadingEpisodes.count,
             isLoading: false
           )
         }
@@ -625,7 +630,7 @@ struct DownloadedEpisodesView: View {
         }
         .listStyle(.plain)
         .refreshable {
-          viewModel.setModelContext(modelContext)
+          await viewModel.refreshDownloadedEpisodes()
         }
       }
     }
