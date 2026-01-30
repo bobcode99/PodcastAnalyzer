@@ -747,11 +747,15 @@ final class CloudAIService {
         let apiKey = settings.currentAPIKey
         let model = settings.currentModel
 
+        // Format transcript based on user's preference (segment-based vs sentence-based)
+        let formattedTranscript = settings.transcriptFormat.formatTranscript(transcript)
+        logger.info("Transcript formatted using \(self.settings.transcriptFormat.rawValue) format")
+
         // Handle Apple PCC via Shortcuts
         if provider == .applePCC {
             progressCallback?("Preparing for Shortcuts...", 0.2)
             return try await analyzeWithShortcuts(
-                transcript: transcript,
+                transcript: formattedTranscript,
                 episodeTitle: episodeTitle,
                 podcastTitle: podcastTitle,
                 analysisType: analysisType,
@@ -772,7 +776,7 @@ final class CloudAIService {
 
         let systemPrompt = buildSystemPrompt(for: analysisType, podcastLanguage: podcastLanguage)
         let userPrompt = buildUserPrompt(
-            transcript: transcript,
+            transcript: formattedTranscript,
             episodeTitle: episodeTitle,
             podcastTitle: podcastTitle,
             analysisType: analysisType
@@ -853,9 +857,12 @@ final class CloudAIService {
 
         progressCallback?("Preparing analysis...", 0.1)
 
+        // Format transcript based on user's preference (segment-based vs sentence-based)
+        let formattedTranscript = settings.transcriptFormat.formatTranscript(transcript)
+
         let systemPrompt = buildSystemPrompt(for: analysisType, podcastLanguage: podcastLanguage)
         let userPrompt = buildUserPrompt(
-            transcript: transcript,
+            transcript: formattedTranscript,
             episodeTitle: episodeTitle,
             podcastTitle: podcastTitle,
             analysisType: analysisType
@@ -944,11 +951,14 @@ final class CloudAIService {
         let apiKey = settings.currentAPIKey
         let model = settings.currentModel
 
+        // Format transcript based on user's preference (segment-based vs sentence-based)
+        let formattedTranscript = settings.transcriptFormat.formatTranscript(transcript)
+
         // Handle Apple PCC via Shortcuts
         if provider == .applePCC {
             return try await askQuestionWithShortcuts(
                 question: question,
-                transcript: transcript,
+                transcript: formattedTranscript,
                 episodeTitle: episodeTitle,
                 podcastLanguage: podcastLanguage,
                 progressCallback: progressCallback
@@ -990,7 +1000,7 @@ final class CloudAIService {
         Question: \(question)
 
         Transcript:
-        \(transcript)
+        \(formattedTranscript)
         """
 
         progressCallback?("Getting answer from \(provider.displayName)...", 0.5)

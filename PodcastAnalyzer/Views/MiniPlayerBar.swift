@@ -8,11 +8,35 @@
 import SwiftData
 import SwiftUI
 
+/// Navigation state for expanded player -> main nav transitions
+enum ExpandedPlayerNavigation: Equatable {
+  case none
+  case episodeDetail(PodcastEpisodeInfo, podcastTitle: String, imageURL: String?)
+  case podcastEpisodeList(PodcastInfoModel)
+
+  static func == (lhs: ExpandedPlayerNavigation, rhs: ExpandedPlayerNavigation) -> Bool {
+    switch (lhs, rhs) {
+    case (.none, .none):
+      return true
+    case let (.episodeDetail(e1, t1, i1), .episodeDetail(e2, t2, i2)):
+      return e1.title == e2.title && t1 == t2 && i1 == i2
+    case let (.podcastEpisodeList(p1), .podcastEpisodeList(p2)):
+      return p1.id == p2.id
+    default:
+      return false
+    }
+  }
+}
+
 struct MiniPlayerBar: View {
   @Environment(\.tabViewBottomAccessoryPlacement) var placement
   @Environment(\.modelContext) private var modelContext
-  @State private var audioManager = EnhancedAudioManager.shared
+  // Access singleton directly without @State to avoid unnecessary observation overhead
+  private var audioManager: EnhancedAudioManager { .shared }
   @State private var showExpandedPlayer = false
+
+  // Pending navigation after expanded player dismisses
+  @Binding var pendingNavigation: ExpandedPlayerNavigation
 
   private var progress: Double {
     guard audioManager.duration > 0 else { return 0 }
@@ -44,12 +68,11 @@ struct MiniPlayerBar: View {
         // Artwork or Placeholder
         Group {
           if let urlString = audioManager.currentEpisode?.imageURL, let url = URL(string: urlString) {
-            AsyncImage(url: url) { phase in
-              if let image = phase.image {
-                image.resizable().aspectRatio(contentMode: .fill)
-              } else {
-                Color.gray
-              }
+
+            CachedAsyncImage(url: url) { image in
+              image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+              Color.gray
             }
           } else {
             RoundedRectangle(cornerRadius: 8)
@@ -97,7 +120,14 @@ struct MiniPlayerBar: View {
       }
     }
     .sheet(isPresented: $showExpandedPlayer) {
-      ExpandedPlayerView()
+      ExpandedPlayerView(
+        onNavigateToEpisodeDetail: { episode, podcastTitle, imageURL in
+          pendingNavigation = .episodeDetail(episode, podcastTitle: podcastTitle, imageURL: imageURL)
+        },
+        onNavigateToPodcast: { podcast in
+          pendingNavigation = .podcastEpisodeList(podcast)
+        }
+      )
     }
   }
 
@@ -200,5 +230,5 @@ struct MiniPlayerBar: View {
 // MARK: - Preview
 
 #Preview {
-  MiniPlayerBar()
+  MiniPlayerBar(pendingNavigation: .constant(.none))
 }

@@ -123,10 +123,19 @@ class TranscriptGenerationViewModel {
 
         state = .transcribing(progress: 0)
 
-        let srtContent = try await transcriptService.audioToSRT(inputFile: audioURL)
+        // Use audioToSRTWithWordTimings to get both SRT and word-level timing
+        let (srtContent, wordTimingsJSON) = try await transcriptService.audioToSRTWithWordTimings(inputFile: audioURL)
 
+        // Save SRT file
         let captionURL = try await fileStorage.saveCaptionFile(
           content: srtContent,
+          episodeTitle: episode.title,
+          podcastTitle: podcastTitle
+        )
+
+        // Save word timings JSON alongside SRT (for accurate word-level highlighting)
+        _ = try await fileStorage.saveWordTimingFile(
+          content: wordTimingsJSON,
           episodeTitle: episode.title,
           podcastTitle: podcastTitle
         )

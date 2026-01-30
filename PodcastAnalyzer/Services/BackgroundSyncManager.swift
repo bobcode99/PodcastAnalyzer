@@ -14,6 +14,17 @@ import SwiftData
 import UserNotifications
 import os.log
 
+// MARK: - Sync Notifications
+
+extension Notification.Name {
+  /// Posted when background sync completes with new episodes
+  /// userInfo contains: "newEpisodeCount" (Int), "updatedPodcastTitles" ([String])
+  static let podcastSyncCompleted = Notification.Name("podcastSyncCompleted")
+
+  /// Posted when a podcast is updated (from any source)
+  static let podcastDataChanged = Notification.Name("podcastDataChanged")
+}
+
 @MainActor
 @Observable
 class BackgroundSyncManager {
@@ -63,7 +74,17 @@ class BackgroundSyncManager {
   }
 
   private init() {
-    self.isBackgroundSyncEnabled = UserDefaults.standard.bool(forKey: Keys.backgroundSyncEnabled)
+    // Check if user has explicitly set the preference
+    let isFirstLaunch = UserDefaults.standard.object(forKey: Keys.backgroundSyncEnabled) == nil
+    if isFirstLaunch {
+      // First launch: enable background sync by default
+      self.isBackgroundSyncEnabled = true
+      UserDefaults.standard.set(true, forKey: Keys.backgroundSyncEnabled)
+    } else {
+      // User has made a choice, respect it
+      self.isBackgroundSyncEnabled = UserDefaults.standard.bool(forKey: Keys.backgroundSyncEnabled)
+    }
+
     self.isNotificationsEnabled = UserDefaults.standard.bool(forKey: Keys.notificationsEnabled)
     if let date = UserDefaults.standard.object(forKey: Keys.lastSyncDate) as? Date {
       self.lastSyncDate = date
@@ -71,6 +92,13 @@ class BackgroundSyncManager {
 
     Task {
       await checkNotificationPermission()
+
+      // Schedule background refresh if enabled (especially important on first launch)
+      if isBackgroundSyncEnabled {
+        await MainActor.run {
+          scheduleBackgroundRefresh()
+        }
+      }
     }
   }
 
@@ -97,12 +125,12 @@ class BackgroundSyncManager {
 
   func scheduleBackgroundRefresh() {
     let request = BGAppRefreshTaskRequest(identifier: Self.backgroundTaskIdentifier)
-    // Schedule for 5 minutes from now (iOS may delay based on system conditions)
-    request.earliestBeginDate = Date(timeIntervalSinceNow: 5 * 60)
+    // Schedule for 4 hours from now (iOS may delay based on system conditions)
+    request.earliestBeginDate = Date(timeIntervalSinceNow: 4 * 60 * 60)
 
     do {
       try BGTaskScheduler.shared.submit(request)
-      logger.info("Background refresh scheduled for 5 minutes from now")
+      logger.info("Background refresh scheduled for 4 hours from now")
     } catch {
       logger.error("Failed to schedule background refresh: \(error.localizedDescription)")
     }
@@ -220,13 +248,24 @@ class BackgroundSyncManager {
       lastSyncDate = Date()
       UserDefaults.standard.set(lastSyncDate, forKey: Keys.lastSyncDate)
 
-      // Send notification if there are new episodes
+      // Send push notification if there are new episodes and enabled
       if totalNewEpisodes > 0 && isNotificationsEnabled {
         await sendNewEpisodesNotification(
           totalCount: totalNewEpisodes,
           details: newEpisodeDetails
         )
       }
+
+      // Always post internal notification for UI updates (even if no new episodes, to update timestamps)
+      let updatedTitles = Set(newEpisodeDetails.map { $0.podcastTitle })
+      NotificationCenter.default.post(
+        name: .podcastSyncCompleted,
+        object: nil,
+        userInfo: [
+          "newEpisodeCount": totalNewEpisodes,
+          "updatedPodcastTitles": Array(updatedTitles)
+        ]
+      )
 
       logger.info("Sync completed. Found \(totalNewEpisodes) new episodes total.")
       return true
@@ -321,12 +360,12 @@ class BackgroundSyncManager {
     guard isBackgroundSyncEnabled else { return }
 
     stopForegroundSync()
-    foregroundTimer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { [weak self] _ in
+    foregroundTimer = Timer.scheduledTimer(withTimeInterval: 4 * 60 * 60, repeats: true) { [weak self] _ in
       Task { @MainActor in
         await self?.syncNow()
       }
     }
-    logger.info("Foreground sync timer started (5 min interval)")
+    logger.info("Foreground sync timer started (4 hour interval)")
   }
 
   func stopForegroundSync() {

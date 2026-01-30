@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.podcast.analyzer", category: "ApplePodcastService")
 
 struct SearchResponse: Decodable {
     let resultCount: Int
@@ -68,9 +71,9 @@ struct AppleRSSFeedResponse: Decodable {
 }
 
 struct AppleRSSFeed: Decodable {
-    let title: String
-    let country: String
-    let updated: String
+    let title: String?
+    let country: String?
+    let updated: String?
     let results: [AppleRSSPodcast]
 }
 
@@ -78,10 +81,17 @@ struct AppleRSSPodcast: Decodable, Identifiable {
     let id: String
     let artistName: String
     let name: String
-    let artworkUrl100: String
+    let artworkUrl100: String?  // Made optional - some podcasts may not have artwork
     let url: String  // iTunes link
     let genres: [AppleRSSGenre]?
     let contentAdvisoryRating: String?
+    let releaseDate: String?  // Added for robustness
+    let kind: String?  // Added for robustness
+
+    // Provide fallback for artwork URL
+    var safeArtworkUrl: String {
+        artworkUrl100 ?? ""
+    }
 }
 
 struct AppleRSSGenre: Decodable {
@@ -111,9 +121,58 @@ class ApplePodcastService: Sendable {
             throw URLError(.badURL)
         }
 
-        let (data, _) = try await URLSession.shared.data(from: url)
-        let response = try JSONDecoder().decode(AppleRSSFeedResponse.self, from: data)
-        return response.feed.results
+        let (data, response) = try await URLSession.shared.data(from: url)
+
+        // Check HTTP status code
+        if let httpResponse = response as? HTTPURLResponse {
+            logger.debug("Apple RSS API response status: \(httpResponse.statusCode) for region: \(region)")
+            guard (200...299).contains(httpResponse.statusCode) else {
+                logger.error("Apple RSS API returned status \(httpResponse.statusCode)")
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        // Try standard decoding first
+        do {
+            let decoder = JSONDecoder()
+            let feedResponse = try decoder.decode(AppleRSSFeedResponse.self, from: data)
+            logger.info("Successfully decoded \(feedResponse.feed.results.count) podcasts for region: \(region)")
+            return feedResponse.feed.results
+        } catch let decodingError as DecodingError {
+            // Log detailed decoding error for debugging
+            logger.error("Decoding error for region \(region): \(decodingError.localizedDescription)")
+
+            // Try manual parsing as fallback to handle malformed items
+            return try parseTopPodcastsManually(from: data, region: region)
+        }
+    }
+
+    /// Manual parsing fallback that skips malformed podcast entries
+    private func parseTopPodcastsManually(from data: Data, region: String) throws -> [AppleRSSPodcast] {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let feed = json["feed"] as? [String: Any],
+              let results = feed["results"] as? [[String: Any]] else {
+            logger.error("Failed to parse JSON structure for region: \(region)")
+            throw URLError(.cannotParseResponse)
+        }
+
+        var podcasts: [AppleRSSPodcast] = []
+        let decoder = JSONDecoder()
+
+        for (index, item) in results.enumerated() {
+            do {
+                let itemData = try JSONSerialization.data(withJSONObject: item)
+                let podcast = try decoder.decode(AppleRSSPodcast.self, from: itemData)
+                podcasts.append(podcast)
+            } catch {
+                // Log and skip malformed items instead of failing completely
+                let name = item["name"] as? String ?? "unknown"
+                logger.warning("Skipping malformed podcast at index \(index) (\(name)): \(error.localizedDescription)")
+            }
+        }
+
+        logger.info("Manual parsing recovered \(podcasts.count) of \(results.count) podcasts for region: \(region)")
+        return podcasts
     }
 
     /// Looks up a podcast's RSS feed URL from its collection ID

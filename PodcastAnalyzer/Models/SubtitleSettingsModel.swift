@@ -1,0 +1,221 @@
+//
+//  SubtitleSettingsModel.swift
+//  PodcastAnalyzer
+//
+//  Settings for subtitle display and translation
+//
+
+import Foundation
+
+// MARK: - Display Mode
+
+/// How subtitles are displayed during playback
+enum SubtitleDisplayMode: String, CaseIterable, Codable, Sendable {
+  case originalOnly = "original_only"
+  case translatedOnly = "translated_only"
+  case dualOriginalFirst = "dual_original_first"
+  case dualTranslatedFirst = "dual_translated_first"
+
+  var displayName: String {
+    switch self {
+    case .originalOnly: return "Original Only"
+    case .translatedOnly: return "Translated Only"
+    case .dualOriginalFirst: return "Dual (Original First)"
+    case .dualTranslatedFirst: return "Dual (Translated First)"
+    }
+  }
+
+  var icon: String {
+    switch self {
+    case .originalOnly: return "text.bubble"
+    case .translatedOnly: return "globe"
+    case .dualOriginalFirst: return "text.bubble.fill"
+    case .dualTranslatedFirst: return "globe.badge.chevron.backward"
+    }
+  }
+
+  var description: String {
+    switch self {
+    case .originalOnly: return "Show only the original transcript"
+    case .translatedOnly: return "Show only the translated text"
+    case .dualOriginalFirst: return "Show original text with translation below"
+    case .dualTranslatedFirst: return "Show translation with original text below"
+    }
+  }
+}
+
+// MARK: - Target Language
+
+/// Available target languages for translation
+enum TranslationTargetLanguage: String, CaseIterable, Codable, Sendable {
+  case deviceLanguage = "device"
+  case english = "en"
+  case traditionalChinese = "zh-Hant"
+  case simplifiedChinese = "zh-Hans"
+  case japanese = "ja"
+  case korean = "ko"
+  case spanish = "es"
+  case french = "fr"
+  case german = "de"
+  case portuguese = "pt"
+  case italian = "it"
+  case russian = "ru"
+  case arabic = "ar"
+  case hindi = "hi"
+  case thai = "th"
+  case vietnamese = "vi"
+
+  var displayName: String {
+    switch self {
+    case .deviceLanguage: return "Device Language"
+    case .english: return "English"
+    case .traditionalChinese: return "Traditional Chinese"
+    case .simplifiedChinese: return "Simplified Chinese"
+    case .japanese: return "Japanese"
+    case .korean: return "Korean"
+    case .spanish: return "Spanish"
+    case .french: return "French"
+    case .german: return "German"
+    case .portuguese: return "Portuguese"
+    case .italian: return "Italian"
+    case .russian: return "Russian"
+    case .arabic: return "Arabic"
+    case .hindi: return "Hindi"
+    case .thai: return "Thai"
+    case .vietnamese: return "Vietnamese"
+    }
+  }
+
+  /// Returns the Locale.Language for Translation framework
+  @available(iOS 17.4, macOS 14.4, *)
+  var localeLanguage: Locale.Language? {
+    switch self {
+    case .deviceLanguage:
+      guard let preferred = Locale.preferredLanguages.first else { return nil }
+      return Locale.Language(identifier: preferred)
+    default:
+      return Locale.Language(identifier: rawValue)
+    }
+  }
+
+  /// Returns the language identifier string
+  var languageIdentifier: String {
+    switch self {
+    case .deviceLanguage:
+      return Locale.preferredLanguages.first ?? "en"
+    default:
+      return rawValue
+    }
+  }
+}
+
+// MARK: - Settings Manager
+
+/// Manages subtitle display and translation preferences
+@MainActor
+@Observable
+final class SubtitleSettingsManager {
+  static let shared = SubtitleSettingsManager()
+
+  /// How subtitles are displayed
+  var displayMode: SubtitleDisplayMode = .originalOnly {
+    didSet { saveSettings() }
+  }
+
+  /// Target language for translation
+  var targetLanguage: TranslationTargetLanguage = .deviceLanguage {
+    didSet { saveSettings() }
+  }
+
+  /// Automatically translate transcripts when loaded
+  var autoTranslateOnLoad: Bool = false {
+    didSet { saveSettings() }
+  }
+
+  /// Automatically download transcripts when episode is downloaded (if available in RSS)
+  var autoDownloadTranscripts: Bool = true {
+    didSet { saveSettings() }
+  }
+
+  /// Group transcript segments into complete sentences (merge segments that don't end with sentence-ending punctuation)
+  var groupSegmentsIntoSentences: Bool = true {
+    didSet { saveSettings() }
+  }
+
+  // MARK: - UserDefaults Keys
+
+  private enum Keys {
+    static let displayMode = "subtitle_display_mode"
+    static let targetLanguage = "subtitle_target_language"
+    static let autoTranslate = "subtitle_auto_translate"
+    static let autoDownloadTranscripts = "subtitle_auto_download_transcripts"
+    static let groupSegmentsIntoSentences = "subtitle_group_segments_into_sentences"
+  }
+
+  // MARK: - Initialization
+
+  private init() {
+    loadSettings()
+  }
+
+  // MARK: - Persistence
+
+  private func loadSettings() {
+    let defaults = UserDefaults.standard
+
+    if let modeString = defaults.string(forKey: Keys.displayMode),
+       let mode = SubtitleDisplayMode(rawValue: modeString) {
+      displayMode = mode
+    }
+
+    if let langString = defaults.string(forKey: Keys.targetLanguage),
+       let lang = TranslationTargetLanguage(rawValue: langString) {
+      targetLanguage = lang
+    }
+
+    autoTranslateOnLoad = defaults.bool(forKey: Keys.autoTranslate)
+
+    // Default to true for auto-download if not set
+    if defaults.object(forKey: Keys.autoDownloadTranscripts) == nil {
+      autoDownloadTranscripts = true
+    } else {
+      autoDownloadTranscripts = defaults.bool(forKey: Keys.autoDownloadTranscripts)
+    }
+
+    // Default to true for sentence grouping if not set
+    if defaults.object(forKey: Keys.groupSegmentsIntoSentences) == nil {
+      groupSegmentsIntoSentences = true
+    } else {
+      groupSegmentsIntoSentences = defaults.bool(forKey: Keys.groupSegmentsIntoSentences)
+    }
+  }
+
+  private func saveSettings() {
+    let defaults = UserDefaults.standard
+    defaults.set(displayMode.rawValue, forKey: Keys.displayMode)
+    defaults.set(targetLanguage.rawValue, forKey: Keys.targetLanguage)
+    defaults.set(autoTranslateOnLoad, forKey: Keys.autoTranslate)
+    defaults.set(autoDownloadTranscripts, forKey: Keys.autoDownloadTranscripts)
+    defaults.set(groupSegmentsIntoSentences, forKey: Keys.groupSegmentsIntoSentences)
+  }
+
+  // MARK: - Translation Availability
+
+  /// Check if Translation framework is available on this device
+  nonisolated var isTranslationAvailable: Bool {
+    if #available(iOS 17.4, macOS 14.4, *) {
+      return true
+    }
+    return false
+  }
+
+  /// Whether dual subtitle mode is enabled
+  var isDualMode: Bool {
+    displayMode == .dualOriginalFirst || displayMode == .dualTranslatedFirst
+  }
+
+  /// Whether translation is needed for current display mode
+  var needsTranslation: Bool {
+    displayMode != .originalOnly
+  }
+}

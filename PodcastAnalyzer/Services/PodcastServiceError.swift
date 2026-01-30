@@ -5,9 +5,7 @@
 //  Created by Bob on 2025/12/17.
 //
 
-import FeedKit
 import Foundation
-internal import XMLKit
 
 public enum PodcastServiceError: Error, LocalizedError {
   case invalidURL

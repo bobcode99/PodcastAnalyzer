@@ -22,49 +22,51 @@ struct HomeView: View {
   @State private var showSubscribeSheet = false
 
   var body: some View {
-    NavigationStack {
-      ScrollView {
-        VStack(alignment: .leading, spacing: 24) {
-          // Up Next Section
-          upNextSection
+    ScrollView {
+      VStack(alignment: .leading, spacing: 24) {
+        // Up Next Section
+        upNextSection
 
-          // Popular Shows Section
-          popularShowsSection
-        }
-        .padding(.vertical)
+        // Popular Shows Section
+        popularShowsSection
       }
-      .navigationTitle(Constants.homeString)
-      .platformToolbarTitleDisplayMode()
-      .toolbar {
-        ToolbarItem(placement: .primaryAction) {
-          Button(action: { showRegionPicker = true }) {
-            HStack(spacing: 4) {
-              Text(viewModel.selectedRegionName)
-                .font(.caption)
-              Image(systemName: "chevron.down")
-                .font(.caption2)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.gray.opacity(0.15))
-            .cornerRadius(12)
+      .padding(.vertical)
+    }
+    .navigationTitle(Constants.homeString)
+    .platformToolbarTitleDisplayMode()
+    .toolbar {
+      ToolbarItem(placement: .primaryAction) {
+        Button(action: { showRegionPicker = true }) {
+          HStack(spacing: 4) {
+            Text(viewModel.selectedRegionFlag)
+              .font(.title3)
+            Image(systemName: "chevron.down")
+              .font(.caption2)
           }
+          .padding(.horizontal, 8)
+          .padding(.vertical, 4)
+          .background(Color.gray.opacity(0.15))
+          .cornerRadius(12)
         }
       }
-      .sheet(isPresented: $showRegionPicker) {
-        RegionPickerSheet(
-          selectedRegion: $viewModel.selectedRegion,
-          isPresented: $showRegionPicker
-        )
-        .presentationDetents([.medium])
-      }
-      .refreshable {
-        await viewModel.refresh()
-      }
+    }
+    .sheet(isPresented: $showRegionPicker) {
+      RegionPickerSheet(
+        selectedRegion: $viewModel.selectedRegion,
+        isPresented: $showRegionPicker
+      )
+      .presentationDetents([.medium])
+    }
+    .refreshable {
+      await viewModel.refresh()
     }
     .onAppear {
       // This is the key: set the context once
       viewModel.setModelContext(modelContext)
+    }
+    .onDisappear {
+      // Cleanup region observer task to prevent memory leaks
+      viewModel.cleanup()
     }
   }
 
@@ -403,7 +405,7 @@ struct TopPodcastRow: View {
   var body: some View {
     NavigationLink(destination: EpisodeListView(
       podcastName: podcast.name,
-      podcastArtwork: podcast.artworkUrl100,
+      podcastArtwork: podcast.safeArtworkUrl,
       artistName: podcast.artistName,
       collectionId: podcast.id,
       applePodcastUrl: podcast.url
@@ -416,7 +418,7 @@ struct TopPodcastRow: View {
           .frame(width: 24)
 
         // Artwork - using CachedAsyncImage for better performance
-        CachedArtworkImage(urlString: podcast.artworkUrl100, size: 56, cornerRadius: 8)
+        CachedArtworkImage(urlString: podcast.safeArtworkUrl, size: 56, cornerRadius: 8)
 
         // Info
         VStack(alignment: .leading, spacing: 2) {
@@ -451,7 +453,7 @@ struct TopPodcastRow: View {
       // View episodes
       NavigationLink(destination: EpisodeListView(
         podcastName: podcast.name,
-        podcastArtwork: podcast.artworkUrl100,
+        podcastArtwork: podcast.safeArtworkUrl,
         artistName: podcast.artistName,
         collectionId: podcast.id,
         applePodcastUrl: podcast.url
@@ -514,6 +516,8 @@ struct RegionPickerSheet: View {
             isPresented = false
           }) {
             HStack {
+              Text(region.flag)
+                .font(.title2)
               Text(region.name)
                 .foregroundColor(.primary)
 
@@ -554,12 +558,10 @@ struct PodcastPreviewSheet: View {
       ScrollView {
         VStack(spacing: 20) {
           // Artwork
-          AsyncImage(url: URL(string: podcast.artworkUrl100.replacingOccurrences(of: "100x100", with: "600x600"))) { phase in
-            if let image = phase.image {
+          CachedAsyncImage(url: URL(string: podcast.safeArtworkUrl.replacingOccurrences(of: "100x100", with: "600x600"))) { image in
               image.resizable().scaledToFit()
-            } else {
+          } placeholder: {
               Color.gray
-            }
           }
           .frame(width: 200, height: 200)
           .cornerRadius(16)
@@ -665,7 +667,6 @@ struct PodcastPreviewSheet: View {
 struct UpNextListView: View {
   let episodes: [LibraryEpisode]
   @Environment(\.modelContext) private var modelContext
-  @State private var viewModel = HomeViewModel()
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
 
@@ -689,9 +690,6 @@ struct UpNextListView: View {
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif
-    .onAppear {
-      viewModel.setModelContext(modelContext)
-    }
     .confirmationDialog(
       "Delete Download",
       isPresented: $showDeleteConfirmation,

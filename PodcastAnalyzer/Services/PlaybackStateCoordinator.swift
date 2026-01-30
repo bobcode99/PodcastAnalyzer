@@ -48,6 +48,20 @@ class PlaybackStateCoordinator {
 
   // Note: No deinit needed - task uses [weak self] and will stop when coordinator is deallocated
 
+  /// Look up the saved playback position for an episode from SwiftData.
+  /// Returns 0 if no saved position or if the episode is already completed.
+  static func savedPlaybackPosition(podcastTitle: String, episodeTitle: String) -> TimeInterval {
+    guard let coordinator = shared, let context = coordinator.modelContext else { return 0 }
+    let id = coordinator.makeEpisodeId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.id == id }
+    )
+    guard let model = try? context.fetch(descriptor).first else { return 0 }
+    // Don't resume completed episodes - start from beginning
+    if model.isCompleted { return 0 }
+    return model.lastPlaybackPosition
+  }
+
   private func savePlaybackPosition(update: PlaybackPositionUpdate) {
     guard let context = modelContext else { return }
 

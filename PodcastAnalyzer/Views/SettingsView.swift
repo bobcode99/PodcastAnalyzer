@@ -15,8 +15,7 @@ struct SettingsView: View {
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
   var body: some View {
-    NavigationStack {
-      List {
+    List {
         // MARK: - Sync & Notifications Section
         Section {
           Toggle(isOn: Binding(get: { syncManager.isBackgroundSyncEnabled }, set: { syncManager.isBackgroundSyncEnabled = $0 })) {
@@ -174,6 +173,29 @@ struct SettingsView: View {
           Text("Region for browsing top podcasts on Home")
         }
 
+        // MARK: - Translation Section
+        Section {
+          Picker(selection: Binding(
+            get: { SubtitleSettingsManager.shared.targetLanguage },
+            set: { SubtitleSettingsManager.shared.targetLanguage = $0 }
+          )) {
+            ForEach(TranslationTargetLanguage.allCases, id: \.self) { language in
+              Text(language.displayName).tag(language)
+            }
+          } label: {
+            HStack {
+              Image(systemName: "translate")
+                .foregroundColor(.blue)
+                .frame(width: 24)
+              Text("Default Translation Language")
+            }
+          }
+        } header: {
+          Text("Translation")
+        } footer: {
+          Text("Default target language for translating transcripts and episode descriptions")
+        }
+
         // MARK: - Transcript Section
         Section {
           // Language picker
@@ -293,7 +315,6 @@ struct SettingsView: View {
         viewModel.loadFeeds(modelContext: modelContext)
         viewModel.checkTranscriptModelStatus()
       }
-    }
   }
 
   // MARK: - Notification Status Text

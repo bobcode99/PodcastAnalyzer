@@ -11,6 +11,10 @@ import SwiftUI
 import ZMarkupParser
 import os.log
 
+#if canImport(Translation)
+@preconcurrency import Translation
+#endif
+
 #if os(iOS)
 import UIKit
 #else
@@ -19,12 +23,22 @@ import AppKit
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "EpisodeDetailViewModel")
 
+/// Represents word-level timing information for accurate highlighting
+struct WordTiming: Equatable, Sendable {
+  let word: String
+  let startTime: TimeInterval
+  let endTime: TimeInterval
+}
+
 /// Represents a single transcript segment with timing information
 struct TranscriptSegment: Identifiable, Equatable {
   let id: Int
   let startTime: TimeInterval
   let endTime: TimeInterval
   let text: String
+  var translatedText: String?
+  /// Word-level timing for accurate highlighting (from Speech framework)
+  var wordTimings: [WordTiming]?
 
   /// Formatted start time string (MM:SS or HH:MM:SS)
   var formattedStartTime: String {
@@ -38,6 +52,25 @@ struct TranscriptSegment: Identifiable, Equatable {
     } else {
       return String(format: "%d:%02d", minutes, seconds)
     }
+  }
+
+  /// Returns display text based on subtitle display mode
+  func displayText(mode: SubtitleDisplayMode) -> (primary: String, secondary: String?) {
+    switch mode {
+    case .originalOnly:
+      return (text, nil)
+    case .translatedOnly:
+      return (translatedText ?? text, nil)
+    case .dualOriginalFirst:
+      return (text, translatedText)
+    case .dualTranslatedFirst:
+      return (translatedText ?? text, translatedText != nil ? text : nil)
+    }
+  }
+
+  /// Whether this segment has a translation
+  var hasTranslation: Bool {
+    translatedText != nil
   }
 }
 
@@ -78,6 +111,32 @@ final class EpisodeDetailViewModel {
   // Parsed transcript segments for live captions
   var transcriptSegments: [TranscriptSegment] = []
   var transcriptSearchQuery: String = ""
+
+  // RSS transcript state (from podcast:transcript tag)
+  var rssTranscriptState: TranscriptDownloadState = .notAvailable
+
+  // Translation state
+  var translationStatus: TranslationStatus = .idle
+  var translatedDescription: String?
+  var translatedEpisodeTitle: String?
+  var translatedPodcastTitle: String?  // Translated podcast show name
+  var transcriptTranslationTrigger: Bool = false  // Toggle to trigger .translationTask
+  var descriptionTranslationTrigger: Bool = false  // Toggle to trigger description translation
+  var episodeTitleTranslationTrigger: Bool = false  // Toggle to trigger title translation
+  var podcastTitleTranslationTrigger: Bool = false  // Toggle to trigger podcast title translation
+
+  // Translation language selection
+  var selectedTranslationLanguage: TranslationTargetLanguage?  // Language selected for translation
+  var availableTranslationLanguages: Set<String> = []  // Cached language codes
+
+  @ObservationIgnored
+  private let translationService = TranslationService.shared
+
+  @ObservationIgnored
+  private let transcriptDownloadService = TranscriptDownloadService.shared
+
+  @ObservationIgnored
+  private let subtitleSettings = SubtitleSettingsManager.shared
 
   // Playback state from SwiftData
   @ObservationIgnored
@@ -182,9 +241,15 @@ final class EpisodeDetailViewModel {
 
   // MARK: - Playback State
 
-  var isPlayingThisEpisode: Bool {
+  /// Check if this episode is the current one loaded in audio manager (regardless of play state)
+  var isCurrentEpisode: Bool {
     guard let currentEpisode = audioManager.currentEpisode else { return false }
     return currentEpisode.title == episode.title && currentEpisode.podcastTitle == podcastTitle
+  }
+
+  /// Check if this episode is currently playing
+  var isPlayingThisEpisode: Bool {
+    isCurrentEpisode && audioManager.isPlaying
   }
 
   var currentTime: TimeInterval {
@@ -266,6 +331,11 @@ final class EpisodeDetailViewModel {
         model.isCompleted = false
         try? modelContext?.save()
         startTime = 0
+
+        // Force new player if this is the same episode (AVPlayer may be at end-of-media)
+        if audioManager.currentEpisode?.id == episodeKey {
+          audioManager.stop()
+        }
       } else {
         startTime = model.lastPlaybackPosition
       }
@@ -557,8 +627,269 @@ final class EpisodeDetailViewModel {
   }
 
   func translateDescription() {
-    // TODO: Implement translation
     logger.debug("Translate description requested")
+    // Toggle to trigger the .translationTask modifiers for description, title, and podcast name
+    descriptionTranslationTrigger.toggle()
+    episodeTitleTranslationTrigger.toggle()
+    podcastTitleTranslationTrigger.toggle()
+  }
+
+  // MARK: - Transcript Translation
+
+  /// Translate to a specific language (called from language picker)
+  func translateTo(_ language: TranslationTargetLanguage) {
+    // Store the selected language for the translation triggers to use
+    selectedTranslationLanguage = language
+    let targetLang = language.languageIdentifier
+
+    logger.debug("Translate requested to: \(language.displayName) (\(targetLang))")
+
+    // Always trigger title/description translation (works without transcript)
+    translationStatus = .preparingSession
+    descriptionTranslationTrigger.toggle()
+    episodeTitleTranslationTrigger.toggle()
+    podcastTitleTranslationTrigger.toggle()
+
+    // Skip transcript translation if no segments available
+    guard !transcriptSegments.isEmpty else {
+      logger.info("No transcript segments - translating title/description only")
+      return
+    }
+
+    Task {
+      // Try to load existing transcript translation first
+      if let translated = await translationService.loadExistingTranslation(
+        segments: transcriptSegments,
+        episodeTitle: episode.title,
+        podcastTitle: podcastTitle,
+        targetLanguage: targetLang
+      ) {
+        await MainActor.run {
+          self.transcriptSegments = translated
+          self.translationStatus = .completed
+          logger.info("Loaded cached translation for \(self.episode.title) in \(language.displayName)")
+        }
+        return
+      }
+
+      // No cached translation, trigger the transcript translation task
+      await MainActor.run {
+        self.transcriptTranslationTrigger.toggle()
+      }
+    }
+  }
+
+  /// Check which translation languages are available (cached)
+  func checkAvailableTranslations() {
+    Task {
+      let available = await fileStorage.listAvailableTranslations(
+        for: episode.title,
+        podcastTitle: podcastTitle
+      )
+
+      await MainActor.run {
+        self.availableTranslationLanguages = available
+        logger.info("Found \(available.count) cached translations: \(available)")
+      }
+    }
+  }
+
+  /// Trigger transcript translation using Apple's Translation framework
+  func translateTranscript() {
+    guard !transcriptSegments.isEmpty else {
+      logger.warning("No transcript segments to translate")
+      return
+    }
+
+    // Use selected language or fall back to settings default
+    let targetLang = (selectedTranslationLanguage ?? subtitleSettings.targetLanguage).languageIdentifier
+
+    Task {
+      // Try to load existing translation first
+      if let translated = await translationService.loadExistingTranslation(
+        segments: transcriptSegments,
+        episodeTitle: episode.title,
+        podcastTitle: podcastTitle,
+        targetLanguage: targetLang
+      ) {
+        await MainActor.run {
+          self.transcriptSegments = translated
+          self.translationStatus = .completed
+          logger.info("Loaded cached translation for \(self.episode.title)")
+        }
+        return
+      }
+
+      // No cached translation, trigger the translation task
+      await MainActor.run {
+        self.translationStatus = .preparingSession
+        self.transcriptTranslationTrigger.toggle()
+      }
+    }
+  }
+
+  /// Called by .translationTask when translation session is ready
+  @available(iOS 17.4, macOS 14.4, *)
+  func performTranscriptTranslation(using session: TranslationSession) async {
+    #if canImport(Translation)
+    let segments = await MainActor.run { self.transcriptSegments }
+    let total = segments.count
+
+    guard total > 0 else {
+      await MainActor.run {
+        self.translationStatus = .failed("No segments to translate")
+      }
+      return
+    }
+
+    await MainActor.run {
+      self.translationStatus = .translating(progress: 0, completed: 0, total: total)
+    }
+
+    var translatedSegments = segments
+
+    // Translate one by one to avoid Sendable issues with batch
+    for (index, segment) in segments.enumerated() {
+      do {
+        let response = try await session.translate(segment.text)
+        translatedSegments[index].translatedText = response.targetText
+
+        let progress = Double(index + 1) / Double(total)
+        await MainActor.run {
+          self.translationStatus = .translating(progress: progress, completed: index + 1, total: total)
+        }
+      } catch {
+        logger.error("Translation failed for segment \(index): \(error.localizedDescription)")
+        await MainActor.run {
+          self.translationStatus = .failed(error.localizedDescription)
+        }
+        return
+      }
+    }
+
+    // Save translated segments using selected language or settings default
+    let targetLang = await MainActor.run {
+      (self.selectedTranslationLanguage ?? self.subtitleSettings.targetLanguage).languageIdentifier
+    }
+
+    do {
+      try await translationService.saveTranslatedSRT(
+        segments: translatedSegments,
+        episodeTitle: episode.title,
+        podcastTitle: podcastTitle,
+        targetLanguage: targetLang
+      )
+    } catch {
+      logger.error("Failed to save translation: \(error.localizedDescription)")
+    }
+
+    await MainActor.run {
+      self.transcriptSegments = translatedSegments
+      self.translationStatus = .completed
+      // Update available translations
+      self.availableTranslationLanguages.insert(targetLang)
+    }
+
+    logger.info("Completed translation for \(self.episode.title)")
+    #endif
+  }
+
+  /// Called by .translationTask for description translation
+  @available(iOS 17.4, macOS 14.4, *)
+  func performDescriptionTranslation(using session: TranslationSession) async {
+    #if canImport(Translation)
+    guard let description = episode.podcastEpisodeDescription, !description.isEmpty else {
+      return
+    }
+
+    // Strip HTML for translation
+    let plainText = stripHTMLForTranslation(description)
+
+    do {
+      let response = try await session.translate(plainText)
+      await MainActor.run {
+        self.translatedDescription = response.targetText
+      }
+      logger.info("Translated description for \(self.episode.title)")
+    } catch {
+      logger.error("Description translation failed: \(error.localizedDescription)")
+    }
+    #endif
+  }
+
+  /// Called by .translationTask for title translation
+  @available(iOS 17.4, macOS 14.4, *)
+  func performTitleTranslation(using session: TranslationSession) async {
+    #if canImport(Translation)
+    let title = episode.title
+    guard !title.isEmpty else { return }
+
+    do {
+      let response = try await session.translate(title)
+      await MainActor.run {
+        self.translatedEpisodeTitle = response.targetText
+      }
+      logger.info("Translated title for \(self.episode.title)")
+    } catch {
+      logger.error("Title translation failed: \(error.localizedDescription)")
+    }
+    #endif
+  }
+
+  /// Called by .translationTask for podcast name translation
+  @available(iOS 17.4, macOS 14.4, *)
+  func performPodcastTitleTranslation(using session: TranslationSession) async {
+    #if canImport(Translation)
+    let title = podcastTitle
+    guard !title.isEmpty else { return }
+
+    do {
+      let response = try await session.translate(title)
+      await MainActor.run {
+        self.translatedPodcastTitle = response.targetText
+      }
+      logger.info("Translated podcast title: \(title)")
+    } catch {
+      logger.error("Podcast title translation failed: \(error.localizedDescription)")
+    }
+    #endif
+  }
+
+  /// Strip HTML tags for translation
+  private func stripHTMLForTranslation(_ html: String) -> String {
+    var result = html
+    // Remove HTML tags
+    result = result.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+    // Decode HTML entities
+    result = decodeHTMLEntities(result)
+    // Collapse whitespace
+    result = result.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    return result.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /// Load existing translations for current segments
+  func loadExistingTranslations() {
+    let settings = SubtitleSettingsManager.shared
+    let targetLang = settings.targetLanguage.languageIdentifier
+
+    Task {
+      if let translated = await translationService.loadExistingTranslation(
+        segments: transcriptSegments,
+        episodeTitle: episode.title,
+        podcastTitle: podcastTitle,
+        targetLanguage: targetLang
+      ) {
+        await MainActor.run {
+          self.transcriptSegments = translated
+          logger.info("Loaded existing translations for \(self.episode.title)")
+        }
+      }
+    }
+  }
+
+  /// Check if translation exists for current language
+  var hasExistingTranslation: Bool {
+    transcriptSegments.contains { $0.translatedText != nil }
   }
 
   func toggleStar() {
@@ -629,6 +960,87 @@ final class EpisodeDetailViewModel {
     logger.debug("Report issue for: \(self.episode.title)")
   }
 
+  // MARK: - RSS Transcript Methods
+
+  /// Check if RSS transcript is available from the feed
+  func checkRSSTranscriptAvailability() {
+    Task {
+      let state = await transcriptDownloadService.getDownloadState(
+        episodeTitle: episode.title,
+        podcastTitle: podcastTitle,
+        transcriptURL: episode.transcriptURL,
+        transcriptType: episode.transcriptType
+      )
+
+      await MainActor.run {
+        rssTranscriptState = state
+
+        // If already downloaded, load the transcript
+        if case .downloaded = state {
+          Task {
+            await loadExistingTranscript()
+          }
+        }
+      }
+    }
+  }
+
+  /// Download RSS transcript from the feed URL
+  func downloadRSSTranscript() {
+    guard case .available(let urlString, let type) = rssTranscriptState,
+          let url = URL(string: urlString) else {
+      logger.warning("Cannot download RSS transcript: not available")
+      return
+    }
+
+    Task {
+      await MainActor.run {
+        rssTranscriptState = .downloading(progress: 0.5)
+      }
+
+      do {
+        let savedURL = try await transcriptDownloadService.downloadTranscript(
+          from: url,
+          type: type,
+          episodeTitle: episode.title,
+          podcastTitle: podcastTitle
+        )
+
+        await MainActor.run {
+          rssTranscriptState = .downloaded(localPath: savedURL.path)
+          logger.info("RSS transcript downloaded successfully")
+        }
+
+        // Load the transcript
+        await loadExistingTranscript()
+
+      } catch {
+        await MainActor.run {
+          rssTranscriptState = .failed(error: error.localizedDescription)
+          logger.error("RSS transcript download failed: \(error.localizedDescription)")
+        }
+      }
+    }
+  }
+
+  /// Check if RSS transcript is available and not yet downloaded
+  var hasRSSTranscriptAvailable: Bool {
+    if case .available = rssTranscriptState { return true }
+    return false
+  }
+
+  /// Check if RSS transcript is being downloaded
+  var isDownloadingRSSTranscript: Bool {
+    if case .downloading = rssTranscriptState { return true }
+    return false
+  }
+
+  /// Check if RSS transcript has been downloaded
+  var hasDownloadedRSSTranscript: Bool {
+    if case .downloaded = rssTranscriptState { return true }
+    return false
+  }
+
   // MARK: - Transcript Methods
 
   /// Gets the podcast language from SwiftData, falling back to "en" if not found
@@ -658,7 +1070,7 @@ final class EpisodeDetailViewModel {
       let transcriptService = TranscriptService(language: language)
       isModelReady = await transcriptService.isModelReady()
 
-      // Check if transcript already exists
+      // Check if transcript already exists (either from RSS or generated)
       let exists = await fileStorage.captionFileExists(
         for: episode.title,
         podcastTitle: podcastTitle
@@ -666,6 +1078,9 @@ final class EpisodeDetailViewModel {
 
       if exists {
         await loadExistingTranscript()
+      } else {
+        // Check for RSS transcript availability
+        checkRSSTranscriptAvailability()
       }
     }
   }
@@ -742,6 +1157,9 @@ final class EpisodeDetailViewModel {
     PlatformClipboard.string = transcriptText
   }
 
+  /// Cached word timings data from JSON file (for accurate word-level highlighting)
+  private var wordTimingsData: TranscriptService.TranscriptData?
+
   private func loadExistingTranscript() async {
     do {
       let content = try await fileStorage.loadCaptionFile(
@@ -755,9 +1173,21 @@ final class EpisodeDetailViewModel {
         podcastTitle: podcastTitle
       )
 
+      // Try to load word timings JSON (optional - may not exist for RSS transcripts)
+      var timingsData: TranscriptService.TranscriptData?
+      if let wordTimingsJSON = try await fileStorage.loadWordTimingFile(
+        for: episode.title,
+        podcastTitle: podcastTitle
+      ) {
+        if let jsonData = wordTimingsJSON.data(using: .utf8) {
+          timingsData = try? JSONDecoder().decode(TranscriptService.TranscriptData.self, from: jsonData)
+        }
+      }
+
       await MainActor.run {
         transcriptText = content
         cachedTranscriptDate = fileDate
+        wordTimingsData = timingsData
         transcriptState = .completed
         parseTranscriptSegments()
       }
@@ -797,32 +1227,58 @@ final class EpisodeDetailViewModel {
     cloudAnalysisCache.fullAnalysis != nil || !cloudAnalysisCache.questionAnswers.isEmpty
   }
 
-  /// Parses SRT content and returns clean text without timestamps
-  /// Each subtitle entry is separated by a newline for readability
+  /// Parses SRT content and returns clean text formatted in paragraphs
+  /// Groups segments into sentences, then combines 4 sentences per paragraph
   var cleanTranscriptText: String {
-    guard !transcriptText.isEmpty else { return "" }
+    guard !transcriptSegments.isEmpty else { return "" }
 
-    var cleanLines: [String] = []
-    let entries = transcriptText.components(separatedBy: "\n\n")
+    // Group segments into sentences using TranscriptGrouping
+    let sentences = TranscriptGrouping.groupIntoSentences(transcriptSegments)
 
-    for entry in entries {
-      let lines = entry.components(separatedBy: "\n")
-      // Skip index and timestamp lines, get text
-      if lines.count >= 3 {
-        let textLines = Array(lines[2...])
-        let combinedText = textLines.joined(separator: " ").trimmingCharacters(
-          in: .whitespaces)
-        if !combinedText.isEmpty {
-          cleanLines.append(combinedText)
+    // Combine 4 sentences per paragraph
+    let sentencesPerParagraph = 4
+    var paragraphs: [String] = []
+
+    for startIndex in stride(from: 0, to: sentences.count, by: sentencesPerParagraph) {
+      let endIndex = min(startIndex + sentencesPerParagraph, sentences.count)
+      let chunk = sentences[startIndex..<endIndex]
+      let paragraphText = chunk.map { $0.text }.joined(separator: " ")
+      paragraphs.append(paragraphText)
+    }
+
+    return paragraphs.joined(separator: "\n\n")
+  }
+
+  // MARK: - Live Captions Methods
+
+  /// Finds word timings for a segment from the loaded word timings data
+  /// - Parameters:
+  ///   - segmentId: The segment ID (1-based)
+  ///   - startTime: Segment start time
+  ///   - endTime: Segment end time
+  /// - Returns: Array of WordTiming if found, nil otherwise
+  private func findWordTimingsForSegment(segmentId: Int, startTime: TimeInterval, endTime: TimeInterval) -> [WordTiming]? {
+    guard let data = wordTimingsData else { return nil }
+
+    // Try to find segment by ID first
+    if let segment = data.segments.first(where: { $0.id == segmentId }) {
+      return segment.wordTimings.map { timing in
+        WordTiming(word: timing.word, startTime: timing.startTime, endTime: timing.endTime)
+      }
+    }
+
+    // Fallback: find segment by time overlap
+    for segment in data.segments {
+      // Check if times roughly match (within 0.5s tolerance)
+      if abs(segment.startTime - startTime) < 0.5 && abs(segment.endTime - endTime) < 0.5 {
+        return segment.wordTimings.map { timing in
+          WordTiming(word: timing.word, startTime: timing.startTime, endTime: timing.endTime)
         }
       }
     }
 
-    // Join with newlines to preserve paragraph breaks
-    return cleanLines.joined(separator: "\n\n")
+    return nil
   }
-
-  // MARK: - Live Captions Methods
 
   /// Parses SRT content into transcript segments
   func parseTranscriptSegments() {
@@ -906,24 +1362,44 @@ final class EpisodeDetailViewModel {
 
       text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
+      // Decode HTML entities (e.g., &nbsp; -> space)
+      text = decodeHTMLEntities(text)
+
       guard !text.isEmpty else {
         logger.warning("Entry \(index + 1): empty text")
         continue
       }
+
+      // Look up word timings for this segment if available
+      let wordTimings: [WordTiming]? = findWordTimingsForSegment(
+        segmentId: index + 1,  // Word timings use 1-based IDs
+        startTime: startTime,
+        endTime: endTime
+      )
 
       segments.append(
         TranscriptSegment(
           id: index,
           startTime: startTime,
           endTime: endTime,
-          text: text
+          text: text,
+          wordTimings: wordTimings
         ))
     }
 
-    transcriptSegments = segments
-    logger.info(
-      "Successfully parsed \(segments.count) transcript segments from \(matches.count) regex matches"
-    )
+    // Apply sentence grouping if enabled
+    if subtitleSettings.groupSegmentsIntoSentences {
+      let grouped = groupSegmentsIntoSentences(segments)
+      transcriptSegments = grouped
+      logger.info(
+        "Grouped \(segments.count) segments into \(grouped.count) sentences"
+      )
+    } else {
+      transcriptSegments = segments
+      logger.info(
+        "Successfully parsed \(segments.count) transcript segments from \(matches.count) regex matches"
+      )
+    }
 
     // Debug: log first few segments if we have any
     if !segments.isEmpty {
@@ -932,6 +1408,67 @@ final class EpisodeDetailViewModel {
         logger.info("Second segment: \(segments[1].text.prefix(50))...")
       }
     }
+  }
+
+  // MARK: - Sentence Grouping
+
+  /// Groups transcript segments into complete sentences by merging segments that don't end with sentence-ending punctuation
+  private func groupSegmentsIntoSentences(_ segments: [TranscriptSegment]) -> [TranscriptSegment] {
+    let sentenceEndings = CharacterSet(charactersIn: ".!?。！？")
+    var grouped: [TranscriptSegment] = []
+    var currentGroup: [TranscriptSegment] = []
+
+    for segment in segments {
+      currentGroup.append(segment)
+
+      // Check if this segment ends with sentence-ending punctuation
+      let trimmedText = segment.text.trimmingCharacters(in: .whitespaces)
+      if let lastChar = trimmedText.unicodeScalars.last,
+         sentenceEndings.contains(lastChar) {
+        // End of sentence - merge the group
+        if let merged = mergeSegments(currentGroup) {
+          grouped.append(merged)
+        }
+        currentGroup = []
+      }
+    }
+
+    // Handle any remaining segments that didn't end with punctuation
+    if !currentGroup.isEmpty, let merged = mergeSegments(currentGroup) {
+      grouped.append(merged)
+    }
+
+    return grouped
+  }
+
+  /// Merges multiple transcript segments into a single segment
+  private func mergeSegments(_ segments: [TranscriptSegment]) -> TranscriptSegment? {
+    guard let first = segments.first, let last = segments.last else { return nil }
+
+    // Combine text with spaces
+    let combinedText = segments.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+
+    // Combine translated text if all segments have translations
+    let translatedText: String?
+    if segments.allSatisfy({ $0.translatedText != nil }) {
+      translatedText = segments.compactMap { $0.translatedText?.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+    } else {
+      translatedText = nil
+    }
+
+    // Combine word timings from all segments (if any have them)
+    let combinedWordTimings: [WordTiming]?
+    let allTimings = segments.compactMap { $0.wordTimings }.flatMap { $0 }
+    combinedWordTimings = allTimings.isEmpty ? nil : allTimings
+
+    return TranscriptSegment(
+      id: first.id,
+      startTime: first.startTime,
+      endTime: last.endTime,
+      text: combinedText,
+      translatedText: translatedText,
+      wordTimings: combinedWordTimings
+    )
   }
 
   /// Parses SRT time format (HH:MM:SS,mmm) to TimeInterval
@@ -951,7 +1488,55 @@ final class EpisodeDetailViewModel {
     return hours * 3600 + minutes * 60 + seconds
   }
 
-  /// Returns filtered segments based on search query
+  /// Decode common HTML entities in text
+  private func decodeHTMLEntities(_ text: String) -> String {
+    var result = text
+
+    // Common HTML entities
+    let entities: [(String, String)] = [
+      ("&nbsp;", " "),
+      ("&amp;", "&"),
+      ("&lt;", "<"),
+      ("&gt;", ">"),
+      ("&quot;", "\""),
+      ("&apos;", "'"),
+      ("&#39;", "'"),
+      ("&rsquo;", "'"),
+      ("&lsquo;", "'"),
+      ("&rdquo;", "\""),
+      ("&ldquo;", "\""),
+      ("&ndash;", "–"),
+      ("&mdash;", "—"),
+      ("&hellip;", "…"),
+      ("&#160;", " "),  // Numeric form of &nbsp;
+    ]
+
+    for (entity, replacement) in entities {
+      result = result.replacingOccurrences(of: entity, with: replacement)
+    }
+
+    // Handle numeric HTML entities (&#NNN;)
+    if let regex = try? NSRegularExpression(pattern: "&#(\\d+);", options: []) {
+      let nsString = result as NSString
+      let matches = regex.matches(in: result, options: [], range: NSRange(location: 0, length: nsString.length))
+
+      // Process matches in reverse to avoid index shifting
+      for match in matches.reversed() {
+        if match.numberOfRanges >= 2 {
+          let codeRange = match.range(at: 1)
+          if let code = Int(nsString.substring(with: codeRange)),
+             let scalar = Unicode.Scalar(code) {
+            let replacement = String(Character(scalar))
+            result = (result as NSString).replacingCharacters(in: match.range, with: replacement)
+          }
+        }
+      }
+    }
+
+    return result
+  }
+
+  /// Returns filtered segments based on search query (searches both original and translated text)
   var filteredTranscriptSegments: [TranscriptSegment] {
     guard !transcriptSearchQuery.isEmpty else {
       return transcriptSegments
@@ -959,7 +1544,16 @@ final class EpisodeDetailViewModel {
 
     let query = transcriptSearchQuery.lowercased()
     return transcriptSegments.filter { segment in
-      segment.text.lowercased().contains(query)
+      // Search in original text
+      if segment.text.lowercased().contains(query) {
+        return true
+      }
+      // Also search in translated text if available
+      if let translatedText = segment.translatedText,
+         translatedText.lowercased().contains(query) {
+        return true
+      }
+      return false
     }
   }
 
