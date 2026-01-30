@@ -10,8 +10,13 @@ import Foundation
 import os.log
 internal import XMLKit
 
+
 public actor PodcastRssService {
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "PodcastRssService")
+
+  #if DEBUG
+  private static let signpostLog = OSLog(subsystem: "com.podcast.analyzer", category: "PointsOfInterest")
+  #endif
 
   // MARK: - Supported Transcript Types
 
@@ -56,6 +61,12 @@ public actor PodcastRssService {
   /// - Parameter urlString: any RSS/Atom/JSON feed URL
   /// - Returns: `PodcastInfo` (only RSS data is kept)
   public func fetchPodcast(from urlString: String) async throws -> PodcastInfo {
+    #if DEBUG
+    let signpostID = OSSignpostID(log: Self.signpostLog)
+    os_signpost(.begin, log: Self.signpostLog, name: "RSSService.fetchPodcast", signpostID: signpostID)
+    defer { os_signpost(.end, log: Self.signpostLog, name: "RSSService.fetchPodcast", signpostID: signpostID) }
+    #endif
+
     guard let url = URL(string: urlString) else {
       throw PodcastServiceError.invalidURL
     }

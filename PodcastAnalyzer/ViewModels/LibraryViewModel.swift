@@ -10,6 +10,10 @@ import SwiftData
 import SwiftUI
 import os.log
 
+#if DEBUG
+private let signpostLog = OSLog(subsystem: "com.podcast.analyzer", category: "PointsOfInterest")
+#endif
+
 // MARK: - Library Episode Model
 
 struct LibraryEpisode: Identifiable {
@@ -152,6 +156,12 @@ final class LibraryViewModel {
     setupDownloadCompletionObserver()
     setupSyncCompletionObserver()
     startDownloadingPollTimer()
+  }
+
+  deinit {
+    MainActor.assumeIsolated {
+      cleanup()
+    }
   }
 
   /// Clean up resources. Call this from onDisappear.
@@ -435,20 +445,30 @@ final class LibraryViewModel {
     await loadLatestEpisodes()
   }
 
-  /// Legacy loadAll for refresh operations that need to wait for completion
+  /// Load all sections — shows cached data immediately, syncs disk in background
   private func loadAll() async {
+    #if DEBUG
+    let signpostID = OSSignpostID(log: signpostLog)
+    os_signpost(.begin, log: signpostLog, name: "LibraryViewModel.loadAll", signpostID: signpostID)
+    #endif
+
     isLoading = true
-    
+
     // First, load all podcasts (needed by other loaders)
     await loadAllPodcasts()
 
     // Then load the rest using async let for parallelism while staying on MainActor
+    // Use loadDownloadedSection (fast path) instead of loadDownloadedEpisodes (slow disk sync)
     async let savedTask: () = loadSavedEpisodes()
-    async let downloadedTask: () = loadDownloadedEpisodes()
+    async let downloadedTask: () = loadDownloadedSection()
     async let latestTask: () = loadLatestEpisodes()
     _ = await (savedTask, downloadedTask, latestTask)
 
     isLoading = false
+
+    #if DEBUG
+    os_signpost(.end, log: signpostLog, name: "LibraryViewModel.loadAll", signpostID: signpostID)
+    #endif
   }
   // MARK: - Public Refresh Methods
 
@@ -595,6 +615,12 @@ final class LibraryViewModel {
   /// 1. Verifies existing downloads still exist
   /// 2. Discovers downloaded files that exist but aren't tracked in SwiftData
   private func syncDownloadedFilesWithSwiftData() async {
+    #if DEBUG
+    let signpostID = OSSignpostID(log: signpostLog)
+    os_signpost(.begin, log: signpostLog, name: "LibraryViewModel.syncDisk", signpostID: signpostID)
+    defer { os_signpost(.end, log: signpostLog, name: "LibraryViewModel.syncDisk", signpostID: signpostID) }
+    #endif
+
     guard let context = modelContext else { return }
 
     // 1. Get all EpisodeDownloadModel entries

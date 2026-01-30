@@ -241,13 +241,23 @@ private func handleAudioInterruption(_ notification: Notification) {
             do {
                 try AVAudioSession.sharedInstance().setActive(true)
                 
-                // 4. Delayed Resume
+                // 4. Delayed Resume with retry
                 // Audio hardware needs a moment to switch back from the other app
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                     guard let self = self else { return }
                     self.resume()
                     self.wasPlayingBeforeInterruption = false
-                    self.logger.info("Interruption ended: Audio resumed")
+
+                    // Verify playback actually started; retry once if not
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        guard let self = self else { return }
+                        if !self.isPlaying, self.player?.rate == 0 {
+                            self.logger.warning("Interruption resume failed, retrying once")
+                            self.resume()
+                        } else {
+                            self.logger.info("Interruption ended: Audio resumed successfully")
+                        }
+                    }
                 }
             } catch {
                 logger.error("Failed to reactivate session after interruption: \(error.localizedDescription)")

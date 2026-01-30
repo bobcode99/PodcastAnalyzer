@@ -156,15 +156,17 @@ struct MiniPlayerBar: View {
       return
     }
 
-    // Case 4: No last episode - find one from SwiftData
-    if let episode = findEpisodeToPlay() {
-      audioManager.play(
-        episode: episode,
-        audioURL: episode.audioURL,
-        startTime: 0,
-        imageURL: episode.imageURL,
-        useDefaultSpeed: true
-      )
+    // Case 4: No last episode - find one from SwiftData (async to avoid blocking UI)
+    Task { @MainActor in
+      if let episode = findEpisodeToPlay() {
+        audioManager.play(
+          episode: episode,
+          audioURL: episode.audioURL,
+          startTime: 0,
+          imageURL: episode.imageURL,
+          useDefaultSpeed: true
+        )
+      }
     }
   }
 

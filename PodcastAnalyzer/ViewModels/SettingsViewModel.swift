@@ -75,6 +75,13 @@ final class SettingsViewModel {
     loadAutoPlayNextEpisode()
   }
 
+  deinit {
+    MainActor.assumeIsolated {
+      successMessageTask?.cancel()
+      transcriptDownloadTask?.cancel()
+    }
+  }
+
   // MARK: - Region Settings
 
   func setSelectedRegion(_ region: String) {

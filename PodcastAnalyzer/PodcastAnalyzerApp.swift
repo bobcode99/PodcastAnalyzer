@@ -58,33 +58,43 @@ struct PodcastAnalyzerApp: App {
   init() {
     // Register background task for episode sync
     BackgroundSyncManager.registerBackgroundTask()
+
+    // Register MetricKit crash reporting subscriber
+    CrashReportingService.shared.start()
   }
 
   var body: some Scene {
     WindowGroup {
       ContentView()
-        .onAppear {
-          // Initialize playback state coordinator on first appear
-          Task { @MainActor in
-            if PlaybackStateCoordinator.shared == nil {
-              _ = PlaybackStateCoordinator(modelContext: sharedModelContainer.mainContext)
-            }
-
-            // Set up background sync manager
-            BackgroundSyncManager.shared.setModelContainer(sharedModelContainer)
-
-            // Set up podcast import manager
-            PodcastImportManager.shared.setModelContainer(sharedModelContainer)
-
-            // Set up notification navigation manager
-            NotificationNavigationManager.shared.setModelContainer(sharedModelContainer)
-
-            // Start foreground sync if enabled
-            if BackgroundSyncManager.shared.isBackgroundSyncEnabled {
-              BackgroundSyncManager.shared.startForegroundSync()
-              BackgroundSyncManager.shared.scheduleBackgroundRefresh()
-            }
+        .task {
+          // Critical: initialize playback state and sync manager first
+          if PlaybackStateCoordinator.shared == nil {
+            _ = PlaybackStateCoordinator(modelContext: sharedModelContainer.mainContext)
           }
+          BackgroundSyncManager.shared.setModelContainer(sharedModelContainer)
+
+          // Start foreground sync if enabled
+          if BackgroundSyncManager.shared.isBackgroundSyncEnabled {
+            BackgroundSyncManager.shared.startForegroundSync()
+            BackgroundSyncManager.shared.scheduleBackgroundRefresh()
+          }
+
+          // Deferred: non-critical managers initialized after first frame
+          PodcastImportManager.shared.setModelContainer(sharedModelContainer)
+          NotificationNavigationManager.shared.setModelContainer(sharedModelContainer)
+
+          // Register low-memory warning handler to clear caches
+          #if os(iOS)
+          NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+          ) { _ in
+            ImageCacheManager.shared.clearMemoryCache()
+            Task { await RSSCacheService.shared.clearAllCache() }
+            logger.warning("Low memory warning: cleared image and RSS caches")
+          }
+          #endif
         }
         .onOpenURL { url in
           // Handle URL callbacks from Shortcuts

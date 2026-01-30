@@ -16,6 +16,10 @@ import Foundation
 import Observation
 import os.log
 
+#if DEBUG
+private let signpostLog = OSLog(subsystem: "com.podcast.analyzer", category: "PointsOfInterest")
+#endif
+
 enum DownloadState: Codable, Equatable, Sendable {
   case notDownloaded
   case downloading(progress: Double)
@@ -441,8 +445,26 @@ final class DownloadManager {
         return
       }
 
+      // Check available disk space before starting download (require at least 50 MB)
+      do {
+        let attrs = try FileManager.default.attributesOfFileSystem(
+          forPath: NSHomeDirectory())
+        if let freeSpace = attrs[.systemFreeSize] as? Int64,
+           freeSpace < 50 * 1024 * 1024 {
+          logger.warning("Insufficient disk space for download: \(freeSpace / 1_048_576) MB free")
+          downloadStates[episodeKey] = .failed(error: "Not enough disk space (need at least 50 MB)")
+          return
+        }
+      } catch {
+        logger.warning("Could not check disk space: \(error.localizedDescription)")
+        // Proceed anyway — disk space check is best-effort
+      }
+
       // Start download
       downloadStates[episodeKey] = .downloading(progress: 0)
+      #if DEBUG
+      os_signpost(.event, log: signpostLog, name: "DownloadManager.startDownload", "%{public}s", episode.title)
+      #endif
       let task = await sessionDelegate.startDownload(
         url: url,
         episodeTitle: episode.title,
@@ -500,6 +522,17 @@ final class DownloadManager {
           self?.downloadStates[episodeKey] = .downloaded(localPath: path)
         }
         return .downloaded(localPath: path)
+      }
+    }
+
+    // If state says downloaded, verify the file still exists on disk
+    if case .downloaded(let path) = downloadStates[episodeKey] {
+      if !FileManager.default.fileExists(atPath: path) {
+        logger.warning("Download record exists but file missing on disk: \(path)")
+        DispatchQueue.main.async { [weak self] in
+          self?.downloadStates[episodeKey] = .notDownloaded
+        }
+        return .notDownloaded
       }
     }
 

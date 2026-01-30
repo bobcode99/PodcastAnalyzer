@@ -409,6 +409,12 @@ final class HomeViewModel {
     }
   }
 
+  deinit {
+    MainActor.assumeIsolated {
+      cleanup()
+    }
+  }
+
   func cleanup() {
     regionObserverTask?.cancel()
     regionObserverTask = nil

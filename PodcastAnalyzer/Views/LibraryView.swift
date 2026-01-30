@@ -199,13 +199,10 @@ struct LibraryView: View {
       forName: .podcastSyncCompleted,
       object: nil,
       queue: .main
-    ) { [self] _ in
-      Task { @MainActor in
+    ) { _ in
+      Task { @MainActor [viewModel, modelContext] in
         // Refresh the view model data
         viewModel.setModelContext(modelContext)
-        withAnimation(.easeInOut(duration: 0.3)) {
-          updateSortedPodcasts()
-        }
       }
     }
 
@@ -214,8 +211,8 @@ struct LibraryView: View {
       forName: .episodeDownloadCompleted,
       object: nil,
       queue: .main
-    ) { [self] _ in
-      Task { @MainActor in
+    ) { _ in
+      Task { @MainActor [viewModel, modelContext] in
         viewModel.setModelContext(modelContext)
       }
     }
