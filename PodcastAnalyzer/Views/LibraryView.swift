@@ -194,15 +194,20 @@ struct LibraryView: View {
   }
 
   private func setupNotificationObservers() {
+    // Capture the ViewModel reference (class, Sendable) before entering @Sendable closure.
+    // The VM already stores its ModelContext internally, so we call refreshSavedEpisodes
+    // which uses the stored context — avoiding capture of non-Sendable ModelContext.
+    let vm = viewModel
+
     // Listen for sync completion to refresh data
     syncObserver = NotificationCenter.default.addObserver(
       forName: .podcastSyncCompleted,
       object: nil,
       queue: .main
     ) { _ in
-      Task { @MainActor [viewModel, modelContext] in
-        // Refresh the view model data
-        viewModel.setModelContext(modelContext)
+      Task { @MainActor in
+        await vm.refreshSavedEpisodes()
+        await vm.refreshDownloadedEpisodes()
       }
     }
 
@@ -212,8 +217,8 @@ struct LibraryView: View {
       object: nil,
       queue: .main
     ) { _ in
-      Task { @MainActor [viewModel, modelContext] in
-        viewModel.setModelContext(modelContext)
+      Task { @MainActor in
+        await vm.refreshDownloadedEpisodes()
       }
     }
   }

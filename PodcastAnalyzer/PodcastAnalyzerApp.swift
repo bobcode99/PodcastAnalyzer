@@ -90,9 +90,11 @@ struct PodcastAnalyzerApp: App {
             object: nil,
             queue: .main
           ) { _ in
-            ImageCacheManager.shared.clearMemoryCache()
-            Task { await RSSCacheService.shared.clearAllCache() }
-            logger.warning("Low memory warning: cleared image and RSS caches")
+            Task { @MainActor in
+              ImageCacheManager.shared.clearMemoryCache()
+              await RSSCacheService.shared.clearAllCache()
+              logger.warning("Low memory warning: cleared image and RSS caches")
+            }
           }
           #endif
         }

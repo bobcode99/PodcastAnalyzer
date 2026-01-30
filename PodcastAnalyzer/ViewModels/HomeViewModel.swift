@@ -29,12 +29,16 @@ final class HomeViewModel {
   var isLoadingTopPodcasts = false
 
   // Region selection - synced with Settings
+  // Note: use _selectedRegion for direct storage access in init() to avoid didSet side effects
   var selectedRegion: String = "us" {
     didSet {
       if oldValue != selectedRegion {
         // Save to UserDefaults for consistency
         UserDefaults.standard.set(selectedRegion, forKey: "selectedPodcastRegion")
-        Task { await loadTopPodcasts(forceRefresh: true) }
+        // Only trigger reload if we've been initialized with a model context
+        if isAlreadyLoaded {
+          Task { await loadTopPodcasts(forceRefresh: true) }
+        }
       }
     }
   }
@@ -93,18 +97,23 @@ final class HomeViewModel {
       topPodcasts = Self.cachedTopPodcasts
     }
 
-    // Listen for region changes from Settings using async sequence
-    regionObserverTask = Task {
-      for await notification in NotificationCenter.default.notifications(named: .podcastRegionChanged) {
-        if let newRegion = notification.object as? String {
-          selectedRegion = newRegion
-        }
-      }
-    }
+    // Region observer is set up in setModelContext() to avoid premature loads
   }
 
   func setModelContext(_ context: ModelContext) {
     self.modelContext = context
+
+    // Ensure region observer is running (may have been cancelled by cleanup)
+    if regionObserverTask == nil || regionObserverTask?.isCancelled == true {
+      regionObserverTask = Task {
+        for await notification in NotificationCenter.default.notifications(named: .podcastRegionChanged) {
+          if let newRegion = notification.object as? String {
+            selectedRegion = newRegion
+          }
+        }
+      }
+    }
+
     // Only load if we haven't or if we need a fresh start
     if !isAlreadyLoaded {
       isAlreadyLoaded = true  // Set immediately to prevent race condition
