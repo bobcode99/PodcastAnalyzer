@@ -119,7 +119,7 @@ struct SmallWidgetView: View {
                 .overlay(
                   Image(systemName: "music.note")
                     .font(.title2)
-                    .foregroundColor(.blue)
+                    .foregroundStyle(.blue)
                 )
             }
           }
@@ -135,12 +135,12 @@ struct SmallWidgetView: View {
           .font(.caption)
           .fontWeight(.semibold)
           .lineLimit(2)
-          .foregroundColor(.primary)
+          .foregroundStyle(.primary)
 
         // Duration: current / total
         Text("\(data.formattedCurrentTime) / \(data.formattedDuration)")
           .font(.caption2)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
       .padding(12)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -172,7 +172,7 @@ struct MediumWidgetView: View {
               .overlay(
                 Image(systemName: "music.note")
                   .font(.largeTitle)
-                  .foregroundColor(.blue)
+                  .foregroundStyle(.blue)
               )
           }
         }
@@ -185,12 +185,12 @@ struct MediumWidgetView: View {
             .font(.subheadline)
             .fontWeight(.semibold)
             .lineLimit(2)
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
 
           // Podcast name
           Text(data.podcastTitle)
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .lineLimit(1)
 
           Spacer()
@@ -213,7 +213,7 @@ struct MediumWidgetView: View {
             HStack {
               Text("\(data.formattedCurrentTime) / \(data.formattedDuration)")
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
               Spacer()
             }
           }
@@ -224,13 +224,13 @@ struct MediumWidgetView: View {
 
             Text(data.isPlaying ? "Playing" : "Paused")
               .font(.caption)
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
 
             Spacer()
 
             Text(data.formattedRemainingTime)
               .font(.caption)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
         }
         .padding(.vertical, 4)
@@ -267,7 +267,7 @@ struct WidgetPlayButton: View {
       // Play/Pause icon
       Image(systemName: isPlaying ? "pause.fill" : "play.fill")
         .font(.system(size: 14, weight: .bold))
-        .foregroundColor(.blue)
+        .foregroundStyle(.blue)
         .offset(x: isPlaying ? 0 : 1) // Slight offset for play icon visual balance
     }
   }
@@ -280,13 +280,13 @@ struct EmptyWidgetView: View {
     VStack(spacing: 8) {
       Image(systemName: "headphones")
         .font(.title)
-        .foregroundColor(.blue.opacity(0.6))
+        .foregroundStyle(.blue.opacity(0.6))
       Text("No Episode Playing")
         .font(.caption)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       Text("Open app to start listening")
         .font(.caption2)
-        .foregroundColor(.secondary.opacity(0.8))
+        .foregroundStyle(.secondary.opacity(0.8))
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .widgetURL(URL(string: "podcastanalyzer://library"))
