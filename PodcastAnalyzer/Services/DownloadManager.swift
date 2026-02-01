@@ -518,7 +518,7 @@ final class DownloadManager {
         episodeTitle: episodeTitle, podcastTitle: podcastTitle)
       {
         // Schedule the state update for next run loop to avoid "publishing during view update"
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
           self?.downloadStates[episodeKey] = .downloaded(localPath: path)
         }
         return .downloaded(localPath: path)
@@ -529,7 +529,7 @@ final class DownloadManager {
     if case .downloaded(let path) = downloadStates[episodeKey] {
       if !FileManager.default.fileExists(atPath: path) {
         logger.warning("Download record exists but file missing on disk: \(path)")
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
           self?.downloadStates[episodeKey] = .notDownloaded
         }
         return .notDownloaded

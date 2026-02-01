@@ -188,7 +188,8 @@ struct iOSContentView: View {
       break
     case let .episodeDetail(episode, podcastTitle, imageURL):
       // Small delay to allow sheet dismissal animation to complete
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+      Task {
+        try? await Task.sleep(for: .seconds(0.3))
         expandedPlayerEpisode = episode
         expandedPlayerPodcastTitle = podcastTitle
         expandedPlayerImageURL = imageURL
@@ -197,7 +198,8 @@ struct iOSContentView: View {
       }
     case let .podcastEpisodeList(podcastModel):
       // Small delay to allow sheet dismissal animation to complete
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+      Task {
+        try? await Task.sleep(for: .seconds(0.3))
         expandedPlayerPodcastModel = podcastModel
         showExpandedPlayerPodcast = true
         expandedPlayerNavigation = .none

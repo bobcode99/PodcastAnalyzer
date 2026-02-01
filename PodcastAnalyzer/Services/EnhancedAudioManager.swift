@@ -109,7 +109,7 @@ class EnhancedAudioManager: NSObject {
   // Sleep timer
   var sleepTimerOption: SleepTimerOption = .off
   var sleepTimerRemaining: TimeInterval = 0
-  private var sleepTimer: Timer?
+  private var sleepTimerTask: Task<Void, Never>?
 
   // Audio interruption handling - track if we should resume after interruption ends
   private var wasPlayingBeforeInterruption: Bool = false
@@ -243,20 +243,18 @@ private func handleAudioInterruption(_ notification: Notification) {
                 
                 // 4. Delayed Resume with retry
                 // Audio hardware needs a moment to switch back from the other app
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                    guard let self = self else { return }
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(0.8))
+                    guard let self else { return }
                     self.resume()
                     self.wasPlayingBeforeInterruption = false
-
                     // Verify playback actually started; retry once if not
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                        guard let self = self else { return }
-                        if !self.isPlaying, self.player?.rate == 0 {
-                            self.logger.warning("Interruption resume failed, retrying once")
-                            self.resume()
-                        } else {
-                            self.logger.info("Interruption ended: Audio resumed successfully")
-                        }
+                    try? await Task.sleep(for: .seconds(0.5))
+                    if !self.isPlaying, self.player?.rate == 0 {
+                        self.logger.warning("Interruption resume failed, retrying once")
+                        self.resume()
+                    } else {
+                        self.logger.info("Interruption ended: Audio resumed successfully")
                     }
                 }
             } catch {
@@ -606,8 +604,8 @@ private func handleAudioInterruption(_ notification: Notification) {
   /// Set the sleep timer option
   func setSleepTimer(_ option: SleepTimerOption) {
     // Cancel existing timer
-    sleepTimer?.invalidate()
-    sleepTimer = nil
+    sleepTimerTask?.cancel()
+    sleepTimerTask = nil
     sleepTimerOption = option
 
     switch option {
@@ -630,9 +628,11 @@ private func handleAudioInterruption(_ notification: Notification) {
 
   /// Start the countdown timer
   private func startSleepTimerCountdown() {
-    sleepTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-      guard let self else { return }
-      Task { @MainActor in
+    sleepTimerTask?.cancel()
+    sleepTimerTask = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(1))
+        guard let self else { return }
         self.updateSleepTimer()
       }
     }
@@ -660,8 +660,8 @@ private func handleAudioInterruption(_ notification: Notification) {
   private func triggerSleepTimer() {
     logger.info("Sleep timer triggered - pausing playback")
     pause()
-    sleepTimer?.invalidate()
-    sleepTimer = nil
+    sleepTimerTask?.cancel()
+    sleepTimerTask = nil
     sleepTimerOption = .off
     sleepTimerRemaining = 0
   }

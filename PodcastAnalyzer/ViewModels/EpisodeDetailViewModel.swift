@@ -1583,7 +1583,8 @@ final class EpisodeDetailViewModel {
     if !isPlayingThisEpisode {
       playAction()
       // Give player time to initialize, then seek
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+      Task { [weak self] in
+        try? await Task.sleep(for: .seconds(0.3))
         self?.audioManager.seek(to: segment.startTime)
       }
     } else {

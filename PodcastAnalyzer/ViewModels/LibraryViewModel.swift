@@ -655,6 +655,7 @@ final class LibraryViewModel {
 
     if !modelsWithPaths.isEmpty {
       let pathsToCheck = modelsWithPaths.map { ($0.0, $0.1) }
+      // Detached to avoid blocking @MainActor with synchronous FileManager I/O
       let missingFiles = await Task.detached(priority: .background) { () -> Set<String> in
         let fm = FileManager.default
         var missing = Set<String>()
@@ -731,6 +732,7 @@ final class LibraryViewModel {
 
   /// Check if audio file exists on disk for an episode
   private func checkAudioFileExists(episodeTitle: String, podcastTitle: String) async -> String? {
+    // Detached to avoid blocking @MainActor with synchronous FileManager I/O
     await Task.detached(priority: .background) {
       let fm = FileManager.default
 

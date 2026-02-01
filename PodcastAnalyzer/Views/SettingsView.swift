@@ -548,7 +548,8 @@ struct AddFeedView: View {
         Button(action: {
           viewModel.addRssLink(modelContext: modelContext) {
             // Dismiss on success
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            Task {
+              try? await Task.sleep(for: .seconds(1.5))
               onDismiss()
             }
           }

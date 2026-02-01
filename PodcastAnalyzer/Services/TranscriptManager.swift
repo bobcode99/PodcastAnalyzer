@@ -58,13 +58,6 @@ class TranscriptManager {
     return min(max(processorCount / 2, 2), 4)
   }()
   
-  // Dedicated background queue for CPU-intensive transcription work
-  private let transcriptionQueue = DispatchQueue(
-    label: "com.podcast.analyzer.transcription",
-    qos: .userInitiated,
-    attributes: .concurrent
-  )
-
   // Queue for pending jobs
   private var pendingJobs: [TranscriptJob] = []
   private var runningJobIds: Set<String> = []

@@ -42,6 +42,11 @@ private actor DownloadCoordinator {
 
 // MARK: - Image Cache Manager
 
+// SAFETY: @unchecked Sendable is safe because:
+// - NSCache is internally thread-safe
+// - DownloadCoordinator (actor) handles async download coordination
+// - All mutable state is accessed through synchronized paths
+// TODO: Migrate to Mutex<NSCache> when minimum deployment target is iOS 18+
 final class ImageCacheManager: @unchecked Sendable {
   static let shared = ImageCacheManager()
 

@@ -308,7 +308,8 @@ struct ApplePodcastRow: View {
                     isSubscribing = true
                     onSubscribe()
                     // Reset after a delay (subscription will update via @Query)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
                         isSubscribing = false
                     }
                 }) {
