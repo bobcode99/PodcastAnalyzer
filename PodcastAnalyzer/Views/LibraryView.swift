@@ -778,17 +778,10 @@ struct DownloadingEpisodeRow: View {
           .lineLimit(1)
 
         // Progress bar
-        GeometryReader { geo in
-          ZStack(alignment: .leading) {
-            Capsule()
-              .fill(Color.blue.opacity(0.2))
-              .frame(height: 4)
-            Capsule()
-              .fill(Color.blue)
-              .frame(width: geo.size.width * episode.progress, height: 4)
-          }
-        }
-        .frame(height: 4)
+        ProgressView(value: episode.progress)
+          .progressViewStyle(.linear)
+          .tint(.blue)
+          .frame(height: 4)
       }
 
       Spacer()

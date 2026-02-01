@@ -45,46 +45,44 @@ struct ExpandedPlayerView: View {
         )
         .ignoresSafeArea()
 
-        GeometryReader { geometry in
-            ScrollView {
-                // This container ensures content spans at least the full screen height
+        ScrollView {
+            // This container ensures content spans at least the full screen height
+            VStack(spacing: 0) {
+
+                // 1. Artwork & Info Group
                 VStack(spacing: 0) {
-                    
-                    // 1. Artwork & Info Group
-                    VStack(spacing: 0) {
-                        artworkSection
-                            .padding(.top, geometry.size.height * 0.02)
-                        
-                        episodeInfoSection
-                            .padding(.top, 24)
-                    }
-                    
-                    Spacer(minLength: 20) // Flexible space
+                    artworkSection
+                        .padding(.top, 16)
 
-                    // 2. Playback Group (Progress + Controls)
-                    VStack(spacing: 24) {
-                        progressSection
-                            .padding(.horizontal, 24)
-                        
-                        controlsSection
-                    }
-
-                    Spacer(minLength: 20) // Flexible space
-
-                    // 3. Bottom Actions
-                    bottomActionsSection
-                        .padding(.bottom, (viewModel.hasTranscript && !viewModel.transcriptSegments.isEmpty) ? 20 : 40)
-
-                    // 4. Transcript - ONLY renders if data exists
-                    if viewModel.hasTranscript && !viewModel.transcriptSegments.isEmpty {
-                        transcriptPreviewSection
-                            .padding(.top, 10)
-                            .padding(.bottom, 40)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
+                    episodeInfoSection
+                        .padding(.top, 24)
                 }
-                .frame(minHeight: geometry.size.height) // Forces the Spacers to work
+
+                Spacer(minLength: 20) // Flexible space
+
+                // 2. Playback Group (Progress + Controls)
+                VStack(spacing: 24) {
+                    progressSection
+                        .padding(.horizontal, 24)
+
+                    controlsSection
+                }
+
+                Spacer(minLength: 20) // Flexible space
+
+                // 3. Bottom Actions
+                bottomActionsSection
+                    .padding(.bottom, (viewModel.hasTranscript && !viewModel.transcriptSegments.isEmpty) ? 20 : 40)
+
+                // 4. Transcript - ONLY renders if data exists
+                if viewModel.hasTranscript && !viewModel.transcriptSegments.isEmpty {
+                    transcriptPreviewSection
+                        .padding(.top, 10)
+                        .padding(.bottom, 40)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
+            .containerRelativeFrame(.vertical, alignment: .center)
         }
         .blur(radius: showSpeedPicker || showQueue ? 3 : 0)
 

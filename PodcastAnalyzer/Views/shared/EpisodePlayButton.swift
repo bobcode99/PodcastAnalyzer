@@ -217,17 +217,10 @@ struct EpisodePlayButton: View {
 
         // Progress bar (only show when partially played)
         if playbackProgress > 0 && playbackProgress < 1 {
-          GeometryReader { geo in
-            ZStack(alignment: .leading) {
-              Capsule()
-                .fill(Color.white.opacity(0.4))
-                .frame(height: 2)
-              Capsule()
-                .fill(Color.white)
-                .frame(width: geo.size.width * playbackProgress, height: 2)
-            }
-          }
-          .frame(width: 24, height: 2)
+          ProgressView(value: playbackProgress)
+            .progressViewStyle(.linear)
+            .tint(.white)
+            .frame(width: 24)
         }
 
         // Duration text
@@ -273,17 +266,10 @@ struct EpisodePlayButton: View {
 
         // Progress bar (only show when partially played)
         if playbackProgress > 0 && playbackProgress < 1 {
-          GeometryReader { geo in
-            ZStack(alignment: .leading) {
-              Capsule()
-                .fill(Color.white.opacity(0.4))
-                .frame(height: 3)
-              Capsule()
-                .fill(Color.white)
-                .frame(width: geo.size.width * playbackProgress, height: 3)
-            }
-          }
-          .frame(width: 32, height: 3)
+          ProgressView(value: playbackProgress)
+            .progressViewStyle(.linear)
+            .tint(.white)
+            .frame(width: 32)
         }
 
         if let duration = durationText {
