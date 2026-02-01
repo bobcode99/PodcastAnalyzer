@@ -46,7 +46,7 @@ struct HomeView: View {
           .padding(.horizontal, 8)
           .padding(.vertical, 4)
           .background(Color.gray.opacity(0.15))
-          .cornerRadius(12)
+          .clipShape(.rect(cornerRadius: 12))
         }
       }
     }
@@ -564,7 +564,7 @@ struct PodcastPreviewSheet: View {
               Color.gray
           }
           .frame(width: 200, height: 200)
-          .cornerRadius(16)
+          .clipShape(.rect(cornerRadius: 16))
           .shadow(radius: 8)
 
           // Title and Artist
@@ -589,7 +589,7 @@ struct PodcastPreviewSheet: View {
                   .padding(.vertical, 4)
                   .background(Color.blue.opacity(0.15))
                   .foregroundStyle(.blue)
-                  .cornerRadius(12)
+                  .clipShape(.rect(cornerRadius: 12))
               }
             }
           }
@@ -606,7 +606,7 @@ struct PodcastPreviewSheet: View {
             .frame(maxWidth: .infinity)
             .padding()
             .background(Color.green.opacity(0.15))
-            .cornerRadius(12)
+            .clipShape(.rect(cornerRadius: 12))
             .padding(.horizontal)
           } else if viewModel.isSubscribing {
             ProgressView("Subscribing...")
@@ -628,7 +628,7 @@ struct PodcastPreviewSheet: View {
                 .padding()
                 .background(Color.blue)
                 .foregroundStyle(.white)
-                .cornerRadius(12)
+                .clipShape(.rect(cornerRadius: 12))
             }
             .padding(.horizontal)
           }

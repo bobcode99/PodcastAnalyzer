@@ -126,7 +126,7 @@ struct MacMiniPlayerBar: View {
               .padding(.horizontal, 8)
               .padding(.vertical, 4)
               .background(Color.gray.opacity(0.15))
-              .cornerRadius(4)
+              .clipShape(.rect(cornerRadius: 4))
           }
           .menuStyle(.borderlessButton)
           .frame(width: 44)

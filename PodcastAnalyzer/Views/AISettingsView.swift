@@ -252,7 +252,7 @@ struct AISettingsView: View {
                     }
                     .padding(10)
                     .background(Color.yellow.opacity(0.1))
-                    .cornerRadius(8)
+                    .clipShape(.rect(cornerRadius: 8))
 
                     // How it works
                     VStack(alignment: .leading, spacing: 4) {
@@ -269,7 +269,7 @@ struct AISettingsView: View {
                     }
                     .padding(10)
                     .background(Color.blue.opacity(0.1))
-                    .cornerRadius(8)
+                    .clipShape(.rect(cornerRadius: 8))
                 } header: {
                     Text("Setup Instructions")
                 }

@@ -177,7 +177,7 @@ struct LibraryView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .background(Color.platformSystemGray6)
-        .cornerRadius(12)
+        .clipShape(.rect(cornerRadius: 12))
       }
       .buttonStyle(.plain)
     }
@@ -381,7 +381,7 @@ struct QuickAccessCard: View {
     .padding(12)
     .frame(maxWidth: .infinity, minHeight: 90)
     .background(Color.platformSystemGray6)
-    .cornerRadius(12)
+    .clipShape(.rect(cornerRadius: 12))
   }
 }
 
@@ -408,7 +408,7 @@ struct PodcastGridCell: View {
           .overlay(ProgressView().scaleEffect(0.5))
       }
       .aspectRatio(1, contentMode: .fit)
-      .cornerRadius(10)
+      .clipShape(.rect(cornerRadius: 10))
       .clipped()
 
       // Podcast title
@@ -763,7 +763,7 @@ struct DownloadingEpisodeRow: View {
           )
       }
       .frame(width: 56, height: 56)
-      .cornerRadius(8)
+      .clipShape(.rect(cornerRadius: 8))
 
       // Title and progress
       VStack(alignment: .leading, spacing: 4) {

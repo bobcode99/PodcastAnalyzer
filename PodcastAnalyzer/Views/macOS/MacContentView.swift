@@ -130,7 +130,7 @@ struct MacContentView: View {
             .frame(width: 800) // Fixed width - adjust this value (e.g., 600-1000) to fit your app's typical window
             .padding(.bottom, 20) // Lift from bottom edge
             .background(.ultraThinMaterial) // Blurry glass effect
-            .cornerRadius(12) // Rounded corners
+            .clipShape(.rect(cornerRadius: 12)) // Rounded corners
             .shadow(radius: 8) // Hover/lift shadow
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
@@ -720,7 +720,7 @@ struct MacSearchView: View {
     }
     .padding(4)
     .background(Color.gray.opacity(0.1))
-    .cornerRadius(10)
+    .clipShape(.rect(cornerRadius: 10))
   }
 
   // MARK: - Empty Search View

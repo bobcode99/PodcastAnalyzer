@@ -91,7 +91,7 @@ struct TranscriptGenerationView: View {
         .textSelection(.enabled)
         .padding()
         .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
+        .clipShape(.rect(cornerRadius: 8))
     }
   }
 
@@ -163,7 +163,7 @@ struct TranscriptGenerationView: View {
     .frame(maxWidth: .infinity)
     .padding()
     .background(Color.gray.opacity(0.1))
-    .cornerRadius(12)
+    .clipShape(.rect(cornerRadius: 12))
   }
 
   @ViewBuilder

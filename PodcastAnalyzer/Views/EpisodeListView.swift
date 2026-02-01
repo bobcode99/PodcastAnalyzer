@@ -193,7 +193,7 @@ struct EpisodeListView: View {
             Color.gray
         }
         .frame(width: 150, height: 150)
-        .cornerRadius(12)
+        .clipShape(.rect(cornerRadius: 12))
 
         Text(name)
           .font(.headline)
@@ -505,9 +505,9 @@ struct EpisodeListView: View {
                   .overlay(ProgressView())
           }
           .frame(width: 100, height: 100)
-          .cornerRadius(8)
+          .clipShape(.rect(cornerRadius: 8))
         } else {
-          Color.gray.frame(width: 100, height: 100).cornerRadius(8)
+          Color.gray.frame(width: 100, height: 100).clipShape(.rect(cornerRadius: 8))
         }
 
         VStack(alignment: .leading, spacing: 4) {
@@ -535,7 +535,7 @@ struct EpisodeListView: View {
           .padding(.horizontal, 6)
           .padding(.vertical, 2)
           .background(Color.gray.opacity(0.15))
-          .cornerRadius(4)
+          .clipShape(.rect(cornerRadius: 4))
 
           // Subscribe button
           Button(action: subscribe) {
@@ -549,7 +549,7 @@ struct EpisodeListView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(isSubscribed ? Color.green : Color.blue)
-            .cornerRadius(16)
+            .clipShape(.rect(cornerRadius: 16))
           }
           .buttonStyle(.plain)
           .disabled(isSubscribed)
@@ -634,7 +634,7 @@ struct EpisodeListView: View {
             .padding(.vertical, 6)
             .background(Color.gray.opacity(0.15))
             .foregroundStyle(.primary)
-            .cornerRadius(16)
+            .clipShape(.rect(cornerRadius: 16))
           }
           .buttonStyle(.plain)
         }
@@ -668,7 +668,7 @@ struct FilterChip: View {
       .padding(.vertical, 6)
       .background(isSelected ? Color.blue : Color.gray.opacity(0.15))
       .foregroundStyle(isSelected ? .white : .primary)
-      .cornerRadius(16)
+      .clipShape(.rect(cornerRadius: 16))
     }
     .buttonStyle(.plain)
   }

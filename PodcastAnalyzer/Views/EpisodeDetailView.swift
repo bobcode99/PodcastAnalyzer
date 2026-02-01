@@ -295,10 +295,10 @@ struct EpisodeDetailView: View {
                         Color.gray.overlay(ProgressView())
                     }
                     .frame(width: 80, height: 80)
-                    .cornerRadius(10)
+                    .clipShape(.rect(cornerRadius: 10))
                     .shadow(radius: 2)
                 } else {
-                    Color.gray.frame(width: 80, height: 80).cornerRadius(10)
+                    Color.gray.frame(width: 80, height: 80).clipShape(.rect(cornerRadius: 10))
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -664,7 +664,7 @@ struct EpisodeDetailView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(Color.platformSystemGray6)
-            .cornerRadius(10)
+            .clipShape(.rect(cornerRadius: 10))
 
             // Translate button with circular progress - shows language picker
             Button {
@@ -876,7 +876,7 @@ struct EpisodeDetailView: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.gray.opacity(0.1))
-        .cornerRadius(12)
+        .clipShape(.rect(cornerRadius: 12))
         .padding(.horizontal)
     }
 

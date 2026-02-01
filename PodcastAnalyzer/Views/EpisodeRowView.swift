@@ -227,7 +227,7 @@ struct EpisodeRowView: View {
         .foregroundStyle(.white)
         .padding(4)
         .background(Color.blue)
-        .cornerRadius(4)
+        .clipShape(.rect(cornerRadius: 4))
         .padding(4)
       }
     }

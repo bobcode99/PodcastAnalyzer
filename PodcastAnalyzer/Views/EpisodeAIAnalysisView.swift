@@ -328,7 +328,7 @@ struct EpisodeAIAnalysisView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color.platformSystemGray6)
-        .cornerRadius(10)
+        .clipShape(.rect(cornerRadius: 10))
 
         Button(action: submitQuestion) {
           Image(systemName: "paperplane.fill")
@@ -398,7 +398,7 @@ struct EpisodeAIAnalysisView: View {
       .padding()
       .background(canAnalyze ? Color.blue : Color.gray)
       .foregroundStyle(.white)
-      .cornerRadius(12)
+      .clipShape(.rect(cornerRadius: 12))
     }
     .disabled(!canAnalyze)
   }
@@ -423,7 +423,7 @@ struct EpisodeAIAnalysisView: View {
         }
         .padding(10)
         .background(Color.orange.opacity(0.1))
-        .cornerRadius(8)
+        .clipShape(.rect(cornerRadius: 8))
       }
 
       // Structured content based on type
@@ -471,7 +471,7 @@ struct EpisodeAIAnalysisView: View {
     }
     .padding()
     .background(Color.platformSystemGray6)
-    .cornerRadius(12)
+    .clipShape(.rect(cornerRadius: 12))
   }
 
   // MARK: - Structured Result Views
@@ -501,7 +501,7 @@ struct EpisodeAIAnalysisView: View {
                   .padding(.vertical, 6)
                   .background(Color.blue.opacity(0.1))
                   .foregroundStyle(.blue)
-                  .cornerRadius(16)
+                  .clipShape(.rect(cornerRadius: 16))
               }
             }
           }
@@ -602,7 +602,7 @@ struct EpisodeAIAnalysisView: View {
               .padding(.vertical, 6)
               .background(color.opacity(0.1))
               .foregroundStyle(color)
-              .cornerRadius(16)
+              .clipShape(.rect(cornerRadius: 16))
           }
         }
       }
@@ -772,7 +772,7 @@ struct EpisodeAIAnalysisView: View {
               }
               .padding()
               .background(Color.purple.opacity(0.05))
-              .cornerRadius(8)
+              .clipShape(.rect(cornerRadius: 8))
             }
           }
         }
@@ -853,7 +853,7 @@ struct EpisodeAIAnalysisView: View {
           selectableText(parsed.conclusion)
             .padding()
             .background(Color.indigo.opacity(0.1))
-            .cornerRadius(8)
+            .clipShape(.rect(cornerRadius: 8))
         }
       }
     } else {
@@ -986,7 +986,7 @@ struct EpisodeAIAnalysisView: View {
         }
         .padding(8)
         .background(Color.orange.opacity(0.1))
-        .cornerRadius(6)
+        .clipShape(.rect(cornerRadius: 6))
       }
 
       // Question with enhanced styling
@@ -1070,7 +1070,7 @@ struct EpisodeAIAnalysisView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(confidenceColor(result.confidence).opacity(0.1))
-        .cornerRadius(16)
+        .clipShape(.rect(cornerRadius: 16))
       }
 
       // Related topics as chips
@@ -1088,7 +1088,7 @@ struct EpisodeAIAnalysisView: View {
                 .padding(.vertical, 4)
                 .background(Color.purple.opacity(0.1))
                 .foregroundStyle(.purple)
-                .cornerRadius(12)
+                .clipShape(.rect(cornerRadius: 12))
             }
           }
         }
@@ -1109,7 +1109,7 @@ struct EpisodeAIAnalysisView: View {
               .padding(8)
               .frame(maxWidth: .infinity, alignment: .leading)
               .background(Color.platformSystemGray5)
-              .cornerRadius(6)
+              .clipShape(.rect(cornerRadius: 6))
           }
         }
       }
@@ -1132,7 +1132,7 @@ struct EpisodeAIAnalysisView: View {
     }
     .padding()
     .background(Color.platformSystemGray6)
-    .cornerRadius(12)
+    .clipShape(.rect(cornerRadius: 12))
   }
 
   /// Get icon for confidence level
@@ -1189,7 +1189,7 @@ struct EpisodeAIAnalysisView: View {
         }
         .padding()
         .background(Color.blue.opacity(0.05))
-        .cornerRadius(12)
+        .clipShape(.rect(cornerRadius: 12))
 
       case .completed:
         EmptyView()
@@ -1204,7 +1204,7 @@ struct EpisodeAIAnalysisView: View {
         }
         .padding()
         .background(Color.red.opacity(0.1))
-        .cornerRadius(8)
+        .clipShape(.rect(cornerRadius: 8))
       }
     }
   }

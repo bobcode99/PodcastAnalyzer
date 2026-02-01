@@ -504,7 +504,7 @@ struct AddFeedView: View {
             .textFieldStyle(.plain)
             .padding(16)
             .background(Color.platformSystemGray6)
-            .cornerRadius(12)
+            .clipShape(.rect(cornerRadius: 12))
             .autocorrectionDisabled()
             #if os(iOS)
             .textInputAutocapitalization(.never)

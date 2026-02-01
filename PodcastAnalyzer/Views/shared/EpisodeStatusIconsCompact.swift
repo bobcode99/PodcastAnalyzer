@@ -67,7 +67,7 @@ struct EpisodeStatusIconsCompact: View {
       }
       .padding(4)
       .background(.ultraThinMaterial)
-      .cornerRadius(6)
+      .clipShape(.rect(cornerRadius: 6))
       .padding(4)
     }
   }

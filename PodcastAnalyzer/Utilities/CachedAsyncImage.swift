@@ -331,7 +331,7 @@ struct CachedArtworkImage: View {
         )
     }
     .frame(width: size, height: size)
-    .cornerRadius(cornerRadius)
+    .clipShape(.rect(cornerRadius: cornerRadius))
     .clipped()
   }
 }

@@ -841,7 +841,7 @@ struct SpeedPickerOverlay: View {
           .padding(.horizontal, 20)
           .padding(.vertical, 8)
           .background(Color.blue)
-          .cornerRadius(20)
+          .clipShape(.rect(cornerRadius: 20))
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 16)
@@ -970,7 +970,7 @@ struct TranscriptFullScreenView: View {
           Color.gray.opacity(0.3)
         }
         .frame(width: 44, height: 44)
-        .cornerRadius(6)
+        .clipShape(.rect(cornerRadius: 6))
       }
 
       // Episode info
@@ -1009,7 +1009,7 @@ struct TranscriptFullScreenView: View {
     }
     .padding(12)
     .background(Color.platformSystemGray6)
-    .cornerRadius(12)
+    .clipShape(.rect(cornerRadius: 12))
   }
 }
 

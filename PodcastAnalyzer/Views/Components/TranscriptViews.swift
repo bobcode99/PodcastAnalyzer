@@ -505,7 +505,7 @@ struct TranscriptPreviewView: View {
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
                     .background(Color.blue.opacity(0.1))
-                    .cornerRadius(12)
+                    .clipShape(.rect(cornerRadius: 12))
                     .padding(.horizontal, 16)
             }
 
@@ -542,7 +542,7 @@ struct TranscriptPreviewView: View {
                 }
             }
             .background(Color.platformSystemGray6)
-            .cornerRadius(12)
+            .clipShape(.rect(cornerRadius: 12))
             .padding(.horizontal, 16)
         }
     }
@@ -636,7 +636,7 @@ struct FullTranscriptContent: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(Color.platformSystemGray6)
-            .cornerRadius(10)
+            .clipShape(.rect(cornerRadius: 10))
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
 

@@ -98,7 +98,7 @@ struct PodcastSearchView: View {
         }
         .padding(4)
         .background(Color.platformSystemGray6)
-        .cornerRadius(10)
+        .clipShape(.rect(cornerRadius: 10))
     }
 
     // MARK: - Empty Search View
