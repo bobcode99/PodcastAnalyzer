@@ -869,20 +869,20 @@ struct MacSearchView: View {
   }
 
   private func filterLibraryPodcasts() -> [PodcastInfoModel] {
-    let query = searchText.lowercased()
+    let query = searchText
     return subscribedPodcasts.filter { podcast in
-      podcast.podcastInfo.title.lowercased().contains(query)
+      podcast.podcastInfo.title.localizedStandardContains(query)
     }
   }
 
   private func filterLibraryEpisodes() -> [(uniqueId: String, episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] {
-    let query = searchText.lowercased()
+    let query = searchText
     var results: [(uniqueId: String, episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
 
     for podcast in subscribedPodcasts {
       let matchingEpisodes = podcast.podcastInfo.episodes.filter { episode in
-        episode.title.lowercased().contains(query) ||
-        (episode.podcastEpisodeDescription?.lowercased().contains(query) ?? false)
+        episode.title.localizedStandardContains(query) ||
+        (episode.podcastEpisodeDescription?.localizedStandardContains(query) ?? false)
       }
 
       for episode in matchingEpisodes {

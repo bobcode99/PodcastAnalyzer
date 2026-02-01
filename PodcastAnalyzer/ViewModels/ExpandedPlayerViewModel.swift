@@ -58,7 +58,7 @@ final class ExpandedPlayerViewModel {
   private let subtitleSettings = SubtitleSettingsManager.shared
 
   @ObservationIgnored
-  private var updateTimer: Timer?
+  private var updateTask: Task<Void, Never>?
 
   @ObservationIgnored
   private let applePodcastService = ApplePodcastService()
@@ -88,9 +88,10 @@ final class ExpandedPlayerViewModel {
   }
 
   private func setupUpdateTimer() {
-    updateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-      guard let self else { return }
-      Task { @MainActor in
+    updateTask = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(500))
+        guard let self, !Task.isCancelled else { return }
         self.updateState()
       }
     }
@@ -451,9 +452,9 @@ final class ExpandedPlayerViewModel {
     guard !transcriptSearchQuery.isEmpty else {
       return transcriptSegments
     }
-    let query = transcriptSearchQuery.lowercased()
+    let query = transcriptSearchQuery
     return transcriptSegments.filter { segment in
-      segment.text.lowercased().contains(query)
+      segment.text.localizedStandardContains(query)
     }
   }
 
@@ -617,7 +618,7 @@ final class ExpandedPlayerViewModel {
 
   /// Clean up resources. Call this from onDisappear.
   func cleanup() {
-    updateTimer?.invalidate()
-    updateTimer = nil
+    updateTask?.cancel()
+    updateTask = nil
   }
 }

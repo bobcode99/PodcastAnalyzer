@@ -354,22 +354,24 @@ class BackgroundSyncManager {
   // MARK: - Foreground Timer (Optional: for when app is active)
 
   @ObservationIgnored
-  private var foregroundTimer: Timer?
+  private var foregroundSyncTask: Task<Void, Never>?
 
   func startForegroundSync() {
     guard isBackgroundSyncEnabled else { return }
 
     stopForegroundSync()
-    foregroundTimer = Timer.scheduledTimer(withTimeInterval: 4 * 60 * 60, repeats: true) { [weak self] _ in
-      Task { @MainActor in
-        await self?.syncNow()
+    foregroundSyncTask = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(4 * 60 * 60))
+        guard let self, !Task.isCancelled else { return }
+        await self.syncNow()
       }
     }
     logger.info("Foreground sync timer started (4 hour interval)")
   }
 
   func stopForegroundSync() {
-    foregroundTimer?.invalidate()
-    foregroundTimer = nil
+    foregroundSyncTask?.cancel()
+    foregroundSyncTask = nil
   }
 }

@@ -491,6 +491,21 @@ struct EpisodeListView: View {
     }
   }
 
+  @ViewBuilder
+  private func descriptionView(for viewModel: EpisodeListViewModel) -> some View {
+    switch viewModel.descriptionContent {
+    case .loading:
+      EmptyView()
+    case .empty:
+      Text("No description available.")
+        .foregroundStyle(.secondary)
+        .font(.caption)
+    case .parsed(let attributedString):
+      HTMLTextView(attributedString: attributedString)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
   // MARK: - Header Section
 
   @ViewBuilder
@@ -557,7 +572,7 @@ struct EpisodeListView: View {
 
           if viewModel.podcastInfo.podcastInfoDescription != nil {
             VStack(alignment: .leading, spacing: 2) {
-              viewModel.descriptionView
+              descriptionView(for: viewModel)
                 .lineLimit(
                   viewModel.isDescriptionExpanded ? nil : 3
                 )

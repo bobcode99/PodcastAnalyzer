@@ -33,15 +33,21 @@ final class EpisodeListViewModel {
   var isRefreshing: Bool = false
   var isDescriptionExpanded: Bool = false
 
-  // HTML-rendered description view
-  var descriptionView: AnyView = AnyView(EmptyView())
+  enum DescriptionContent {
+    case loading
+    case empty
+    case parsed(NSAttributedString)
+  }
+
+  // HTML-rendered description content
+  var descriptionContent: DescriptionContent = .loading
 
   // MARK: - Dependencies
   private let podcastModel: PodcastInfoModel
   private let downloadManager = DownloadManager.shared
   private let rssService = PodcastRssService()
   private var modelContext: ModelContext?
-  private var refreshTimer: Timer?
+  private var refreshTask: Task<Void, Never>?
   private var downloadCompletionObserver: NSObjectProtocol?
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
@@ -58,10 +64,10 @@ final class EpisodeListViewModel {
 
     // Apply search filter first
     if !searchText.isEmpty {
-      let query = searchText.lowercased()
+      let query = searchText
       episodes = episodes.filter { episode in
-        episode.title.lowercased().contains(query)
-          || (episode.podcastEpisodeDescription?.lowercased().contains(query) ?? false)
+        episode.title.localizedStandardContains(query)
+          || (episode.podcastEpisodeDescription?.localizedStandardContains(query) ?? false)
       }
     }
 
@@ -211,11 +217,7 @@ final class EpisodeListViewModel {
     let html = podcastModel.podcastInfo.podcastInfoDescription ?? ""
 
     guard !html.isEmpty else {
-      descriptionView = AnyView(
-        Text("No description available.")
-          .foregroundStyle(.secondary)
-          .font(.caption)
-      )
+      descriptionContent = .empty
       return
     }
 
@@ -238,10 +240,7 @@ final class EpisodeListViewModel {
       let attributedString = parser.render(html)
 
       await MainActor.run {
-        self.descriptionView = AnyView(
-          HTMLTextView(attributedString: attributedString)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        )
+        self.descriptionContent = .parsed(attributedString)
       }
     }
   }
@@ -253,17 +252,18 @@ final class EpisodeListViewModel {
     stopRefreshTimer()
 
     // Refresh every 5 seconds instead of 2 to reduce CPU usage
-    refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-      guard let self else { return }
-      Task { @MainActor in
+    refreshTask = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(5))
+        guard let self, !Task.isCancelled else { return }
         self.loadEpisodeModels()
       }
     }
   }
 
   func stopRefreshTimer() {
-    refreshTimer?.invalidate()
-    refreshTimer = nil
+    refreshTask?.cancel()
+    refreshTask = nil
   }
 
   // MARK: - Episode Key Helper

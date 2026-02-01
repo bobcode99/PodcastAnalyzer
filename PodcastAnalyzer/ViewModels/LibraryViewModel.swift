@@ -87,28 +87,28 @@ final class LibraryViewModel {
   // Filtered arrays based on search text
   var filteredSavedEpisodes: [LibraryEpisode] {
     guard !savedSearchText.isEmpty else { return savedEpisodes }
-    let query = savedSearchText.lowercased()
+    let query = savedSearchText
     return savedEpisodes.filter {
-      $0.episodeInfo.title.lowercased().contains(query) ||
-      $0.podcastTitle.lowercased().contains(query)
+      $0.episodeInfo.title.localizedStandardContains(query) ||
+      $0.podcastTitle.localizedStandardContains(query)
     }
   }
 
   var filteredDownloadedEpisodes: [LibraryEpisode] {
     guard !downloadedSearchText.isEmpty else { return downloadedEpisodes }
-    let query = downloadedSearchText.lowercased()
+    let query = downloadedSearchText
     return downloadedEpisodes.filter {
-      $0.episodeInfo.title.lowercased().contains(query) ||
-      $0.podcastTitle.lowercased().contains(query)
+      $0.episodeInfo.title.localizedStandardContains(query) ||
+      $0.podcastTitle.localizedStandardContains(query)
     }
   }
 
   var filteredLatestEpisodes: [LibraryEpisode] {
     guard !latestSearchText.isEmpty else { return latestEpisodes }
-    let query = latestSearchText.lowercased()
+    let query = latestSearchText
     return latestEpisodes.filter {
-      $0.episodeInfo.title.lowercased().contains(query) ||
-      $0.podcastTitle.lowercased().contains(query)
+      $0.episodeInfo.title.localizedStandardContains(query) ||
+      $0.podcastTitle.localizedStandardContains(query)
     }
   }
 
@@ -144,7 +144,7 @@ final class LibraryViewModel {
   private var podcastTitleMap: [String: PodcastInfoModel] = [:]
 
   private var syncCompletionObserver: NSObjectProtocol?
-  private var downloadingPollTimer: Timer?
+  private var downloadingPollTask: Task<Void, Never>?
 
   init(modelContext: ModelContext?) {
     self.modelContext = modelContext
@@ -181,16 +181,18 @@ final class LibraryViewModel {
 
   private func startDownloadingPollTimer() {
     stopDownloadingPollTimer()
-    downloadingPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-      Task { @MainActor in
-        self?.updateDownloadingEpisodes()
+    downloadingPollTask = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(500))
+        guard let self, !Task.isCancelled else { return }
+        self.updateDownloadingEpisodes()
       }
     }
   }
 
   private func stopDownloadingPollTimer() {
-    downloadingPollTimer?.invalidate()
-    downloadingPollTimer = nil
+    downloadingPollTask?.cancel()
+    downloadingPollTask = nil
   }
 
   /// Update the list of currently downloading episodes from DownloadManager
@@ -393,7 +395,7 @@ final class LibraryViewModel {
       setupSyncCompletionObserver()
     }
     // Restart timer if it was stopped
-    if downloadingPollTimer == nil {
+    if downloadingPollTask == nil {
       startDownloadingPollTimer()
     }
   }

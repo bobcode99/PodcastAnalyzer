@@ -77,9 +77,13 @@ struct TranscriptSegment: Identifiable, Equatable {
 @Observable
 final class EpisodeDetailViewModel {
 
-  var descriptionView: AnyView = AnyView(
-    Text("Loading...").foregroundStyle(.secondary)
-  )
+  enum DescriptionContent {
+    case loading
+    case empty
+    case parsed(NSAttributedString)
+  }
+
+  var descriptionContent: DescriptionContent = .loading
 
   @ObservationIgnored
   let episode: PodcastEpisodeInfo
@@ -531,11 +535,7 @@ final class EpisodeDetailViewModel {
     let html = episode.podcastEpisodeDescription ?? ""
 
     guard !html.isEmpty else {
-      descriptionView = AnyView(
-        Text("No description available.")
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      )
+      descriptionContent = .empty
       return
     }
 
@@ -558,11 +558,7 @@ final class EpisodeDetailViewModel {
       let attributedString = parser.render(html)
 
       await MainActor.run {
-        self.descriptionView = AnyView(
-          HTMLTextView(attributedString: attributedString)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
-        )
+        self.descriptionContent = .parsed(attributedString)
       }
     }
   }
@@ -1542,15 +1538,15 @@ final class EpisodeDetailViewModel {
       return transcriptSegments
     }
 
-    let query = transcriptSearchQuery.lowercased()
+    let query = transcriptSearchQuery
     return transcriptSegments.filter { segment in
       // Search in original text
-      if segment.text.lowercased().contains(query) {
+      if segment.text.localizedStandardContains(query) {
         return true
       }
       // Also search in translated text if available
       if let translatedText = segment.translatedText,
-         translatedText.lowercased().contains(query) {
+         translatedText.localizedStandardContains(query) {
         return true
       }
       return false

@@ -387,6 +387,22 @@ struct EpisodeDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private var descriptionView: some View {
+        switch viewModel.descriptionContent {
+        case .loading:
+            Text("Loading...").foregroundStyle(.secondary)
+        case .empty:
+            Text("No description available.")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .parsed(let attributedString):
+            HTMLTextView(attributedString: attributedString)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+        }
+    }
+
     // MARK: - Summary Content (no ScrollView - parent provides scrolling)
     private var summaryContent: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -402,7 +418,7 @@ struct EpisodeDetailView: View {
 
                     // Original description (collapsed by default)
                     DisclosureGroup("Original") {
-                        viewModel.descriptionView
+                        descriptionView
                             .textSelection(.enabled)
                     }
                     .foregroundStyle(.secondary)
@@ -410,7 +426,7 @@ struct EpisodeDetailView: View {
                 .padding(.horizontal)
             } else {
                 // Original description only
-                viewModel.descriptionView
+                descriptionView
                     .textSelection(.enabled)
                     .padding(.horizontal)
             }

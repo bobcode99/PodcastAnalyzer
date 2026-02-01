@@ -26,25 +26,27 @@ struct TranslationLanguagePickerSheet: View {
             List {
                 // Currently selected default language section
                 Section {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Default Language")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Text(settings.targetLanguage.displayName)
-                                .font(.headline)
-                        }
-
-                        Spacer()
-
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.blue)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
+                    Button {
                         onSelectLanguage(settings.targetLanguage)
                         dismiss()
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Default Language")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Text(settings.targetLanguage.displayName)
+                                    .font(.headline)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.blue)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 } header: {
                     Text("Quick Translate")
                 } footer: {

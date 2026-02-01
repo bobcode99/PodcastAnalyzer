@@ -427,7 +427,7 @@ struct WordHighlightedText: View {
                 wordAttr.font = .system(size: 17, weight: .regular)
             }
 
-            if !searchQuery.isEmpty && timing.word.lowercased().contains(searchQuery.lowercased()) {
+            if !searchQuery.isEmpty && timing.word.localizedStandardContains(searchQuery) {
                 wordAttr.backgroundColor = .yellow.opacity(0.4)
             }
 
