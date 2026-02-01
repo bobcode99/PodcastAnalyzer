@@ -110,7 +110,7 @@ struct TranscriptGenerationView: View {
             .font(.headline)
           Text("\(Int(progress * 100))%")
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         }
 
       case .transcribing(let progress):
@@ -122,7 +122,7 @@ struct TranscriptGenerationView: View {
           if progress > 0 {
             Text("Processing audio...")
               .font(.caption)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
         }
 
@@ -130,12 +130,12 @@ struct TranscriptGenerationView: View {
         VStack(spacing: 12) {
           Image(systemName: "checkmark.circle.fill")
             .font(.system(size: 50))
-            .foregroundColor(.green)
+            .foregroundStyle(.green)
           Text("Transcript Generated")
             .font(.headline)
           Text("Saved to Files app")
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
           Button(action: { viewModel.regenerateTranscript() }) {
             Label("Regenerate", systemImage: "arrow.clockwise")
           }
@@ -146,12 +146,12 @@ struct TranscriptGenerationView: View {
         VStack(spacing: 12) {
           Image(systemName: "exclamationmark.triangle.fill")
             .font(.system(size: 50))
-            .foregroundColor(.red)
+            .foregroundStyle(.red)
           Text("Error")
             .font(.headline)
           Text(message)
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
           Button(action: { viewModel.generateTranscript() }) {
             Label("Retry", systemImage: "arrow.clockwise")
@@ -171,7 +171,7 @@ struct TranscriptGenerationView: View {
     VStack(spacing: 12) {
       Image(systemName: "waveform")
         .font(.system(size: 50))
-        .foregroundColor(.blue)
+        .foregroundStyle(.blue)
 
       Text("Ready to Generate Transcript")
         .font(.headline)
@@ -179,7 +179,7 @@ struct TranscriptGenerationView: View {
       if !viewModel.isModelReady {
         Text("Speech recognition model will be downloaded on first use")
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)
       }
 

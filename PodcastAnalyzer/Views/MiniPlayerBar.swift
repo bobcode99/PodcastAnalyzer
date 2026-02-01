@@ -77,7 +77,7 @@ struct MiniPlayerBar: View {
           } else {
             RoundedRectangle(cornerRadius: 8)
               .fill(Color.gray.opacity(0.3))
-              .overlay(Image(systemName: "music.note").foregroundColor(.secondary))
+              .overlay(Image(systemName: "music.note").foregroundStyle(.secondary))
           }
         }
         .frame(width: 48, height: 48)
@@ -92,7 +92,7 @@ struct MiniPlayerBar: View {
 
           Text(audioManager.currentEpisode?.podcastTitle ?? "Select an episode to play")
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .lineLimit(1)
         }
 
@@ -105,7 +105,7 @@ struct MiniPlayerBar: View {
           Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
             .font(.title2)
             .frame(width: 32)
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
         }
 
       }

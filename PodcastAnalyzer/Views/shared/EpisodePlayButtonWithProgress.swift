@@ -109,7 +109,7 @@ struct EpisodePlayButtonWithProgress: View {
             .fontWeight(.medium)
         }
       }
-      .foregroundColor(.white)
+      .foregroundStyle(.white)
       .padding(.horizontal, 8)
       .padding(.vertical, 5)
       .background(Color.blue)

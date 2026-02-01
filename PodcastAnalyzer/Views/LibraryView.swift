@@ -156,11 +156,11 @@ struct LibraryView: View {
           HStack(spacing: 8) {
             Image(systemName: "clock.fill")
               .font(.system(size: 16))
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
             Text("Latest Episodes")
               .font(.subheadline)
               .fontWeight(.medium)
-              .foregroundColor(.primary)
+              .foregroundStyle(.primary)
           }
 
           Spacer()
@@ -168,10 +168,10 @@ struct LibraryView: View {
           HStack(spacing: 4) {
              Text("\(viewModel.latestEpisodes.count)")
                .font(.caption)
-               .foregroundColor(.secondary)
+               .foregroundStyle(.secondary)
              Image(systemName: "chevron.right")
                .font(.caption)
-               .foregroundColor(.secondary)
+               .foregroundStyle(.secondary)
           }
         }
         .padding(.horizontal, 16)
@@ -242,7 +242,7 @@ struct LibraryView: View {
 
           Text("\(sortedPodcasts.count)")
             .font(.subheadline)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
       }
 
       if sortedPodcasts.isEmpty {
@@ -324,12 +324,12 @@ struct LibraryView: View {
     VStack(spacing: 12) {
       Image(systemName: "square.stack.3d.up")
         .font(.system(size: 40))
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       Text("No Subscriptions")
         .font(.headline)
       Text("Search and subscribe to podcasts to build your library")
         .font(.caption)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
     }
     .frame(maxWidth: .infinity)
@@ -351,7 +351,7 @@ struct QuickAccessCard: View {
       HStack {
         Image(systemName: icon)
           .font(.system(size: 20))
-          .foregroundColor(iconColor)
+          .foregroundStyle(iconColor)
 
         Spacer()
 
@@ -361,7 +361,7 @@ struct QuickAccessCard: View {
         } else {
           Image(systemName: "chevron.right")
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         }
       }
 
@@ -371,11 +371,11 @@ struct QuickAccessCard: View {
         Text(title)
           .font(.subheadline)
           .fontWeight(.semibold)
-          .foregroundColor(.primary)
+          .foregroundStyle(.primary)
 
         Text("\(count) episodes")
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
     }
     .padding(12)
@@ -416,13 +416,13 @@ struct PodcastGridCell: View {
         .font(.caption)
         .fontWeight(.medium)
         .lineLimit(2)
-        .foregroundColor(.primary)
+        .foregroundStyle(.primary)
 
       // Latest episode date
       if let dateStr = latestEpisodeDate {
         Text(dateStr)
           .font(.caption2)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
     }
   }
@@ -497,12 +497,12 @@ struct SavedEpisodesView: View {
     VStack(spacing: 16) {
       Image(systemName: "star")
         .font(.system(size: 50))
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       Text("No Saved Episodes")
         .font(.headline)
       Text("Star episodes to save them here for later")
         .font(.subheadline)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
     }
     .padding()
@@ -591,7 +591,7 @@ struct DownloadedEpisodesView: View {
               Text("Downloading")
                 .font(.subheadline)
                 .fontWeight(.semibold)
-                .foregroundColor(.primary)
+                .foregroundStyle(.primary)
                 .textCase(nil)
             }
           }
@@ -619,7 +619,7 @@ struct DownloadedEpisodesView: View {
                 Text("Downloaded")
                   .font(.subheadline)
                   .fontWeight(.semibold)
-                  .foregroundColor(.primary)
+                  .foregroundStyle(.primary)
                   .textCase(nil)
               }
             }
@@ -665,12 +665,12 @@ struct DownloadedEpisodesView: View {
     VStack(spacing: 16) {
       Image(systemName: "arrow.down.circle")
         .font(.system(size: 50))
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       Text("No Downloads")
         .font(.headline)
       Text("Downloaded episodes will appear here for offline listening")
         .font(.subheadline)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
     }
     .padding()
@@ -759,7 +759,7 @@ struct DownloadingEpisodeRow: View {
           .fill(Color.gray.opacity(0.2))
           .overlay(
             Image(systemName: "music.note")
-              .foregroundColor(.gray)
+              .foregroundStyle(.gray)
           )
       }
       .frame(width: 56, height: 56)
@@ -774,7 +774,7 @@ struct DownloadingEpisodeRow: View {
 
         Text(episode.podcastTitle)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .lineLimit(1)
 
         // Progress bar
@@ -796,7 +796,7 @@ struct DownloadingEpisodeRow: View {
       // Status
       Text(statusText)
         .font(.caption)
-        .foregroundColor(.blue)
+        .foregroundStyle(.blue)
         .fontWeight(.medium)
     }
     .padding(.vertical, 4)
@@ -869,12 +869,12 @@ struct LatestEpisodesView: View {
     VStack(spacing: 16) {
       Image(systemName: "clock")
         .font(.system(size: 50))
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       Text("No Episodes")
         .font(.headline)
       Text("Subscribe to podcasts to see latest episodes")
         .font(.subheadline)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
     }
     .padding()

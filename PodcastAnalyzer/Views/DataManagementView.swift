@@ -36,7 +36,7 @@ struct DataManagementView: View {
         }) {
           HStack {
             Image(systemName: "photo.on.rectangle")
-              .foregroundColor(.orange)
+              .foregroundStyle(.orange)
               .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
               Text("Image Cache")
@@ -46,7 +46,7 @@ struct DataManagementView: View {
               } else {
                 Text(imageCacheSize)
                   .font(.caption)
-                  .foregroundColor(.secondary)
+                  .foregroundStyle(.secondary)
               }
             }
             Spacer()
@@ -56,7 +56,7 @@ struct DataManagementView: View {
             } else {
               Text("Clear")
                 .font(.subheadline)
-                .foregroundColor(.blue)
+                .foregroundStyle(.blue)
             }
           }
         }
@@ -69,7 +69,7 @@ struct DataManagementView: View {
         }) {
           HStack {
             Image(systemName: "arrow.down.circle.fill")
-              .foregroundColor(.green)
+              .foregroundStyle(.green)
               .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
               Text("Downloaded Episodes")
@@ -79,7 +79,7 @@ struct DataManagementView: View {
               } else {
                 Text(downloadedAudioSize)
                   .font(.caption)
-                  .foregroundColor(.secondary)
+                  .foregroundStyle(.secondary)
               }
             }
             Spacer()
@@ -89,7 +89,7 @@ struct DataManagementView: View {
             } else {
               Text("Remove All")
                 .font(.subheadline)
-                .foregroundColor(.red)
+                .foregroundStyle(.red)
             }
           }
         }
@@ -102,7 +102,7 @@ struct DataManagementView: View {
         }) {
           HStack {
             Image(systemName: "text.bubble")
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
               .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
               Text("Transcripts")
@@ -112,7 +112,7 @@ struct DataManagementView: View {
               } else {
                 Text(transcriptsSize)
                   .font(.caption)
-                  .foregroundColor(.secondary)
+                  .foregroundStyle(.secondary)
               }
             }
             Spacer()
@@ -122,7 +122,7 @@ struct DataManagementView: View {
             } else {
               Text("Remove All")
                 .font(.subheadline)
-                .foregroundColor(.red)
+                .foregroundStyle(.red)
             }
           }
         }
@@ -135,7 +135,7 @@ struct DataManagementView: View {
         }) {
           HStack {
             Image(systemName: "sparkles")
-              .foregroundColor(.purple)
+              .foregroundStyle(.purple)
               .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
               Text("AI Analysis Data")
@@ -145,7 +145,7 @@ struct DataManagementView: View {
               } else {
                 Text("\(aiAnalysisCount) analyses")
                   .font(.caption)
-                  .foregroundColor(.secondary)
+                  .foregroundStyle(.secondary)
               }
             }
             Spacer()
@@ -155,7 +155,7 @@ struct DataManagementView: View {
             } else {
               Text("Remove All")
                 .font(.subheadline)
-                .foregroundColor(.red)
+                .foregroundStyle(.red)
             }
           }
         }
@@ -174,7 +174,7 @@ struct DataManagementView: View {
             Text("Total Storage Used")
             Spacer()
             Text(calculateTotalSize())
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
         }
       }

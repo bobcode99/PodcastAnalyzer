@@ -85,7 +85,7 @@ struct PodcastSearchView: View {
                     Text(tab.rawValue)
                         .font(.subheadline)
                         .fontWeight(selectedTab == tab ? .semibold : .regular)
-                        .foregroundColor(selectedTab == tab ? .primary : .secondary)
+                        .foregroundStyle(selectedTab == tab ? .primary : .secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .background(
@@ -108,15 +108,15 @@ struct PodcastSearchView: View {
             Spacer()
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 50))
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             Text("Search for podcasts")
                 .font(.title3)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             Text(selectedTab == .applePodcasts
                  ? "Find new podcasts to subscribe"
                  : "Search your subscribed podcasts and episodes")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
             Spacer()
@@ -137,7 +137,7 @@ struct PodcastSearchView: View {
                 VStack {
                     Spacer()
                     Text("No results found")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                 }
             } else {
@@ -175,7 +175,7 @@ struct PodcastSearchView: View {
                 VStack {
                     Spacer()
                     Text("No results in your library")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                 }
             } else {
@@ -284,11 +284,11 @@ struct ApplePodcastRow: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .lineLimit(1)
-                    .foregroundColor(.primary)
+                    .foregroundStyle(.primary)
 
                 Text("Show · \(podcast.artistName)")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
 
@@ -299,7 +299,7 @@ struct ApplePodcastRow: View {
                 Image(systemName: "checkmark")
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                    .foregroundColor(.green)
+                    .foregroundStyle(.green)
             } else if isSubscribing {
                 ProgressView()
                     .scaleEffect(0.8)
@@ -315,14 +315,14 @@ struct ApplePodcastRow: View {
                 }) {
                     Image(systemName: "plus")
                         .font(.title3)
-                        .foregroundColor(.blue)
+                        .foregroundStyle(.blue)
                 }
                 .buttonStyle(.plain)
             }
 
             Image(systemName: "chevron.right")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
@@ -350,7 +350,7 @@ struct LibraryPodcastRow: View {
 
                     Text("Show · \(podcastModel.podcastInfo.episodes.count) episodes")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
 
                 Spacer()
@@ -358,7 +358,7 @@ struct LibraryPodcastRow: View {
                 Image(systemName: "checkmark")
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                    .foregroundColor(.primary)
+                    .foregroundStyle(.primary)
             }
             .padding(.vertical, 4)
         }
@@ -400,7 +400,7 @@ struct LibraryEpisodeRow: View {
                         }
                     }
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
 
                     // Title
                     Text(episode.title)
@@ -418,7 +418,7 @@ struct LibraryEpisodeRow: View {
                     }) {
                         Image(systemName: "play.fill")
                             .font(.title3)
-                            .foregroundColor(.white)
+                            .foregroundStyle(.white)
                             .frame(width: 32, height: 32)
                             .background(Color.purple)
                             .clipShape(Circle())

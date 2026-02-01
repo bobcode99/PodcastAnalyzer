@@ -86,7 +86,7 @@ struct HomeView: View {
           NavigationLink(destination: UpNextListView(episodes: viewModel.upNextEpisodes)) {
             Text("See All")
               .font(.subheadline)
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
           }
         }
       }
@@ -96,13 +96,13 @@ struct HomeView: View {
         VStack(spacing: 8) {
           Image(systemName: "play.circle")
             .font(.system(size: 40))
-            .foregroundColor(.gray)
+            .foregroundStyle(.gray)
           Text("No unplayed episodes")
             .font(.subheadline)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
           Text("Subscribe to podcasts to see new episodes here")
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -159,10 +159,10 @@ struct HomeView: View {
         VStack(spacing: 8) {
           Image(systemName: "chart.line.uptrend.xyaxis")
             .font(.system(size: 40))
-            .foregroundColor(.gray)
+            .foregroundStyle(.gray)
           Text("Unable to load popular shows")
             .font(.subheadline)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
@@ -235,7 +235,7 @@ struct UpNextCard: View {
       // Podcast title
       Text(episode.podcastTitle)
         .font(.caption)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .lineLimit(1)
 
       // Episode title
@@ -414,7 +414,7 @@ struct TopPodcastRow: View {
         // Rank
         Text("\(rank)")
           .font(.headline)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .frame(width: 24)
 
         // Artwork - using CachedAsyncImage for better performance
@@ -426,17 +426,17 @@ struct TopPodcastRow: View {
             .font(.subheadline)
             .fontWeight(.medium)
             .lineLimit(1)
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
 
           Text(podcast.artistName)
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .lineLimit(1)
 
           if let genres = podcast.genres, let first = genres.first {
             Text(first.name)
               .font(.caption2)
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
           }
         }
 
@@ -444,7 +444,7 @@ struct TopPodcastRow: View {
 
         Image(systemName: "chevron.right")
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
       .padding(.vertical, 8)
     }
@@ -466,7 +466,7 @@ struct TopPodcastRow: View {
       // Subscribe
       if viewModel.isAlreadySubscribed(podcast) {
         Label("Already Subscribed", systemImage: "checkmark.circle.fill")
-          .foregroundColor(.green)
+          .foregroundStyle(.green)
       } else {
         Button {
           viewModel.subscribeToPodcast(podcast)
@@ -519,13 +519,13 @@ struct RegionPickerSheet: View {
               Text(region.flag)
                 .font(.title2)
               Text(region.name)
-                .foregroundColor(.primary)
+                .foregroundStyle(.primary)
 
               Spacer()
 
               if selectedRegion == region.code {
                 Image(systemName: "checkmark")
-                  .foregroundColor(.blue)
+                  .foregroundStyle(.blue)
               }
             }
           }
@@ -576,7 +576,7 @@ struct PodcastPreviewSheet: View {
 
             Text(podcast.artistName)
               .font(.subheadline)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
 
           // Genres
@@ -588,7 +588,7 @@ struct PodcastPreviewSheet: View {
                   .padding(.horizontal, 10)
                   .padding(.vertical, 4)
                   .background(Color.blue.opacity(0.15))
-                  .foregroundColor(.blue)
+                  .foregroundStyle(.blue)
                   .cornerRadius(12)
               }
             }
@@ -598,10 +598,10 @@ struct PodcastPreviewSheet: View {
           if viewModel.isAlreadySubscribed(podcast) {
             HStack {
               Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
+                .foregroundStyle(.green)
               Text("Already Subscribed")
                 .font(.headline)
-                .foregroundColor(.green)
+                .foregroundStyle(.green)
             }
             .frame(maxWidth: .infinity)
             .padding()
@@ -613,7 +613,7 @@ struct PodcastPreviewSheet: View {
           } else if viewModel.subscriptionError != nil {
             VStack(spacing: 8) {
               Text("Failed to subscribe")
-                .foregroundColor(.red)
+                .foregroundStyle(.red)
               Button("Try Again") {
                 viewModel.subscribeToPodcast(podcast)
               }
@@ -627,7 +627,7 @@ struct PodcastPreviewSheet: View {
                 .frame(maxWidth: .infinity)
                 .padding()
                 .background(Color.blue)
-                .foregroundColor(.white)
+                .foregroundStyle(.white)
                 .cornerRadius(12)
             }
             .padding(.horizontal)

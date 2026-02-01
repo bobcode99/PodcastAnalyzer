@@ -213,7 +213,7 @@ final class EpisodeListViewModel {
     guard !html.isEmpty else {
       descriptionView = AnyView(
         Text("No description available.")
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .font(.caption)
       )
       return

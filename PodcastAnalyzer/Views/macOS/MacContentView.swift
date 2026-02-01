@@ -166,7 +166,7 @@ struct MacContentView: View {
           Text("Your Podcasts")
         } icon: {
           Image(systemName: "square.stack")
-            .foregroundColor(.blue)
+            .foregroundStyle(.blue)
         }
         .tag(MacSidebarItem.libraryPodcasts)
         
@@ -174,7 +174,7 @@ struct MacContentView: View {
           Text("Saved")
         } icon: {
           Image(systemName: "star.fill")
-            .foregroundColor(.yellow)
+            .foregroundStyle(.yellow)
         }
         .tag(MacSidebarItem.librarySaved)
         
@@ -182,7 +182,7 @@ struct MacContentView: View {
           Text("Downloaded")
         } icon: {
           Image(systemName: "arrow.down.circle.fill")
-            .foregroundColor(.green)
+            .foregroundStyle(.green)
         }
         .tag(MacSidebarItem.libraryDownloaded)
         
@@ -190,7 +190,7 @@ struct MacContentView: View {
           Text("Latest Episodes")
         } icon: {
           Image(systemName: "clock.fill")
-            .foregroundColor(.blue)
+            .foregroundStyle(.blue)
         }
         .tag(MacSidebarItem.libraryLatest)
       }
@@ -287,7 +287,7 @@ struct MacHomeContentView: View {
             if !viewModel.upNextEpisodes.isEmpty {
               Button("See All") {}
                 .buttonStyle(.plain)
-                .foregroundColor(.accentColor)
+                .foregroundStyle(.accentColor)
             }
           }
 
@@ -388,7 +388,7 @@ struct MacUpNextCard: View {
 
       Text(episode.podcastTitle)
         .font(.caption)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .lineLimit(1)
 
       Text(episode.episodeInfo.title)
@@ -399,7 +399,7 @@ struct MacUpNextCard: View {
       if let duration = episode.episodeInfo.formattedDuration {
         Text(duration)
           .font(.caption2)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
     }
     .frame(width: 180)
@@ -415,7 +415,7 @@ struct MacTopPodcastRow: View {
     HStack(spacing: 12) {
       Text("\(rank)")
         .font(.headline)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .frame(width: 24)
 
       CachedArtworkImage(urlString: podcast.artworkUrl100, size: 50, cornerRadius: 8)
@@ -428,7 +428,7 @@ struct MacTopPodcastRow: View {
 
         Text(podcast.artistName)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .lineLimit(1)
       }
 
@@ -707,7 +707,7 @@ struct MacSearchView: View {
           Text(tab.rawValue)
             .font(.subheadline)
             .fontWeight(selectedTab == tab ? .semibold : .regular)
-            .foregroundColor(selectedTab == tab ? .primary : .secondary)
+            .foregroundStyle(selectedTab == tab ? .primary : .secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
             .background(
@@ -730,15 +730,15 @@ struct MacSearchView: View {
       Spacer()
       Image(systemName: "magnifyingglass")
         .font(.system(size: 50))
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       Text("Search for podcasts")
         .font(.title3)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       Text(selectedTab == .applePodcasts
            ? "Find new podcasts to subscribe"
            : "Search your subscribed podcasts and episodes")
         .font(.subheadline)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
         .padding(.horizontal, 40)
       Spacer()
@@ -759,7 +759,7 @@ struct MacSearchView: View {
         VStack {
           Spacer()
           Text("No results found")
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
           Spacer()
         }
       } else {
@@ -797,7 +797,7 @@ struct MacSearchView: View {
         VStack {
           Spacer()
           Text("No results in your library")
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
           Spacer()
         }
       } else {
@@ -920,11 +920,11 @@ struct MacApplePodcastRow: View {
           .font(.subheadline)
           .fontWeight(.medium)
           .lineLimit(1)
-          .foregroundColor(.primary)
+          .foregroundStyle(.primary)
 
         Text("Show · \(podcast.artistName)")
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .lineLimit(1)
       }
 
@@ -934,7 +934,7 @@ struct MacApplePodcastRow: View {
         Image(systemName: "checkmark")
           .font(.subheadline)
           .fontWeight(.semibold)
-          .foregroundColor(.green)
+          .foregroundStyle(.green)
       } else if isSubscribing {
         ProgressView()
           .scaleEffect(0.8)
@@ -950,14 +950,14 @@ struct MacApplePodcastRow: View {
         }) {
           Image(systemName: "plus")
             .font(.title3)
-            .foregroundColor(.blue)
+            .foregroundStyle(.blue)
         }
         .buttonStyle(.plain)
       }
 
       Image(systemName: "chevron.right")
         .font(.caption)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
     }
     .padding(.vertical, 4)
     .contentShape(Rectangle())
@@ -981,7 +981,7 @@ struct MacLibraryPodcastRow: View {
 
         Text("Show · \(podcastModel.podcastInfo.episodes.count) episodes")
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
 
       Spacer()
@@ -989,7 +989,7 @@ struct MacLibraryPodcastRow: View {
       Image(systemName: "checkmark")
         .font(.subheadline)
         .fontWeight(.semibold)
-        .foregroundColor(.primary)
+        .foregroundStyle(.primary)
     }
     .padding(.vertical, 4)
   }
@@ -1020,7 +1020,7 @@ struct MacLibraryEpisodeRow: View {
           }
         }
         .font(.caption2)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
 
         Text(episode.title)
           .font(.subheadline)
@@ -1036,7 +1036,7 @@ struct MacLibraryEpisodeRow: View {
         }) {
           Image(systemName: "play.fill")
             .font(.title3)
-            .foregroundColor(.white)
+            .foregroundStyle(.white)
             .frame(width: 32, height: 32)
             .background(Color.purple)
             .clipShape(Circle())

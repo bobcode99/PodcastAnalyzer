@@ -227,7 +227,7 @@ struct PodcastImportSheet: View {
 
             Text(importManager.importStatus)
               .font(.subheadline)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
 
             ProgressView()
               .scaleEffect(1.5)
@@ -239,7 +239,7 @@ struct PodcastImportSheet: View {
           VStack(spacing: 20) {
             Image(systemName: results.failed == 0 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
               .font(.system(size: 60))
-              .foregroundColor(results.failed == 0 ? .green : .orange)
+              .foregroundStyle(results.failed == 0 ? .green : .orange)
 
             Text("Import Complete")
               .font(.title2)
@@ -248,14 +248,14 @@ struct PodcastImportSheet: View {
             VStack(alignment: .leading, spacing: 8) {
               HStack {
                 Image(systemName: "checkmark.circle.fill")
-                  .foregroundColor(.green)
+                  .foregroundStyle(.green)
                 Text("\(results.successful) podcasts imported")
               }
 
               if results.skipped > 0 {
                 HStack {
                   Image(systemName: "arrow.right.circle.fill")
-                    .foregroundColor(.blue)
+                    .foregroundStyle(.blue)
                   Text("\(results.skipped) already subscribed")
                 }
               }
@@ -263,7 +263,7 @@ struct PodcastImportSheet: View {
               if results.failed > 0 {
                 HStack {
                   Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.red)
+                    .foregroundStyle(.red)
                   Text("\(results.failed) failed")
                 }
               }
@@ -274,19 +274,19 @@ struct PodcastImportSheet: View {
               VStack(alignment: .leading, spacing: 4) {
                 Text("Failed URLs:")
                   .font(.caption)
-                  .foregroundColor(.secondary)
+                  .foregroundStyle(.secondary)
 
                 ForEach(results.failedPodcasts.prefix(3), id: \.self) { url in
                   Text(url)
                     .font(.caption2)
-                    .foregroundColor(.red)
+                    .foregroundStyle(.red)
                     .lineLimit(1)
                 }
 
                 if results.failedPodcasts.count > 3 {
                   Text("... and \(results.failedPodcasts.count - 3) more")
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 }
               }
               .padding()
@@ -308,7 +308,7 @@ struct PodcastImportSheet: View {
               .scaleEffect(1.5)
             Text("Preparing import...")
               .font(.subheadline)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
         }
 

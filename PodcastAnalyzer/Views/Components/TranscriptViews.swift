@@ -272,7 +272,7 @@ struct SentenceView: View {
                     Text(sentence.formattedStartTime)
                         .font(.caption)
                         .fontWeight(.medium)
-                        .foregroundColor(isSentenceActive ? .blue : .secondary)
+                        .foregroundStyle(isSentenceActive ? .blue : .secondary)
                         .frame(width: 50, alignment: .leading)
                 }
 
@@ -287,7 +287,7 @@ struct SentenceView: View {
                        displayMode == .dualOriginalFirst || displayMode == .dualTranslatedFirst {
                         Text(translatedText)
                             .font(.system(size: 15, weight: .regular))
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                             .lineSpacing(3)
                     }
                 }
@@ -477,7 +477,7 @@ struct TranscriptPreviewView: View {
             HStack {
                 HStack(spacing: 6) {
                     Image(systemName: "captions.bubble.fill")
-                        .foregroundColor(.purple)
+                        .foregroundStyle(.purple)
                     Text("Transcript")
                         .font(.headline)
                 }
@@ -491,7 +491,7 @@ struct TranscriptPreviewView: View {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
                             .font(.caption)
                     }
-                    .foregroundColor(.blue)
+                    .foregroundStyle(.blue)
                 }
             }
             .padding(.horizontal, 20)
@@ -520,12 +520,12 @@ struct TranscriptPreviewView: View {
                         HStack(alignment: .top, spacing: 10) {
                             Text(sentence.formattedStartTime)
                                 .font(.caption)
-                                .foregroundColor(.blue)
+                                .foregroundStyle(.blue)
                                 .frame(width: 50, alignment: .leading)
 
                             Text(sentence.text)
                                 .font(.subheadline)
-                                .foregroundColor(sentence.id == currentSentence?.id ? .primary : .secondary)
+                                .foregroundStyle(sentence.id == currentSentence?.id ? .primary : .secondary)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -620,7 +620,7 @@ struct FullTranscriptContent: View {
             // Search bar
             HStack {
                 Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .font(.system(size: 14))
                 TextField("Search transcript...", text: $searchQuery)
                     .textFieldStyle(.plain)
@@ -628,7 +628,7 @@ struct FullTranscriptContent: View {
                 if !searchQuery.isEmpty {
                     Button(action: { searchQuery = "" }) {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                             .font(.system(size: 14))
                     }
                 }

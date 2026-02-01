@@ -78,7 +78,7 @@ struct TranscriptSegment: Identifiable, Equatable {
 final class EpisodeDetailViewModel {
 
   var descriptionView: AnyView = AnyView(
-    Text("Loading...").foregroundColor(.secondary)
+    Text("Loading...").foregroundStyle(.secondary)
   )
 
   @ObservationIgnored
@@ -533,7 +533,7 @@ final class EpisodeDetailViewModel {
     guard !html.isEmpty else {
       descriptionView = AnyView(
         Text("No description available.")
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, alignment: .leading)
       )
       return

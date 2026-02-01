@@ -208,14 +208,14 @@ struct EpisodeListView: View {
     VStack(spacing: 16) {
       Image(systemName: "exclamationmark.triangle")
         .font(.system(size: 50))
-        .foregroundColor(.orange)
+        .foregroundStyle(.orange)
 
       Text("Unable to load podcast")
         .font(.headline)
 
       Text(error)
         .font(.subheadline)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
         .padding(.horizontal)
 
@@ -377,7 +377,7 @@ struct EpisodeListView: View {
         Text("Episodes (\(viewModel.filteredEpisodeCount))")
           .font(.subheadline)
           .fontWeight(.semibold)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
     }
     .listStyle(.plain)
@@ -517,7 +517,7 @@ struct EpisodeListView: View {
           if !artistName.isEmpty {
             Text(artistName)
               .font(.subheadline)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
 
           // Language badge
@@ -531,7 +531,7 @@ struct EpisodeListView: View {
             )
             .font(.caption2)
           }
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .padding(.horizontal, 6)
           .padding(.vertical, 2)
           .background(Color.gray.opacity(0.15))
@@ -545,7 +545,7 @@ struct EpisodeListView: View {
             }
             .font(.subheadline)
             .fontWeight(.medium)
-            .foregroundColor(.white)
+            .foregroundStyle(.white)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(isSubscribed ? Color.green : Color.blue)
@@ -573,7 +573,7 @@ struct EpisodeListView: View {
                 )
                 .font(.caption)
                 .fontWeight(.medium)
-                .foregroundColor(.blue)
+                .foregroundStyle(.blue)
               }
               .buttonStyle(.plain)
             }
@@ -633,7 +633,7 @@ struct EpisodeListView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Color.gray.opacity(0.15))
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
             .cornerRadius(16)
           }
           .buttonStyle(.plain)
@@ -667,7 +667,7 @@ struct FilterChip: View {
       .padding(.horizontal, 12)
       .padding(.vertical, 6)
       .background(isSelected ? Color.blue : Color.gray.opacity(0.15))
-      .foregroundColor(isSelected ? .white : .primary)
+      .foregroundStyle(isSelected ? .white : .primary)
       .cornerRadius(16)
     }
     .buttonStyle(.plain)

@@ -75,7 +75,7 @@ struct EpisodeStatusIcons: View {
   private func statusIcon(_ name: String, color: Color) -> some View {
     Image(systemName: name)
       .font(.system(size: 10))
-      .foregroundColor(color)
+      .foregroundStyle(color)
   }
 
   private var downloadProgressView: some View {
@@ -88,7 +88,7 @@ struct EpisodeStatusIcons: View {
         .rotationEffect(.degrees(-90))
       Image(systemName: "arrow.down")
         .font(.system(size: 6, weight: .bold))
-        .foregroundColor(.blue)
+        .foregroundStyle(.blue)
     }
     .frame(width: 14, height: 14)
   }
@@ -100,7 +100,7 @@ struct EpisodeStatusIcons: View {
         .frame(width: 10, height: 10)
       Image(systemName: "text.bubble")
         .font(.system(size: 8, weight: .bold))
-        .foregroundColor(.purple)
+        .foregroundStyle(.purple)
     }
   }
 }

@@ -22,11 +22,11 @@ struct SubtitleSettingsSheet: View {
             } label: {
               HStack {
                 Label(mode.displayName, systemImage: mode.icon)
-                  .foregroundColor(.primary)
+                  .foregroundStyle(.primary)
                 Spacer()
                 if settings.displayMode == mode {
                   Image(systemName: "checkmark")
-                    .foregroundColor(.blue)
+                    .foregroundStyle(.blue)
                 }
               }
             }
@@ -51,7 +51,7 @@ struct SubtitleSettingsSheet: View {
         } footer: {
           if !settings.isTranslationAvailable {
             Text("Translation requires iOS 17.4 or later")
-              .foregroundColor(.orange)
+              .foregroundStyle(.orange)
           }
         }
 
@@ -71,13 +71,13 @@ struct SubtitleSettingsSheet: View {
               .font(.subheadline.bold())
             Text("Transcripts can come from:")
               .font(.caption)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
             Text("- RSS feed (podcast:transcript tag)")
               .font(.caption)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
             Text("- On-device speech recognition")
               .font(.caption)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
           .padding(.vertical, 4)
         } header: {

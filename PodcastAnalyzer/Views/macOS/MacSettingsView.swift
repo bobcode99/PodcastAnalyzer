@@ -72,7 +72,7 @@ struct GeneralSettingsTab: View {
           Text("Version")
           Spacer()
           Text("1.0.0")
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         }
       }
     }
@@ -122,7 +122,7 @@ struct SyncSettingsTab: View {
               Text("Last Sync")
               Spacer()
               Text(lastSync.formatted(date: .abbreviated, time: .shortened))
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             }
           }
 
@@ -230,12 +230,12 @@ struct TranscriptSettingsTab: View {
         ProgressView()
           .scaleEffect(0.7)
         Text("Checking...")
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
     case .notDownloaded:
       HStack(spacing: 8) {
         Text("Not installed")
-          .foregroundColor(.orange)
+          .foregroundStyle(.orange)
         Button("Download") {
           viewModel.downloadTranscriptModel()
         }
@@ -247,7 +247,7 @@ struct TranscriptSettingsTab: View {
         ProgressView(value: progress)
           .frame(width: 80)
         Text("\(Int(progress * 100))%")
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
         Button {
           viewModel.cancelTranscriptDownload()
         } label: {
@@ -258,14 +258,14 @@ struct TranscriptSettingsTab: View {
     case .ready:
       HStack(spacing: 4) {
         Image(systemName: "checkmark.circle.fill")
-          .foregroundColor(.green)
+          .foregroundStyle(.green)
         Text("Ready")
-          .foregroundColor(.green)
+          .foregroundStyle(.green)
       }
     case .error(let message):
       HStack(spacing: 8) {
         Text(message)
-          .foregroundColor(.red)
+          .foregroundStyle(.red)
           .lineLimit(1)
         Button("Retry") {
           viewModel.downloadTranscriptModel()
@@ -275,7 +275,7 @@ struct TranscriptSettingsTab: View {
       }
     case .simulatorNotSupported:
       Text("Requires physical device")
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
     }
   }
 }
@@ -294,10 +294,10 @@ struct AISettingsTab: View {
             Spacer()
             if AISettingsManager.shared.hasConfiguredProvider {
               Text(AISettingsManager.shared.selectedProvider.displayName)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             } else {
               Text("Not configured")
-                .foregroundColor(.orange)
+                .foregroundStyle(.orange)
             }
           }
         }
@@ -424,14 +424,14 @@ struct StorageSettingsTab: View {
   ) -> some View {
     HStack {
       Image(systemName: icon)
-        .foregroundColor(iconColor)
+        .foregroundStyle(iconColor)
         .frame(width: 20)
 
       VStack(alignment: .leading, spacing: 2) {
         Text(title)
         Text(size)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
 
       Spacer()
@@ -443,7 +443,7 @@ struct StorageSettingsTab: View {
         Button(isDestructive ? "Remove All" : "Clear") {
           action()
         }
-        .foregroundColor(isDestructive ? .red : .blue)
+        .foregroundStyle(isDestructive ? .red : .blue)
       }
     }
     .buttonStyle(.plain)

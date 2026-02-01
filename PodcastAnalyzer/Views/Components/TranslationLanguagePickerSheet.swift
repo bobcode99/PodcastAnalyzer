@@ -30,7 +30,7 @@ struct TranslationLanguagePickerSheet: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Default Language")
                                 .font(.subheadline)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             Text(settings.targetLanguage.displayName)
                                 .font(.headline)
                         }
@@ -38,7 +38,7 @@ struct TranslationLanguagePickerSheet: View {
                         Spacer()
 
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.blue)
+                            .foregroundStyle(.blue)
                     }
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -89,12 +89,12 @@ struct TranslationLanguagePickerSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(language.displayName)
-                        .foregroundColor(.primary)
+                        .foregroundStyle(.primary)
 
                     if hasTranslation {
                         Text("Cached")
                             .font(.caption)
-                            .foregroundColor(.green)
+                            .foregroundStyle(.green)
                     }
                 }
 
@@ -106,11 +106,11 @@ struct TranslationLanguagePickerSheet: View {
                             .scaleEffect(0.8)
                         Text("Translating...")
                             .font(.caption)
-                            .foregroundColor(.blue)
+                            .foregroundStyle(.blue)
                     }
                 } else if hasTranslation {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
+                        .foregroundStyle(.green)
                 }
             }
         }

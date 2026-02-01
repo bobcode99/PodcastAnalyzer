@@ -237,7 +237,7 @@ struct EpisodePlayButton: View {
             .fontWeight(.medium)
         }
       }
-      .foregroundColor(.white)
+      .foregroundStyle(.white)
       .padding(.horizontal, 8)
       .padding(.vertical, 5)
       .background(Color.blue)
@@ -292,7 +292,7 @@ struct EpisodePlayButton: View {
             .fontWeight(.medium)
         }
       }
-      .foregroundColor(.white)
+      .foregroundStyle(.white)
       .padding(.horizontal, 14)
       .padding(.vertical, 10)
       .background(Color.blue)

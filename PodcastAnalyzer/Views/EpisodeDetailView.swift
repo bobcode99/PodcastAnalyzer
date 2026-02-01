@@ -316,12 +316,12 @@ struct EpisodeDetailView: View {
                             DisclosureGroup("Original") {
                                 Text(viewModel.title)
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.leading)
                                     .textSelection(.enabled)
                             }
                             .font(.caption2)
-                            .foregroundColor(.blue)
+                            .foregroundStyle(.blue)
                         }
                     } else {
                         Text(viewModel.title)
@@ -339,19 +339,19 @@ struct EpisodeDetailView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(translatedTitle)
                                         .font(.caption)
-                                        .foregroundColor(.blue)
+                                        .foregroundStyle(.blue)
                                     Text(viewModel.podcastTitle)
                                         .font(.caption2)
-                                        .foregroundColor(.secondary)
+                                        .foregroundStyle(.secondary)
                                 }
                             } else {
                                 Text(viewModel.podcastTitle)
                                     .font(.caption)
-                                    .foregroundColor(.blue)
+                                    .foregroundStyle(.blue)
                             }
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 8))
-                                .foregroundColor(.blue)
+                                .foregroundStyle(.blue)
                         }
                     }
                     .buttonStyle(.plain)
@@ -361,7 +361,7 @@ struct EpisodeDetailView: View {
                         if let dateString = viewModel.pubDateString {
                             Text(dateString)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
 
                         // Status icons (same as EpisodeRowView)
@@ -369,13 +369,13 @@ struct EpisodeDetailView: View {
                             if viewModel.isStarred {
                                 Image(systemName: "star.fill")
                                     .font(.system(size: 12))
-                                    .foregroundColor(.yellow)
+                                    .foregroundStyle(.yellow)
                             }
 
                             if viewModel.hasLocalAudio {
                                 Image(systemName: "arrow.down.circle.fill")
                                     .font(.system(size: 12))
-                                    .foregroundColor(.green)
+                                    .foregroundStyle(.green)
                             }
 
                             // Transcript status
@@ -384,7 +384,7 @@ struct EpisodeDetailView: View {
                                 if viewModel.hasTranscript {
                                     Image(systemName: "captions.bubble.fill")
                                         .font(.system(size: 12))
-                                        .foregroundColor(.purple)
+                                        .foregroundStyle(.purple)
                                 }
                             case .downloadingModel, .transcribing:
                                 HStack(spacing: 2) {
@@ -393,20 +393,20 @@ struct EpisodeDetailView: View {
                             case .completed:
                                 Image(systemName: "captions.bubble.fill")
                                     .font(.system(size: 12))
-                                    .foregroundColor(.purple)
+                                    .foregroundStyle(.purple)
                             }
 
                             // AI Analysis available
                             if viewModel.hasAIAnalysis {
                                 Image(systemName: "sparkles")
                                     .font(.system(size: 12))
-                                    .foregroundColor(.orange)
+                                    .foregroundStyle(.orange)
                             }
 
                             if viewModel.isCompleted {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.system(size: 12))
-                                    .foregroundColor(.green)
+                                    .foregroundStyle(.green)
                             }
                         }
                     }
@@ -441,7 +441,7 @@ struct EpisodeDetailView: View {
                     Text("Streaming")
                 }
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -456,7 +456,7 @@ struct EpisodeDetailView: View {
             Button(action: { viewModel.startDownload() }) {
                 Image(systemName: "arrow.down.circle")
                     .font(.system(size: 14))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(Color.gray)
@@ -479,12 +479,12 @@ struct EpisodeDetailView: View {
                             .rotationEffect(.degrees(-90))
                         Image(systemName: "xmark")
                             .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(.white)
+                            .foregroundStyle(.white)
                     }
                     Text("\(Int(progress * 100))%")
                         .font(.caption)
                         .fontWeight(.medium)
-                        .foregroundColor(.white)
+                        .foregroundStyle(.white)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -508,7 +508,7 @@ struct EpisodeDetailView: View {
             Button(action: { showDeleteConfirmation = true }) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 14))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(Color.green)
@@ -520,7 +520,7 @@ struct EpisodeDetailView: View {
             Button(action: { viewModel.startDownload() }) {
                 Image(systemName: "exclamationmark.circle")
                     .font(.system(size: 14))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(Color.red)
@@ -566,7 +566,7 @@ struct EpisodeDetailView: View {
                         viewModel.descriptionView
                             .textSelection(.enabled)
                     }
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal)
             } else {
@@ -645,7 +645,7 @@ struct EpisodeDetailView: View {
             // Search bar
             HStack {
                 Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .font(.system(size: 14))
                 TextField(
                     "Search transcript...",
@@ -656,7 +656,7 @@ struct EpisodeDetailView: View {
                 if !viewModel.transcriptSearchQuery.isEmpty {
                     Button(action: { viewModel.transcriptSearchQuery = "" }) {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                             .font(.system(size: 14))
                     }
                 }
@@ -676,11 +676,11 @@ struct EpisodeDetailView: View {
                 } else if case .failed = viewModel.translationStatus {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 20))
-                        .foregroundColor(.red)
+                        .foregroundStyle(.red)
                 } else {
                     Image(systemName: viewModel.hasExistingTranslation ? "translate.fill" : "translate")
                         .font(.system(size: 20))
-                        .foregroundColor(viewModel.hasExistingTranslation ? .blue : .secondary)
+                        .foregroundStyle(viewModel.hasExistingTranslation ? .blue : .secondary)
                 }
             }
             .disabled(viewModel.translationStatus.isTranslating)
@@ -691,7 +691,7 @@ struct EpisodeDetailView: View {
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 20))
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
 
             // Options menu
@@ -739,7 +739,7 @@ struct EpisodeDetailView: View {
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 22))
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 16)
@@ -757,10 +757,10 @@ struct EpisodeDetailView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "captions.bubble")
                             .font(.system(size: 50))
-                            .foregroundColor(.blue)
+                            .foregroundStyle(.blue)
                         Text("Transcript Available").font(.headline)
                         Text("This episode has a transcript from the podcast feed.")
-                            .font(.caption).foregroundColor(.secondary)
+                            .font(.caption).foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                         Button(action: { viewModel.downloadRSSTranscript() }) {
                             Label("Download Transcript", systemImage: "arrow.down.circle")
@@ -780,13 +780,13 @@ struct EpisodeDetailView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "waveform")
                             .font(.system(size: 50))
-                            .foregroundColor(.blue)
+                            .foregroundStyle(.blue)
                         Text("Ready to Generate Transcript").font(.headline)
                         if !viewModel.isModelReady {
                             Text(
                                 "Speech recognition model will be downloaded on first use"
                             )
-                            .font(.caption).foregroundColor(.secondary)
+                            .font(.caption).foregroundStyle(.secondary)
                             .multilineTextAlignment(
                                 .center
                             )
@@ -804,12 +804,10 @@ struct EpisodeDetailView: View {
                 } else {
                     VStack(spacing: 12) {
                         Image(systemName: "text.bubble").font(.system(size: 48))
-                            .foregroundColor(
-                                .secondary
-                            )
+                            .foregroundStyle(.secondary)
                         Text("No transcript available").font(.headline)
                         Text("Download the episode to generate a transcript.")
-                            .font(.subheadline).foregroundColor(.secondary)
+                            .font(.subheadline).foregroundStyle(.secondary)
                             .multilineTextAlignment(
                                 .center
                             )
@@ -821,7 +819,7 @@ struct EpisodeDetailView: View {
                     ProgressView(value: progress).frame(width: 200)
                     Text("Downloading Speech Model").font(.headline)
                     Text("\(Int(progress * 100))%").font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
 
             case .transcribing(let progress):
@@ -836,11 +834,11 @@ struct EpisodeDetailView: View {
                     Text("\(Int(progress * 100))%")
                         .font(.title2)
                         .fontWeight(.semibold)
-                        .foregroundColor(.blue)
+                        .foregroundStyle(.blue)
 
                     Text("Processing audio...")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
 
             case .completed:
@@ -849,7 +847,7 @@ struct EpisodeDetailView: View {
                     Image(systemName: "checkmark.circle.fill").font(
                         .system(size: 50)
                     )
-                    .foregroundColor(.green)
+                    .foregroundStyle(.green)
                     Text("Transcript Generated").font(.headline)
                     Button(action: { viewModel.generateTranscript() }) {
                         Label("Regenerate", systemImage: "arrow.clockwise")
@@ -862,9 +860,9 @@ struct EpisodeDetailView: View {
                     Image(systemName: "exclamationmark.triangle.fill").font(
                         .system(size: 50)
                     )
-                    .foregroundColor(.red)
+                    .foregroundStyle(.red)
                     Text("Error").font(.headline)
-                    Text(message).font(.caption).foregroundColor(.secondary)
+                    Text(message).font(.caption).foregroundStyle(.secondary)
                         .multilineTextAlignment(
                             .center
                         )
@@ -907,7 +905,7 @@ struct TranslationProgressCircle: View {
                 // Small text showing count
                 Text("\(completed)")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundColor(.blue)
+                    .foregroundStyle(.blue)
             } else if case .preparingSession = status {
                 // Indeterminate spinning indicator
                 Circle()
@@ -932,7 +930,7 @@ struct TabButton: View {
                 Text(title)
                     .font(.subheadline)
                     .fontWeight(isSelected ? .semibold : .regular)
-                    .foregroundColor(isSelected ? .blue : .secondary)
+                    .foregroundStyle(isSelected ? .blue : .secondary)
 
                 Rectangle()
                     .fill(isSelected ? Color.blue : Color.clear)
@@ -979,7 +977,7 @@ struct TranscriptSegmentRow: View {
                     Text(segment.formattedStartTime)
                         .font(.caption)
                         .fontWeight(.medium)
-                        .foregroundColor(isCurrentSegment ? .white : .blue)
+                        .foregroundStyle(isCurrentSegment ? .white : .blue)
                         .frame(width: 50, alignment: .leading)
                 }
 
@@ -988,7 +986,7 @@ struct TranscriptSegmentRow: View {
                     // Primary text with search highlighting
                     highlightedText(primary)
                         .font(.body)
-                        .foregroundColor(isCurrentSegment ? .white : .primary)
+                        .foregroundStyle(isCurrentSegment ? .white : .primary)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -996,7 +994,7 @@ struct TranscriptSegmentRow: View {
                     if let secondaryText = secondary {
                         highlightedText(secondaryText)
                             .font(.subheadline)
-                            .foregroundColor(isCurrentSegment ? .white.opacity(0.8) : .secondary)
+                            .foregroundStyle(isCurrentSegment ? .white.opacity(0.8) : .secondary)
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -1007,7 +1005,7 @@ struct TranscriptSegmentRow: View {
                 if isCurrentSegment {
                     Image(systemName: "speaker.wave.2.fill")
                         .font(.caption)
-                        .foregroundColor(.white)
+                        .foregroundStyle(.white)
                 }
             }
             .padding(.horizontal, 16)

@@ -42,11 +42,11 @@ struct MacMiniPlayerBar: View {
                   .font(.subheadline)
                   .fontWeight(.medium)
                   .lineLimit(1)
-                  .foregroundColor(.primary)
+                  .foregroundStyle(.primary)
 
                 Text(episode.podcastTitle)
                   .font(.caption)
-                  .foregroundColor(.secondary)
+                  .foregroundStyle(.secondary)
                   .lineLimit(1)
               }
               .frame(maxWidth: 280, alignment: .leading)
@@ -64,7 +64,7 @@ struct MacMiniPlayerBar: View {
           Button(action: { audioManager.skipBackward(seconds: 15) }) {
             Image(systemName: "gobackward.15")
               .font(.system(size: 18))
-              .foregroundColor(.primary)
+              .foregroundStyle(.primary)
           }
           .buttonStyle(.plain)
           .help("Skip back 15 seconds")
@@ -79,7 +79,7 @@ struct MacMiniPlayerBar: View {
           }) {
             Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
               .font(.system(size: 24))
-              .foregroundColor(.primary)
+              .foregroundStyle(.primary)
               .frame(width: 44, height: 44)
               .contentShape(Rectangle())
           }
@@ -91,7 +91,7 @@ struct MacMiniPlayerBar: View {
           Button(action: { audioManager.skipForward(seconds: 30) }) {
             Image(systemName: "goforward.30")
               .font(.system(size: 18))
-              .foregroundColor(.primary)
+              .foregroundStyle(.primary)
           }
           .buttonStyle(.plain)
           .help("Skip forward 30 seconds")
@@ -104,7 +104,7 @@ struct MacMiniPlayerBar: View {
           // Current time / Duration
           Text("\(formatTime(audioManager.currentTime)) / \(formatTime(audioManager.duration))")
             .font(.system(size: 11))
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .monospacedDigit()
             .frame(width: 90, alignment: .trailing)
 
@@ -136,7 +136,7 @@ struct MacMiniPlayerBar: View {
           Button(action: { showExpandedPlayer = true }) {
             Image(systemName: "arrow.up.left.and.arrow.down.right")
               .font(.system(size: 12))
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
           .buttonStyle(.plain)
           .help("Expand player")
@@ -234,7 +234,7 @@ struct MacExpandedPlayerView: View {
 
           Text(episode.podcastTitle)
             .font(.title3)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         }
       }
       .padding(.horizontal, 40)
@@ -253,14 +253,14 @@ struct MacExpandedPlayerView: View {
         HStack {
           Text(formatTime(audioManager.currentTime))
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .monospacedDigit()
 
           Spacer()
 
           Text("-\(formatTime(audioManager.duration - audioManager.currentTime))")
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .monospacedDigit()
         }
       }
@@ -298,7 +298,7 @@ struct MacExpandedPlayerView: View {
       HStack {
         Text("Speed")
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
 
         Picker("Speed", selection: Binding(
           get: { Double(audioManager.playbackRate) },

@@ -107,7 +107,7 @@ struct EpisodeAIAnalysisView: View {
       // No API key configured
       HStack {
         Image(systemName: "key.fill")
-          .foregroundColor(.orange)
+          .foregroundStyle(.orange)
 
         VStack(alignment: .leading, spacing: 2) {
           Text("API Key Required")
@@ -115,7 +115,7 @@ struct EpisodeAIAnalysisView: View {
             .fontWeight(.medium)
           Text("Configure your cloud AI provider to analyze transcripts")
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         }
 
         Spacer()
@@ -134,11 +134,11 @@ struct EpisodeAIAnalysisView: View {
       // No transcript available
       HStack {
         Image(systemName: "doc.text")
-          .foregroundColor(.blue)
+          .foregroundStyle(.blue)
 
         Text("Generate a transcript first to enable AI analysis")
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
 
         Spacer()
       }
@@ -150,11 +150,11 @@ struct EpisodeAIAnalysisView: View {
       // Ready to analyze
       HStack {
         Image(systemName: settings.selectedProvider.iconName)
-          .foregroundColor(.green)
+          .foregroundStyle(.green)
 
         Text("Using \(settings.selectedProvider.displayName) (\(settings.currentModel))")
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
 
         Spacer()
 
@@ -188,7 +188,7 @@ struct EpisodeAIAnalysisView: View {
         RoundedRectangle(cornerRadius: 8)
           .fill(selectedTab == tab ? Color.accentColor : Color.clear)
       )
-      .foregroundColor(selectedTab == tab ? .white : .primary)
+      .foregroundStyle(selectedTab == tab ? .white : .primary)
     }
     #if os(macOS)
     .buttonStyle(.plain)      // 🔑 THIS fixes the weird macOS behavior
@@ -320,7 +320,7 @@ struct EpisodeAIAnalysisView: View {
               #endif
             }) {
               Image(systemName: "xmark.circle.fill")
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
           }
@@ -369,7 +369,7 @@ struct EpisodeAIAnalysisView: View {
         .bold()
       Text(description)
         .font(.caption)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
     }
   }
 
@@ -397,7 +397,7 @@ struct EpisodeAIAnalysisView: View {
       .frame(maxWidth: .infinity)
       .padding()
       .background(canAnalyze ? Color.blue : Color.gray)
-      .foregroundColor(.white)
+      .foregroundStyle(.white)
       .cornerRadius(12)
     }
     .disabled(!canAnalyze)
@@ -409,15 +409,15 @@ struct EpisodeAIAnalysisView: View {
       if let warning = result.jsonParseWarning {
         HStack(spacing: 8) {
           Image(systemName: "exclamationmark.triangle.fill")
-            .foregroundColor(.orange)
+            .foregroundStyle(.orange)
           VStack(alignment: .leading, spacing: 2) {
             Text("Response Format Warning")
               .font(.caption)
               .fontWeight(.semibold)
-              .foregroundColor(.orange)
+              .foregroundStyle(.orange)
             Text(warning)
               .font(.caption2)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
           Spacer()
         }
@@ -444,17 +444,17 @@ struct EpisodeAIAnalysisView: View {
       HStack {
         Label(result.provider.displayName, systemImage: result.provider.iconName)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
 
         Spacer()
 
         Text(result.model)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
 
         Text(result.timestamp.formatted(date: .abbreviated, time: .shortened))
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
 
       // Regenerate button
@@ -491,7 +491,7 @@ struct EpisodeAIAnalysisView: View {
             Label("Main Topics", systemImage: "list.bullet")
               .font(.subheadline)
               .fontWeight(.semibold)
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
 
             FlowLayout(spacing: 8) {
               ForEach(parsed.mainTopics, id: \.self) { topic in
@@ -500,7 +500,7 @@ struct EpisodeAIAnalysisView: View {
                   .padding(.horizontal, 10)
                   .padding(.vertical, 6)
                   .background(Color.blue.opacity(0.1))
-                  .foregroundColor(.blue)
+                  .foregroundStyle(.blue)
                   .cornerRadius(16)
               }
             }
@@ -513,12 +513,12 @@ struct EpisodeAIAnalysisView: View {
             Label("Key Takeaways", systemImage: "lightbulb")
               .font(.subheadline)
               .fontWeight(.semibold)
-              .foregroundColor(.orange)
+              .foregroundStyle(.orange)
 
             ForEach(Array(parsed.keyTakeaways.enumerated()), id: \.offset) { _, takeaway in
               HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
-                  .foregroundColor(.green)
+                  .foregroundStyle(.green)
                   .font(.caption)
                 Text(takeaway)
                   .font(.subheadline)
@@ -533,7 +533,7 @@ struct EpisodeAIAnalysisView: View {
             VStack(alignment: .leading, spacing: 4) {
               Text("Target Audience")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
               Text(parsed.targetAudience)
                 .font(.caption)
                 .fontWeight(.medium)
@@ -544,7 +544,7 @@ struct EpisodeAIAnalysisView: View {
             VStack(alignment: .leading, spacing: 4) {
               Text("Engagement")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
               HStack(spacing: 4) {
                 engagementIcon(parsed.engagementLevel)
                 Text(parsed.engagementLevel.capitalized)
@@ -592,7 +592,7 @@ struct EpisodeAIAnalysisView: View {
         Label(title, systemImage: icon)
           .font(.subheadline)
           .fontWeight(.semibold)
-          .foregroundColor(color)
+          .foregroundStyle(color)
 
         FlowLayout(spacing: 8) {
           ForEach(items, id: \.self) { item in
@@ -601,7 +601,7 @@ struct EpisodeAIAnalysisView: View {
               .padding(.horizontal, 10)
               .padding(.vertical, 6)
               .background(color.opacity(0.1))
-              .foregroundColor(color)
+              .foregroundStyle(color)
               .cornerRadius(16)
           }
         }
@@ -619,7 +619,7 @@ struct EpisodeAIAnalysisView: View {
             Label("Best Quote", systemImage: "quote.opening")
               .font(.subheadline)
               .fontWeight(.semibold)
-              .foregroundColor(.purple)
+              .foregroundStyle(.purple)
 
             Text("\"\(parsed.bestQuote)\"")
               .font(.body)
@@ -645,12 +645,12 @@ struct EpisodeAIAnalysisView: View {
             Label("Highlights", systemImage: "star.fill")
               .font(.subheadline)
               .fontWeight(.semibold)
-              .foregroundColor(.yellow)
+              .foregroundStyle(.yellow)
 
             ForEach(Array(parsed.highlights.enumerated()), id: \.offset) { _, highlight in
               HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "star.fill")
-                  .foregroundColor(.yellow)
+                  .foregroundStyle(.yellow)
                   .font(.caption)
                 Text(highlight)
                   .font(.subheadline)
@@ -665,12 +665,12 @@ struct EpisodeAIAnalysisView: View {
             Label("Action Items", systemImage: "checklist")
               .font(.subheadline)
               .fontWeight(.semibold)
-              .foregroundColor(.green)
+              .foregroundStyle(.green)
 
             ForEach(Array(parsed.actionItems.enumerated()), id: \.offset) { _, item in
               HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "arrow.right.circle.fill")
-                  .foregroundColor(.green)
+                  .foregroundStyle(.green)
                   .font(.caption)
                 Text(item)
                   .font(.subheadline)
@@ -685,12 +685,12 @@ struct EpisodeAIAnalysisView: View {
             Label("Controversial Points", systemImage: "exclamationmark.triangle.fill")
               .font(.subheadline)
               .fontWeight(.semibold)
-              .foregroundColor(.orange)
+              .foregroundStyle(.orange)
 
             ForEach(Array(controversial.enumerated()), id: \.offset) { _, point in
               HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                  .foregroundColor(.orange)
+                  .foregroundStyle(.orange)
                   .font(.caption)
                 Text(point)
                   .font(.subheadline)
@@ -705,12 +705,12 @@ struct EpisodeAIAnalysisView: View {
             Label("Entertaining Moments", systemImage: "face.smiling.fill")
               .font(.subheadline)
               .fontWeight(.semibold)
-              .foregroundColor(.pink)
+              .foregroundStyle(.pink)
 
             ForEach(Array(entertaining.enumerated()), id: \.offset) { _, moment in
               HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "face.smiling.fill")
-                  .foregroundColor(.pink)
+                  .foregroundStyle(.pink)
                   .font(.caption)
                 Text(moment)
                   .font(.subheadline)
@@ -735,7 +735,7 @@ struct EpisodeAIAnalysisView: View {
           Label("Overview", systemImage: "doc.text")
             .font(.subheadline)
             .fontWeight(.semibold)
-            .foregroundColor(.blue)
+            .foregroundStyle(.blue)
 
           selectableText(parsed.overview)
         }
@@ -746,24 +746,24 @@ struct EpisodeAIAnalysisView: View {
             Label("Main Topics", systemImage: "list.bullet.rectangle")
               .font(.subheadline)
               .fontWeight(.semibold)
-              .foregroundColor(.purple)
+              .foregroundStyle(.purple)
 
             ForEach(Array(parsed.mainTopics.enumerated()), id: \.offset) { _, topic in
               VStack(alignment: .leading, spacing: 6) {
                 Text(topic.topic)
                   .font(.subheadline)
                   .fontWeight(.medium)
-                  .foregroundColor(.primary)
+                  .foregroundStyle(.primary)
 
                 selectableText(topic.summary)
                   .font(.caption)
-                  .foregroundColor(.secondary)
+                  .foregroundStyle(.secondary)
 
                 ForEach(topic.keyPoints, id: \.self) { point in
                   HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "circle.fill")
                       .font(.system(size: 4))
-                      .foregroundColor(.purple)
+                      .foregroundStyle(.purple)
                       .padding(.top, 6)
                     selectableText(point)
                       .font(.caption)
@@ -783,12 +783,12 @@ struct EpisodeAIAnalysisView: View {
             Label("Key Insights", systemImage: "lightbulb.fill")
               .font(.subheadline)
               .fontWeight(.semibold)
-              .foregroundColor(.orange)
+              .foregroundStyle(.orange)
 
             ForEach(Array(parsed.keyInsights.enumerated()), id: \.offset) { _, insight in
               HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "lightbulb.fill")
-                  .foregroundColor(.orange)
+                  .foregroundStyle(.orange)
                   .font(.caption)
                 selectableText(insight)
               }
@@ -802,7 +802,7 @@ struct EpisodeAIAnalysisView: View {
             Label("Notable Quotes", systemImage: "quote.opening")
               .font(.subheadline)
               .fontWeight(.semibold)
-              .foregroundColor(.green)
+              .foregroundStyle(.green)
 
             ForEach(Array(parsed.notableQuotes.enumerated()), id: \.offset) { _, quote in
               selectableText("\"\(quote)\"")
@@ -830,12 +830,12 @@ struct EpisodeAIAnalysisView: View {
             Label("Actionable Advice", systemImage: "checkmark.circle.fill")
               .font(.subheadline)
               .fontWeight(.semibold)
-              .foregroundColor(.teal)
+              .foregroundStyle(.teal)
 
             ForEach(Array(advice.enumerated()), id: \.offset) { _, item in
               HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "arrow.right.circle.fill")
-                  .foregroundColor(.teal)
+                  .foregroundStyle(.teal)
                   .font(.caption)
                 selectableText(item)
               }
@@ -848,7 +848,7 @@ struct EpisodeAIAnalysisView: View {
           Label("Conclusion", systemImage: "checkmark.seal.fill")
             .font(.subheadline)
             .fontWeight(.semibold)
-            .foregroundColor(.indigo)
+            .foregroundStyle(.indigo)
 
           selectableText(parsed.conclusion)
             .padding()
@@ -876,7 +876,7 @@ struct EpisodeAIAnalysisView: View {
       color = .gray
     }
     return Image(systemName: iconName)
-      .foregroundColor(color)
+      .foregroundStyle(color)
       .font(.caption)
   }
 
@@ -923,12 +923,12 @@ struct EpisodeAIAnalysisView: View {
       // Header with streaming indicator
       HStack {
         Image(systemName: "sparkles")
-          .foregroundColor(.blue)
+          .foregroundStyle(.blue)
           .symbolEffect(.pulse)
         Text("Generating...")
           .font(.subheadline)
           .fontWeight(.medium)
-          .foregroundColor(.blue)
+          .foregroundStyle(.blue)
         Spacer()
         ProgressView()
           .scaleEffect(0.8)
@@ -944,7 +944,7 @@ struct EpisodeAIAnalysisView: View {
         HStack {
           Text("Waiting for response...")
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         }
       }
 
@@ -954,11 +954,11 @@ struct EpisodeAIAnalysisView: View {
           settings.selectedProvider.displayName, systemImage: settings.selectedProvider.iconName
         )
         .font(.caption)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         Spacer()
         Text(settings.currentModel)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
     }
     .padding()
@@ -979,10 +979,10 @@ struct EpisodeAIAnalysisView: View {
       if let warning = result.jsonParseWarning {
         HStack(spacing: 8) {
           Image(systemName: "exclamationmark.triangle.fill")
-            .foregroundColor(.orange)
+            .foregroundStyle(.orange)
           Text(warning)
             .font(.caption)
-            .foregroundColor(.orange)
+            .foregroundStyle(.orange)
         }
         .padding(8)
         .background(Color.orange.opacity(0.1))
@@ -997,12 +997,12 @@ struct EpisodeAIAnalysisView: View {
             .frame(width: 32, height: 32)
           Image(systemName: "bubble.left.fill")
             .font(.system(size: 14))
-            .foregroundColor(.blue)
+            .foregroundStyle(.blue)
         }
         VStack(alignment: .leading, spacing: 4) {
           Text("Question")
             .font(.caption2)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .textCase(.uppercase)
           Text(result.question)
             .font(.subheadline)
@@ -1018,12 +1018,12 @@ struct EpisodeAIAnalysisView: View {
             .frame(width: 32, height: 32)
           Image(systemName: "text.bubble.fill")
             .font(.system(size: 14))
-            .foregroundColor(.green)
+            .foregroundStyle(.green)
         }
         VStack(alignment: .leading, spacing: 4) {
           Text("Answer")
             .font(.caption2)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .textCase(.uppercase)
           Text(result.answer)
             .font(.body)
@@ -1061,11 +1061,11 @@ struct EpisodeAIAnalysisView: View {
       if result.confidence != "unknown" {
         HStack(spacing: 6) {
           Image(systemName: confidenceIcon(result.confidence))
-            .foregroundColor(confidenceColor(result.confidence))
+            .foregroundStyle(confidenceColor(result.confidence))
           Text("Confidence: \(result.confidence.capitalized)")
             .font(.caption)
             .fontWeight(.medium)
-            .foregroundColor(confidenceColor(result.confidence))
+            .foregroundStyle(confidenceColor(result.confidence))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -1078,7 +1078,7 @@ struct EpisodeAIAnalysisView: View {
         VStack(alignment: .leading, spacing: 6) {
           Text("Related Topics")
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
 
           FlowLayout(spacing: 6) {
             ForEach(topics, id: \.self) { topic in
@@ -1087,7 +1087,7 @@ struct EpisodeAIAnalysisView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(Color.purple.opacity(0.1))
-                .foregroundColor(.purple)
+                .foregroundStyle(.purple)
                 .cornerRadius(12)
             }
           }
@@ -1099,13 +1099,13 @@ struct EpisodeAIAnalysisView: View {
         VStack(alignment: .leading, spacing: 6) {
           Label("Sources from Transcript", systemImage: "quote.bubble")
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
 
           ForEach(Array(sources.enumerated()), id: \.offset) { _, source in
             Text("\"\(source)\"")
               .font(.caption)
               .italic()
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
               .padding(8)
               .frame(maxWidth: .infinity, alignment: .leading)
               .background(Color.platformSystemGray5)
@@ -1120,14 +1120,14 @@ struct EpisodeAIAnalysisView: View {
       HStack {
         Label(result.provider.displayName, systemImage: result.provider.iconName)
           .font(.caption2)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
         Spacer()
         Text(result.model)
           .font(.caption2)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
         Text(result.timestamp.formatted(date: .abbreviated, time: .shortened))
           .font(.caption2)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
     }
     .padding()
@@ -1173,18 +1173,18 @@ struct EpisodeAIAnalysisView: View {
 
           HStack(spacing: 8) {
             Image(systemName: "sparkles")
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
               .symbolEffect(.pulse)
 
             Text(message)
               .font(.subheadline)
-              .foregroundColor(.primary)
+              .foregroundStyle(.primary)
           }
 
           if progress >= 0 {
             Text("\(Int(progress * 100))% complete")
               .font(.caption)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
         }
         .padding()
@@ -1197,10 +1197,10 @@ struct EpisodeAIAnalysisView: View {
       case .error(let message):
         HStack {
           Image(systemName: "exclamationmark.triangle.fill")
-            .foregroundColor(.red)
+            .foregroundStyle(.red)
           Text(message)
             .font(.caption)
-            .foregroundColor(.red)
+            .foregroundStyle(.red)
         }
         .padding()
         .background(Color.red.opacity(0.1))

@@ -193,7 +193,7 @@ struct ExpandedPlayerView: View {
       .overlay(
         Image(systemName: "music.note")
           .font(.system(size: 60))
-          .foregroundColor(.white.opacity(0.5))
+          .foregroundStyle(.white.opacity(0.5))
       )
   }
 
@@ -210,14 +210,14 @@ struct ExpandedPlayerView: View {
             .fontWeight(.bold)
             .lineLimit(2)
             .multilineTextAlignment(.center)
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
 
           // Podcast name button - navigates to show's episode list
           Button(action: { navigateToPodcast() }) {
             Text(viewModel.podcastTitle)
               .font(.subheadline)
               .fontWeight(.medium)
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
           }
         }
         .frame(maxWidth: .infinity)
@@ -231,7 +231,7 @@ struct ExpandedPlayerView: View {
           Image(systemName: "ellipsis.circle.fill")
             .font(.system(size: 28))
             .symbolRenderingMode(.hierarchical)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         }
         .frame(width: 48, height: 48)
         .contentShape(Rectangle())
@@ -243,7 +243,7 @@ struct ExpandedPlayerView: View {
         Text(date.formatted(date: .abbreviated, time: .omitted))
           .font(.caption2)
           .fontWeight(.bold)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .textCase(.uppercase)
       }
     }
@@ -380,7 +380,7 @@ struct ExpandedPlayerView: View {
       HStack {
         Text(formatTime(displayCurrentTime))
           .font(.caption)
-          .foregroundColor(isScrubbing ? .primary : .secondary)
+          .foregroundStyle(isScrubbing ? .primary : .secondary)
           .monospacedDigit()
           .animation(.easeOut(duration: 0.15), value: isScrubbing)
 
@@ -388,7 +388,7 @@ struct ExpandedPlayerView: View {
 
         Text("-" + formatTime(displayRemainingTime))
           .font(.caption)
-          .foregroundColor(isScrubbing ? .primary : .secondary)
+          .foregroundStyle(isScrubbing ? .primary : .secondary)
           .monospacedDigit()
           .animation(.easeOut(duration: 0.15), value: isScrubbing)
       }
@@ -420,7 +420,7 @@ struct ExpandedPlayerView: View {
       }) {
         Text(formatSpeed(viewModel.playbackSpeed))
           .font(.system(size: 16, weight: .medium))
-          .foregroundColor(.primary)
+          .foregroundStyle(.primary)
           .frame(width: 48, height: 48)
           .background(Color.gray.opacity(0.2))
           .clipShape(Circle())
@@ -434,7 +434,7 @@ struct ExpandedPlayerView: View {
       Button(action: { viewModel.skipBackward() }) {
         Image(systemName: "gobackward.15")
           .font(.system(size: 32))
-          .foregroundColor(.primary)
+          .foregroundStyle(.primary)
       }
       .frame(width: 60)
 
@@ -442,7 +442,7 @@ struct ExpandedPlayerView: View {
       Button(action: { viewModel.togglePlayPause() }) {
         Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
           .font(.system(size: 72))
-          .foregroundColor(.primary)
+          .foregroundStyle(.primary)
       }
       .frame(width: 80)
 
@@ -450,7 +450,7 @@ struct ExpandedPlayerView: View {
       Button(action: { viewModel.skipForward() }) {
         Image(systemName: "goforward.30")
           .font(.system(size: 32))
-          .foregroundColor(.primary)
+          .foregroundStyle(.primary)
       }
       .frame(width: 60)
 
@@ -479,17 +479,17 @@ struct ExpandedPlayerView: View {
             if viewModel.sleepTimerOption == .endOfEpisode {
               Image(systemName: "stop.circle.fill")
                 .font(.system(size: 22))
-                .foregroundColor(.white)
+                .foregroundStyle(.white)
             } else {
               Text(viewModel.sleepTimerRemainingFormatted)
                 .font(.system(size: 11, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundStyle(.white)
                 .minimumScaleFactor(0.5)
             }
           } else {
             Image(systemName: "moon.zzz")
               .font(.system(size: 22))
-              .foregroundColor(.primary)
+              .foregroundStyle(.primary)
           }
         }
         .frame(width: 56, height: 56) // Larger touch target
@@ -515,7 +515,7 @@ struct ExpandedPlayerView: View {
           Text("Detail")
         }
         .font(.subheadline)
-        .foregroundColor(.blue)
+        .foregroundStyle(.blue)
       }
 
       Spacer()
@@ -535,7 +535,7 @@ struct ExpandedPlayerView: View {
           }
         }
         .font(.title3)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       }
     }
     .padding(.horizontal, 40)
@@ -603,7 +603,7 @@ struct QueueOverlay: View {
           Button(action: onDismiss) {
             Image(systemName: "xmark.circle.fill")
               .font(.title2)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
         }
         .padding()
@@ -614,13 +614,13 @@ struct QueueOverlay: View {
           VStack(spacing: 12) {
             Image(systemName: "list.bullet")
               .font(.system(size: 40))
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
             Text("Queue is empty")
               .font(.subheadline)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
             Text("Add episodes using 'Play Next'")
               .font(.caption)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .padding()
@@ -635,7 +635,7 @@ struct QueueOverlay: View {
                     .lineLimit(1)
                   Text(episode.podcastTitle)
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                 }
 
@@ -645,7 +645,7 @@ struct QueueOverlay: View {
                 Button(action: { onPlayItem(index) }) {
                   Image(systemName: "play.circle")
                     .font(.title2)
-                    .foregroundColor(.blue)
+                    .foregroundStyle(.blue)
                 }
                 .buttonStyle(.plain)
               }
@@ -713,18 +713,18 @@ struct SpeedPickerOverlay: View {
         // Header
         HStack {
           Image(systemName: "waveform")
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
           Text("Playback Speed")
             .font(.subheadline)
             .fontWeight(.medium)
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
           Spacer()
 
           // Current speed display
           Text(formatSpeed(sliderValue))
             .font(.title2)
             .fontWeight(.bold)
-            .foregroundColor(.blue)
+            .foregroundStyle(.blue)
             .monospacedDigit()
         }
         .padding(.horizontal, 16)
@@ -745,11 +745,11 @@ struct SpeedPickerOverlay: View {
           } minimumValueLabel: {
             Text("0.5x")
               .font(.caption2)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           } maximumValueLabel: {
             Text("2x")
               .font(.caption2)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
           .tint(.blue)
           .onChange(of: sliderValue) { oldValue, newValue in
@@ -823,10 +823,10 @@ struct SpeedPickerOverlay: View {
             HStack(spacing: 4) {
               Text(showAllSpeeds ? "Show Less" : "More Speeds")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
               Image(systemName: showAllSpeeds ? "chevron.up" : "chevron.down")
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             }
           }
 
@@ -837,7 +837,7 @@ struct SpeedPickerOverlay: View {
           }
           .font(.subheadline)
           .fontWeight(.semibold)
-          .foregroundColor(.white)
+          .foregroundStyle(.white)
           .padding(.horizontal, 20)
           .padding(.vertical, 8)
           .background(Color.blue)
@@ -886,7 +886,7 @@ struct SpeedButton: View {
       Text(formatSpeed(speed))
         .font(.subheadline)
         .fontWeight(isSelected ? .bold : .medium)
-        .foregroundColor(isSelected ? .white : .primary)
+        .foregroundStyle(isSelected ? .white : .primary)
         .frame(minWidth: 44, minHeight: 36)
         .padding(.horizontal, 12)
         .background(
@@ -981,7 +981,7 @@ struct TranscriptFullScreenView: View {
           .lineLimit(1)
         Text(viewModel.currentTimeString)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
 
       Spacer()
@@ -991,19 +991,19 @@ struct TranscriptFullScreenView: View {
         Button(action: { viewModel.skipBackward() }) {
           Image(systemName: "gobackward.15")
             .font(.system(size: 20))
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
         }
 
         Button(action: { viewModel.togglePlayPause() }) {
           Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
             .font(.system(size: 24))
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
         }
 
         Button(action: { viewModel.skipForward() }) {
           Image(systemName: "goforward.30")
             .font(.system(size: 20))
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
         }
       }
     }

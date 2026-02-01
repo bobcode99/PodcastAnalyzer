@@ -224,7 +224,7 @@ struct EpisodeRowView: View {
             ? "waveform" : "pause.fill"
         )
         .font(.system(size: 12, weight: .bold))
-        .foregroundColor(.white)
+        .foregroundStyle(.white)
         .padding(4)
         .background(Color.blue)
         .cornerRadius(4)
@@ -251,7 +251,7 @@ struct EpisodeRowView: View {
       if let date = episode.pubDate {
         Text(formatEpisodeDate(date))
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
 
       // Title
@@ -259,13 +259,13 @@ struct EpisodeRowView: View {
         .font(.subheadline)
         .fontWeight(.semibold)
         .lineLimit(3)
-        .foregroundColor(.primary)
+        .foregroundStyle(.primary)
 
       // Description
       if let description = plainDescription {
         Text(description)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .lineLimit(3)
       }
 
@@ -299,7 +299,7 @@ struct EpisodeRowView: View {
           ProgressView().scaleEffect(0.4)
           Text("\(Int(progress * 100))%").font(.system(size: 9))
         }
-        .foregroundColor(.orange)
+        .foregroundStyle(.orange)
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .background(Color.orange.opacity(0.15))
@@ -309,7 +309,7 @@ struct EpisodeRowView: View {
           ProgressView().scaleEffect(0.4)
           Text("Saving").font(.system(size: 9))
         }
-        .foregroundColor(.blue)
+        .foregroundStyle(.blue)
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .background(Color.blue.opacity(0.15))
@@ -321,31 +321,31 @@ struct EpisodeRowView: View {
         if isStarred {
           Image(systemName: "star.fill")
             .font(.system(size: 10))
-            .foregroundColor(.yellow)
+            .foregroundStyle(.yellow)
         }
 
         if isDownloaded {
           Image(systemName: "arrow.down.circle.fill")
             .font(.system(size: 10))
-            .foregroundColor(.green)
+            .foregroundStyle(.green)
         }
 
         if hasCaptions {
           Image(systemName: "captions.bubble.fill")
             .font(.system(size: 10))
-            .foregroundColor(.purple)
+            .foregroundStyle(.purple)
         } else if isTranscribing {
           HStack(spacing: 2) {
             ProgressView().scaleEffect(0.35)
             if isDownloadingModel {
               Text("Model")
                 .font(.system(size: 8))
-                .foregroundColor(.purple)
+                .foregroundStyle(.purple)
             }
             if let progress = transcriptProgress {
               Text("\(Int(progress * 100))%")
                 .font(.system(size: 8))
-                .foregroundColor(.purple)
+                .foregroundStyle(.purple)
             }
           }
         }
@@ -353,13 +353,13 @@ struct EpisodeRowView: View {
         if hasAIAnalysis {
           Image(systemName: "sparkles")
             .font(.system(size: 10))
-            .foregroundColor(.orange)
+            .foregroundStyle(.orange)
         }
 
         if isCompleted {
           Image(systemName: "checkmark.circle.fill")
             .font(.system(size: 10))
-            .foregroundColor(.green)
+            .foregroundStyle(.green)
         }
       }
 
@@ -371,7 +371,7 @@ struct EpisodeRowView: View {
       } label: {
         Image(systemName: "ellipsis")
           .font(.system(size: 14, weight: .medium))
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .frame(width: 28, height: 28)
           .contentShape(Rectangle())
       }
