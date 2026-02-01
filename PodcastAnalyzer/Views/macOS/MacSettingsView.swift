@@ -10,55 +10,58 @@ import SwiftData
 import SwiftUI
 
 struct MacSettingsView: View {
-  private enum Tabs: Hashable {
+  private enum SettingsTab: Hashable, CaseIterable {
     case general, appearance, sync, playback, transcript, ai, storage
+
+    var title: String {
+      switch self {
+      case .general: "General"
+      case .appearance: "Appearance"
+      case .sync: "Sync"
+      case .playback: "Playback"
+      case .transcript: "Transcript"
+      case .ai: "AI"
+      case .storage: "Storage"
+      }
+    }
+
+    var systemImage: String {
+      switch self {
+      case .general: "gearshape"
+      case .appearance: "paintbrush"
+      case .sync: "arrow.triangle.2.circlepath"
+      case .playback: "play.circle"
+      case .transcript: "text.bubble"
+      case .ai: "sparkles"
+      case .storage: "internaldrive"
+      }
+    }
   }
 
+  @State private var selection: SettingsTab = .general
+
   var body: some View {
-    TabView {
-      GeneralSettingsTab()
-        .tabItem {
-          Label("General", systemImage: "gearshape")
+    TabView(selection: $selection) {
+      ForEach(SettingsTab.allCases, id: \.self) { tab in
+        Tab(tab.title, systemImage: tab.systemImage, value: tab) {
+          tabContent(for: tab)
         }
-        .tag(Tabs.general)
-
-      AppearanceSettingsTab()
-        .tabItem {
-          Label("Appearance", systemImage: "paintbrush")
-        }
-        .tag(Tabs.appearance)
-
-      SyncSettingsTab()
-        .tabItem {
-          Label("Sync", systemImage: "arrow.triangle.2.circlepath")
-        }
-        .tag(Tabs.sync)
-
-      PlaybackSettingsTab()
-        .tabItem {
-          Label("Playback", systemImage: "play.circle")
-        }
-        .tag(Tabs.playback)
-
-      TranscriptSettingsTab()
-        .tabItem {
-          Label("Transcript", systemImage: "text.bubble")
-        }
-        .tag(Tabs.transcript)
-
-      AISettingsTab()
-        .tabItem {
-          Label("AI", systemImage: "sparkles")
-        }
-        .tag(Tabs.ai)
-
-      StorageSettingsTab()
-        .tabItem {
-          Label("Storage", systemImage: "internaldrive")
-        }
-        .tag(Tabs.storage)
+      }
     }
     .frame(width: 500, height: 400)
+  }
+
+  @ViewBuilder
+  private func tabContent(for tab: SettingsTab) -> some View {
+    switch tab {
+    case .general: GeneralSettingsTab()
+    case .appearance: AppearanceSettingsTab()
+    case .sync: SyncSettingsTab()
+    case .playback: PlaybackSettingsTab()
+    case .transcript: TranscriptSettingsTab()
+    case .ai: AISettingsTab()
+    case .storage: StorageSettingsTab()
+    }
   }
 }
 

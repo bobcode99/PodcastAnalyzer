@@ -287,7 +287,7 @@ struct MacHomeContentView: View {
             if !viewModel.upNextEpisodes.isEmpty {
               Button("See All") {}
                 .buttonStyle(.plain)
-                .foregroundStyle(.accentColor)
+                .foregroundStyle(Color.accentColor)
             }
           }
 
