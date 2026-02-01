@@ -45,8 +45,7 @@ struct HomeView: View {
           }
           .padding(.horizontal, 8)
           .padding(.vertical, 4)
-          .background(Color.gray.opacity(0.15))
-          .clipShape(.rect(cornerRadius: 12))
+          .glassEffect(Glass.regular.interactive(), in: .rect(cornerRadius: 12))
         }
       }
     }

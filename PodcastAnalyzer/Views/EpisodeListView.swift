@@ -647,9 +647,8 @@ struct EpisodeListView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(Color.gray.opacity(0.15))
             .foregroundStyle(.primary)
-            .clipShape(.rect(cornerRadius: 16))
+            .glassEffect(Glass.regular.interactive(), in: .rect(cornerRadius: 16))
           }
           .buttonStyle(.plain)
         }
@@ -672,19 +671,32 @@ struct FilterChip: View {
 
   var body: some View {
     Button(action: action) {
-      HStack(spacing: 4) {
-        Image(systemName: icon)
-          .font(.system(size: 12))
-        Text(title)
-          .font(.caption)
-          .fontWeight(isSelected ? .semibold : .regular)
-      }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 6)
-      .background(isSelected ? Color.blue : Color.gray.opacity(0.15))
-      .foregroundStyle(isSelected ? .white : .primary)
-      .clipShape(.rect(cornerRadius: 16))
+      chipLabel
     }
     .buttonStyle(.plain)
+  }
+
+  @ViewBuilder
+  private var chipLabel: some View {
+    let content = HStack(spacing: 4) {
+      Image(systemName: icon)
+        .font(.system(size: 12))
+      Text(title)
+        .font(.caption)
+        .fontWeight(isSelected ? .semibold : .regular)
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 6)
+
+    if isSelected {
+      content
+        .background(Color.blue)
+        .foregroundStyle(.white)
+        .clipShape(.rect(cornerRadius: 16))
+    } else {
+      content
+        .foregroundStyle(.primary)
+        .glassEffect(Glass.regular.interactive(), in: .rect(cornerRadius: 16))
+    }
   }
 }

@@ -663,11 +663,7 @@ struct QueueOverlay: View {
         }
       }
       .frame(maxHeight: 400)
-      .background(
-        RoundedRectangle(cornerRadius: 16)
-          .fill(Color.platformBackground)
-          .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
-      )
+      .glassEffect(Glass.regular, in: .rect(cornerRadius: 16))
       .padding(.horizontal, 16)
     }
   }
@@ -844,11 +840,7 @@ struct SpeedPickerOverlay: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 16)
       }
-      .background(
-        RoundedRectangle(cornerRadius: 16)
-          .fill(Color.platformBackground)
-          .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
-      )
+      .glassEffect(Glass.regular, in: .rect(cornerRadius: 16))
       .padding(.horizontal, 24)
     }
   }
@@ -881,18 +873,27 @@ struct SpeedButton: View {
 
   var body: some View {
     Button(action: onTap) {
-      Text(formatSpeed(speed))
-        .font(.subheadline)
-        .fontWeight(isSelected ? .bold : .medium)
-        .foregroundStyle(isSelected ? .white : .primary)
-        .frame(minWidth: 44, minHeight: 36)
-        .padding(.horizontal, 12)
-        .background(
-          Capsule()
-            .fill(isSelected ? Color.blue : Color.platformSystemGray5)
-        )
+      speedLabel
     }
     .buttonStyle(.plain)
+  }
+
+  @ViewBuilder
+  private var speedLabel: some View {
+    let label = Text(formatSpeed(speed))
+      .font(.subheadline)
+      .fontWeight(isSelected ? .bold : .medium)
+      .foregroundStyle(isSelected ? .white : .primary)
+      .frame(minWidth: 44, minHeight: 36)
+      .padding(.horizontal, 12)
+
+    if isSelected {
+      label
+        .background(Capsule().fill(Color.blue))
+    } else {
+      label
+        .glassEffect(Glass.regular.interactive(), in: .capsule)
+    }
   }
 
   private func formatSpeed(_ speed: Float) -> String {

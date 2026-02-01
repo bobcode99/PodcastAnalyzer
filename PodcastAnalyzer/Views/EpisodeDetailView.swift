@@ -87,24 +87,28 @@ struct EpisodeDetailView: View {
         }
     }
 
+    private var scrollContent: some View {
+        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+            // Header scrolls away naturally
+            headerSection
+                .padding(.bottom, 8)
+
+            Divider()
+
+            // Sticky tabs + content
+            Section {
+                tabContentView
+                    .frame(minHeight: 400)
+            } header: {
+                tabSelector
+                    .glassEffect(Glass.regular)
+            }
+        }
+    }
+
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                // Header scrolls away naturally
-                headerSection
-                    .padding(.bottom, 8)
-
-                Divider()
-
-                // Sticky tabs + content
-                Section {
-                    tabContentView
-                        .frame(minHeight: 400)
-                } header: {
-                    tabSelector
-                        .background(.regularMaterial)
-                }
-            }
+            scrollContent
         }
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: 80)

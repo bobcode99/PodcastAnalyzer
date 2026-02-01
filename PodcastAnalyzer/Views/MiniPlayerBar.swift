@@ -110,7 +110,7 @@ struct MiniPlayerBar: View {
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 10)
-      .background(Color.platformSecondaryBackground)
+      .glassEffect(Glass.regular)
     }
     .sheet(isPresented: $showExpandedPlayer) {
       ExpandedPlayerView(

@@ -77,28 +77,18 @@ struct PodcastSearchView: View {
     private var tabSelector: some View {
         HStack(spacing: 0) {
             ForEach(SearchTab.allCases, id: \.self) { tab in
-                Button(action: {
+                SearchTabButton(
+                    title: tab.rawValue,
+                    isSelected: selectedTab == tab
+                ) {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         selectedTab = tab
                     }
-                }) {
-                    Text(tab.rawValue)
-                        .font(.subheadline)
-                        .fontWeight(selectedTab == tab ? .semibold : .regular)
-                        .foregroundStyle(selectedTab == tab ? .primary : .secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(selectedTab == tab ? Color.platformSystemGray5 : Color.clear)
-                        )
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(4)
-        .background(Color.platformSystemGray6)
-        .clipShape(.rect(cornerRadius: 10))
+        .glassEffect(Glass.regular, in: .rect(cornerRadius: 10))
     }
 
     // MARK: - Empty Search View
@@ -452,6 +442,37 @@ struct LibraryEpisodeRow: View {
             imageURL: episode.imageURL ?? podcastImageURL,
             useDefaultSpeed: true
         )
+    }
+}
+
+// MARK: - Search Tab Button
+
+struct SearchTabButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            tabLabel
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var tabLabel: some View {
+        let base = Text(title)
+            .font(.subheadline)
+            .fontWeight(isSelected ? .semibold : .regular)
+            .foregroundStyle(isSelected ? .primary : .secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+
+        if isSelected {
+            base.glassEffect(Glass.regular.interactive(), in: .rect(cornerRadius: 8))
+        } else {
+            base
+        }
     }
 }
 

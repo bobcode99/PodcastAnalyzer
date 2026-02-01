@@ -380,8 +380,7 @@ struct QuickAccessCard: View {
     }
     .padding(12)
     .frame(maxWidth: .infinity, minHeight: 90)
-    .background(Color.platformSystemGray6)
-    .clipShape(.rect(cornerRadius: 12))
+    .glassEffect(Glass.regular, in: .rect(cornerRadius: 12))
   }
 }
 
