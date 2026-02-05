@@ -74,7 +74,7 @@ struct TranscriptSegment: Identifiable, Equatable {
   }
 }
 
-@Observable
+@MainActor @Observable
 final class EpisodeDetailViewModel {
 
   enum DescriptionContent {
@@ -162,6 +162,13 @@ final class EpisodeDetailViewModel {
 
   @ObservationIgnored
   private var playbackTimerTask: Task<Void, Never>?
+
+  // Additional tracked tasks for proper cleanup
+  @ObservationIgnored
+  private var parseDescriptionTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var checkTranscriptTask: Task<Void, Never>?
 
   // Flag to track transcript manager observation
   @ObservationIgnored
@@ -561,12 +568,9 @@ final class EpisodeDetailViewModel {
       .set(rootStyle: rootStyle)
       .build()
 
-    Task {
+    parseDescriptionTask = Task {
       let attributedString = parser.render(html)
-
-      await MainActor.run {
-        self.descriptionContent = .parsed(attributedString)
-      }
+      self.descriptionContent = .parsed(attributedString)
     }
   }
 
@@ -1067,7 +1071,8 @@ final class EpisodeDetailViewModel {
   }
 
   func checkTranscriptStatus() {
-    Task {
+    checkTranscriptTask?.cancel()
+    checkTranscriptTask = Task {
       // Get podcast language and create transcript service
       let language = getPodcastLanguage()
       let transcriptService = TranscriptService(language: language)
@@ -2315,6 +2320,13 @@ final class EpisodeDetailViewModel {
 
     playbackTimerTask?.cancel()
     playbackTimerTask = nil
+
+    // Cancel additional tracked tasks
+    parseDescriptionTask?.cancel()
+    parseDescriptionTask = nil
+
+    checkTranscriptTask?.cancel()
+    checkTranscriptTask = nil
   }
 
   deinit {
@@ -2322,5 +2334,7 @@ final class EpisodeDetailViewModel {
     downloadTimerTask?.cancel()
     playbackTimerTask?.cancel()
     shareTask?.cancel()
+    parseDescriptionTask?.cancel()
+    checkTranscriptTask?.cancel()
   }
 }

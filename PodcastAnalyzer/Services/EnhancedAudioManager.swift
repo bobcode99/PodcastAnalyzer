@@ -84,7 +84,7 @@ enum SleepTimerOption: Equatable, CaseIterable {
   }
 }
 
-@Observable
+@MainActor @Observable
 class EnhancedAudioManager: NSObject {
   static let shared = EnhancedAudioManager()
 
@@ -280,15 +280,16 @@ private func handleAudioInterruption(_ notification: Notification) {
     commandCenter.skipBackwardCommand.removeTarget(nil)
     commandCenter.changePlaybackPositionCommand.removeTarget(nil)
 
+    // Remote command handlers run on arbitrary queues, so dispatch to MainActor
     commandCenter.playCommand.isEnabled = true
     commandCenter.playCommand.addTarget { [weak self] _ in
-      self?.resume()
+      Task { @MainActor in self?.resume() }
       return .success
     }
 
     commandCenter.pauseCommand.isEnabled = true
     commandCenter.pauseCommand.addTarget { [weak self] _ in
-      self?.pause()
+      Task { @MainActor in self?.pause() }
       return .success
     }
 
@@ -296,14 +297,14 @@ private func handleAudioInterruption(_ notification: Notification) {
     commandCenter.skipForwardCommand.isEnabled = true
     commandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: 15)]
     commandCenter.skipForwardCommand.addTarget { [weak self] _ in
-      self?.skipForward(seconds: 15)
+      Task { @MainActor in self?.skipForward(seconds: 15) }
       return .success
     }
 
     commandCenter.skipBackwardCommand.isEnabled = true
     commandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: 15)]
     commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
-      self?.skipBackward(seconds: 15)
+      Task { @MainActor in self?.skipBackward(seconds: 15) }
       return .success
     }
 
@@ -312,7 +313,8 @@ private func handleAudioInterruption(_ notification: Notification) {
       guard let event = event as? MPChangePlaybackPositionCommandEvent else {
         return .commandFailed
       }
-      self?.seek(to: event.positionTime)
+      let position = event.positionTime
+      Task { @MainActor in self?.seek(to: position) }
       return .success
     }
   }

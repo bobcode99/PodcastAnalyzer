@@ -219,14 +219,15 @@ struct UpNextCard: View {
 
         // Status icons overlay (reactive)
         if let observer = statusObserver {
-          EpisodeStatusIconsCompact(
+          EpisodeStatusIcons(
             isStarred: episode.isStarred,
             isDownloaded: observer.isDownloaded,
             hasTranscript: observer.hasTranscript,
             hasAIAnalysis: observer.hasAIAnalysis,
             isDownloading: observer.isDownloading,
             downloadProgress: observer.downloadProgress,
-            isTranscribing: observer.isTranscribing
+            isTranscribing: observer.isTranscribing,
+            isCompact: true
           )
         }
       }
