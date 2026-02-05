@@ -116,6 +116,13 @@ final class EpisodeDetailViewModel {
   var transcriptSegments: [TranscriptSegment] = []
   var transcriptSearchQuery: String = ""
 
+  // Sentence grouping (precomputed, not per-render)
+  var groupedSentences: [TranscriptSentence] = []
+
+  // Search match navigation
+  var searchMatchIds: [TranscriptSentence.ID] = []
+  var currentMatchIndex: Int = 0
+
   // RSS transcript state (from podcast:transcript tag)
   var rssTranscriptState: TranscriptDownloadState = .notAvailable
 
@@ -1397,6 +1404,9 @@ final class EpisodeDetailViewModel {
       )
     }
 
+    // Precompute sentence grouping for transcript views
+    regroupSentences()
+
     // Debug: log first few segments if we have any
     if !segments.isEmpty {
       logger.info("First segment: \(segments[0].text.prefix(50))...")
@@ -1586,6 +1596,50 @@ final class EpisodeDetailViewModel {
     } else {
       audioManager.seek(to: segment.startTime)
     }
+  }
+
+  // MARK: - Sentence Grouping & Search Navigation
+
+  /// Regroup segments into sentences. Call when transcriptSegments changes.
+  func regroupSentences() {
+    groupedSentences = TranscriptGrouping.groupIntoSentences(transcriptSegments)
+    // Recompute search matches if there's an active query
+    if !transcriptSearchQuery.isEmpty {
+      updateSearchMatches(query: transcriptSearchQuery)
+    }
+  }
+
+  /// Regroup filtered segments into sentences (for search-filtered view)
+  var filteredGroupedSentences: [TranscriptSentence] {
+    guard !transcriptSearchQuery.isEmpty else { return groupedSentences }
+    return TranscriptGrouping.groupIntoSentences(filteredTranscriptSegments)
+  }
+
+  /// Update search match IDs based on current query
+  func updateSearchMatches(query: String) {
+    guard !query.isEmpty else {
+      searchMatchIds = []
+      currentMatchIndex = 0
+      return
+    }
+    searchMatchIds = groupedSentences.compactMap { sentence in
+      sentence.text.localizedStandardContains(query) ? sentence.id : nil
+    }
+    currentMatchIndex = 0
+  }
+
+  /// Navigate to the next search match. Returns the sentence ID to scroll to.
+  func nextMatch() -> TranscriptSentence.ID? {
+    guard !searchMatchIds.isEmpty else { return nil }
+    currentMatchIndex = (currentMatchIndex + 1) % searchMatchIds.count
+    return searchMatchIds[currentMatchIndex]
+  }
+
+  /// Navigate to the previous search match. Returns the sentence ID to scroll to.
+  func previousMatch() -> TranscriptSentence.ID? {
+    guard !searchMatchIds.isEmpty else { return nil }
+    currentMatchIndex = (currentMatchIndex - 1 + searchMatchIds.count) % searchMatchIds.count
+    return searchMatchIds[currentMatchIndex]
   }
 
   // MARK: - On-Device AI (Quick Tags from Metadata)

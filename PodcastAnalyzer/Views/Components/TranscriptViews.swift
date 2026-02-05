@@ -9,7 +9,7 @@
 //  - Segments are grouped into Sentences (until sentence-ending punctuation)
 //  - Each sentence is displayed as one visual block
 //  - Within a sentence, the currently playing segment is highlighted
-//  - Optional: Word-level highlighting when accurate wordTimings exist
+//  - SentenceHighlightState enables efficient SwiftUI diffing
 //
 
 import SwiftUI
@@ -17,7 +17,6 @@ import SwiftUI
 // MARK: - Transcript Sentence Model
 
 /// A sentence composed of multiple transcript segments
-/// Segments are grouped until a sentence-ending punctuation is found
 struct TranscriptSentence: Identifiable {
     let id: Int
     let segments: [TranscriptSegment]
@@ -61,11 +60,20 @@ struct TranscriptSentence: Identifiable {
     }
 }
 
+// MARK: - Sentence Highlight State
+
+/// POD enum for efficient SwiftUI diffing — prevents 100-225 unnecessary re-renders per timer tick
+enum SentenceHighlightState: Equatable {
+    case active(activeSegmentIndex: Int)
+    case played
+    case future
+}
+
 // MARK: - Sentence Grouping Utilities
 
 enum TranscriptGrouping {
     /// Sentence-ending punctuation marks (English and CJK)
-    private static let sentenceEndings: Set<Character> = [".", "!", "?", "。", "！", "？"]
+    private static let sentenceEndings: Set<Character> = [".", "!", "?", "\u{3002}", "\u{FF01}", "\u{FF1F}"]
 
     /// Maximum segments per sentence to handle long unpunctuated streams
     static let maxSegmentsPerSentence = 4
@@ -104,6 +112,24 @@ enum TranscriptGrouping {
         }
 
         return sentences
+    }
+
+    /// Compute highlight state for a sentence given the current playback time
+    static func highlightState(for sentence: TranscriptSentence, currentTime: TimeInterval?) -> SentenceHighlightState {
+        guard let time = currentTime else { return .future }
+
+        if sentence.containsTime(time) {
+            // Find which segment is active
+            if let activeIndex = sentence.segments.firstIndex(where: { time >= $0.startTime && time <= $0.endTime }) {
+                return .active(activeSegmentIndex: activeIndex)
+            }
+            // Time is in a gap between segments within the sentence
+            return .active(activeSegmentIndex: -1)
+        } else if time > sentence.endTime {
+            return .played
+        } else {
+            return .future
+        }
     }
 }
 
@@ -178,7 +204,7 @@ struct SearchHighlightedText: View {
                 upper: text.index(text.startIndex, offsetBy: text.distance(from: text.startIndex, to: range.upperBound))
             ))
             var highlighted = AttributedString(String(text[originalRange]))
-            highlighted.backgroundColor = .yellow.opacity(0.4)
+            highlighted.backgroundColor = .yellow.opacity(0.3)
             highlighted.font = .system(size: 17, weight: .semibold)
             result.append(highlighted)
 
@@ -194,12 +220,12 @@ struct SearchHighlightedText: View {
     }
 }
 
-// MARK: - Sentence-Based Transcript View (NEW - Primary View)
+// MARK: - Sentence-Based Transcript View (Primary View)
 
 /// Displays transcript as sentences with segment-level highlighting within each sentence
 /// This is the main transcript view used by EpisodeDetailView and ExpandedPlayerView
 struct SentenceBasedTranscriptView: View {
-    let segments: [TranscriptSegment]
+    let sentences: [TranscriptSentence]
     let currentTime: TimeInterval?
     let searchQuery: String
     let onSegmentTap: (TranscriptSegment) -> Void
@@ -207,29 +233,34 @@ struct SentenceBasedTranscriptView: View {
     /// Whether to show timestamps on the left
     var showTimestamps: Bool = false
 
-    /// Whether to enable word-level highlighting (requires wordTimings)
-    var enableWordHighlighting: Bool = false
+    /// Subtitle display mode
+    var subtitleMode: SubtitleDisplayMode = .originalOnly
 
-    @State private var settings = SubtitleSettingsManager.shared
+    /// Search match IDs for navigation highlight
+    var searchMatchIds: Set<Int> = []
 
-    /// Sentences grouped from segments
-    private var sentences: [TranscriptSentence] {
-        TranscriptGrouping.groupIntoSentences(segments)
-    }
+    /// Currently focused search match ID
+    var currentSearchMatchId: Int?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        LazyVStack(alignment: .leading, spacing: 12) {
             ForEach(sentences) { sentence in
+                let highlightState = TranscriptGrouping.highlightState(
+                    for: sentence,
+                    currentTime: currentTime
+                )
                 SentenceView(
                     sentence: sentence,
-                    currentTime: currentTime,
+                    highlightState: highlightState,
                     searchQuery: searchQuery,
-                    displayMode: settings.displayMode,
+                    subtitleMode: subtitleMode,
                     showTimestamp: showTimestamps,
-                    enableWordHighlighting: enableWordHighlighting,
+                    isSearchMatch: searchMatchIds.contains(sentence.id),
+                    isCurrentSearchMatch: currentSearchMatchId == sentence.id,
                     onSegmentTap: onSegmentTap
                 )
-                .id("sentence-\(sentence.id)")
+                .equatable()
+                .id(sentence.id)
             }
         }
     }
@@ -237,26 +268,31 @@ struct SentenceBasedTranscriptView: View {
 
 // MARK: - Sentence View (displays one sentence with segment highlighting)
 
-/// Displays a single sentence with individual segment highlighting
-struct SentenceView: View {
+/// Displays a single sentence with individual segment highlighting.
+/// Conforms to Equatable for efficient SwiftUI diffing with `.equatable()`.
+struct SentenceView: View, Equatable {
     let sentence: TranscriptSentence
-    let currentTime: TimeInterval?
+    let highlightState: SentenceHighlightState
     let searchQuery: String
-    let displayMode: SubtitleDisplayMode
+    let subtitleMode: SubtitleDisplayMode
     var showTimestamp: Bool = false
-    var enableWordHighlighting: Bool = false
+    var isSearchMatch: Bool = false
+    var isCurrentSearchMatch: Bool = false
     let onSegmentTap: (TranscriptSegment) -> Void
 
-    /// The currently active segment within this sentence
-    private var activeSegment: TranscriptSegment? {
-        guard let time = currentTime else { return nil }
-        return sentence.activeSegment(at: time)
+    static func == (lhs: SentenceView, rhs: SentenceView) -> Bool {
+        lhs.sentence.id == rhs.sentence.id &&
+        lhs.highlightState == rhs.highlightState &&
+        lhs.searchQuery == rhs.searchQuery &&
+        lhs.subtitleMode == rhs.subtitleMode &&
+        lhs.isSearchMatch == rhs.isSearchMatch &&
+        lhs.isCurrentSearchMatch == rhs.isCurrentSearchMatch
     }
 
-    /// Whether any segment in this sentence is active
-    private var isSentenceActive: Bool {
-        guard let time = currentTime else { return false }
-        return sentence.containsTime(time)
+    /// Whether this sentence is the active one
+    private var isActive: Bool {
+        if case .active = highlightState { return true }
+        return false
     }
 
     var body: some View {
@@ -272,21 +308,21 @@ struct SentenceView: View {
                     Text(sentence.formattedStartTime)
                         .font(.caption)
                         .fontWeight(.medium)
-                        .foregroundStyle(isSentenceActive ? .blue : .secondary)
+                        .foregroundStyle(isActive ? .blue : .secondary)
                         .frame(width: 50, alignment: .leading)
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     // Primary text with segment-level highlighting
-                    buildSentenceText(isPrimary: true)
+                    buildSentenceText()
                         .font(.system(size: 17, weight: .regular))
                         .lineSpacing(4)
 
-                    // Secondary text (translation) if in dual mode
+                    // Translation text for dual subtitle modes
                     if let translatedText = sentence.translatedText,
-                       displayMode == .dualOriginalFirst || displayMode == .dualTranslatedFirst {
+                       subtitleMode == .dualOriginalFirst || subtitleMode == .dualTranslatedFirst {
                         Text(translatedText)
-                            .font(.system(size: 15, weight: .regular))
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineSpacing(3)
                     }
@@ -294,20 +330,26 @@ struct SentenceView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.vertical, 8)
-            .padding(.horizontal, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isSentenceActive ? Color.blue.opacity(0.08) : Color.clear)
-            )
+            .padding(.leading, 8)
+            .padding(.trailing, 12)
+            .overlay(alignment: .leading) {
+                // Active sentence accent bar
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color.blue)
+                    .frame(width: 3)
+                    .opacity(isActive ? 1 : 0)
+                    .scaleEffect(x: 1, y: isActive ? 1 : 0.5, anchor: .leading)
+                    .animation(.easeInOut(duration: 0.25), value: isActive)
+            }
         }
         .buttonStyle(.plain)
     }
 
-    /// Builds the sentence text with segment-level highlighting
+    /// Builds the sentence text with segment-level or search highlighting
     @ViewBuilder
-    private func buildSentenceText(isPrimary: Bool) -> some View {
-        // If searching, just show search highlighting
+    private func buildSentenceText() -> some View {
         if !searchQuery.isEmpty {
+            // Show search highlighting with yellow backgrounds
             SearchHighlightedText(text: sentence.text, query: searchQuery)
         } else {
             // Build text with segment highlighting
@@ -315,7 +357,10 @@ struct SentenceView: View {
         }
     }
 
-    /// Builds an AttributedString where the active segment is highlighted
+    /// Builds an AttributedString with refined highlighting colors:
+    /// - Active segment: blue foreground, semibold
+    /// - Played segment: secondary foreground, regular
+    /// - Future segment: primary foreground, regular
     private func buildSegmentHighlightedAttributedString() -> AttributedString {
         var result = AttributedString()
         let isCJK = CJKTextUtils.containsCJK(sentence.text)
@@ -324,21 +369,26 @@ struct SentenceView: View {
             let segmentText = segment.text.trimmingCharacters(in: .whitespaces)
             var attrText = AttributedString(segmentText)
 
-            // Check if this segment is the active one
-            let isActiveSegment = activeSegment?.id == segment.id
-
-            if isActiveSegment {
-                // Highlight the active segment
-                attrText.foregroundColor = .blue
-                attrText.font = .system(size: 17, weight: .semibold)
-                attrText.backgroundColor = Color.blue.opacity(0.15)
-            } else if let time = currentTime, time > segment.endTime {
-                // Segment already played
-                attrText.foregroundColor = .blue.opacity(0.7)
-                attrText.font = .system(size: 17, weight: .medium)
-            } else {
-                // Segment not yet played
-                attrText.foregroundColor = .primary.opacity(0.7)
+            switch highlightState {
+            case .active(let activeSegmentIndex):
+                if index == activeSegmentIndex {
+                    // Active segment: blue + semibold
+                    attrText.foregroundColor = .blue
+                    attrText.font = .system(size: 17, weight: .semibold)
+                } else if index < activeSegmentIndex || (activeSegmentIndex == -1) {
+                    // Played segment within active sentence
+                    attrText.foregroundColor = .secondary
+                    attrText.font = .system(size: 17, weight: .regular)
+                } else {
+                    // Future segment within active sentence
+                    attrText.foregroundColor = .primary
+                    attrText.font = .system(size: 17, weight: .regular)
+                }
+            case .played:
+                attrText.foregroundColor = .secondary
+                attrText.font = .system(size: 17, weight: .regular)
+            case .future:
+                attrText.foregroundColor = .primary
                 attrText.font = .system(size: 17, weight: .regular)
             }
 
@@ -354,91 +404,40 @@ struct SentenceView: View {
     }
 }
 
-// MARK: - Legacy FlowingTranscriptView (for backward compatibility)
+// MARK: - Search Navigation Bar
 
-/// A flowing paragraph-style transcript view with segment-level highlighting
-/// NOTE: Consider using SentenceBasedTranscriptView for better sentence grouping
-struct FlowingTranscriptView: View {
-    let segments: [TranscriptSegment]
-    let currentTime: TimeInterval?
-    let searchQuery: String
-    let onSegmentTap: (TranscriptSegment) -> Void
-
-    var showTimestamps: Bool = false
-    var enableWordHighlighting: Bool = false
-
-    @State private var settings = SubtitleSettingsManager.shared
+/// Floating search navigation overlay showing match count and prev/next buttons
+struct TranscriptSearchNavigationBar: View {
+    let matchCount: Int
+    let currentIndex: Int
+    let onPrevious: () -> Void
+    let onNext: () -> Void
 
     var body: some View {
-        // Use the new sentence-based view
-        SentenceBasedTranscriptView(
-            segments: segments,
-            currentTime: currentTime,
-            searchQuery: searchQuery,
-            onSegmentTap: onSegmentTap,
-            showTimestamps: showTimestamps,
-            enableWordHighlighting: enableWordHighlighting
-        )
-    }
-}
+        HStack(spacing: 12) {
+            Text("\(currentIndex + 1) of \(matchCount)")
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundStyle(.primary)
 
-// MARK: - Word Highlighted Text (Optional - for accurate word timings)
+            Divider()
+                .frame(height: 20)
 
-/// Text view with word-by-word highlighting based on playback progress
-/// Only used when accurate word timings are available from TranscriptService
-///
-/// enableWordHighlighting conditions:
-/// 1. The segment must have wordTimings array populated
-/// 2. wordTimings must come from TranscriptService.audioToSRTWithWordTimings()
-/// 3. This is typically only accurate for on-device transcription
-struct WordHighlightedText: View {
-    let text: String
-    let wordTimings: [WordTiming]
-    let currentTime: TimeInterval?
-    let searchQuery: String
+            Button(action: onPrevious) {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .disabled(matchCount == 0)
 
-    var body: some View {
-        Text(buildAttributedString())
-    }
-
-    private func buildAttributedString() -> AttributedString {
-        var result = AttributedString()
-        let isCJKText = CJKTextUtils.containsCJK(text)
-
-        guard let time = currentTime else {
-            return AttributedString(text)
+            Button(action: onNext) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .disabled(matchCount == 0)
         }
-
-        for (index, timing) in wordTimings.enumerated() {
-            var wordAttr = AttributedString(timing.word)
-
-            let isSpoken = time >= timing.endTime
-            let isSpeaking = time >= timing.startTime && time < timing.endTime
-
-            if isSpeaking {
-                wordAttr.foregroundColor = .blue
-                wordAttr.font = .system(size: 17, weight: .bold)
-                wordAttr.backgroundColor = Color.blue.opacity(0.2)
-            } else if isSpoken {
-                wordAttr.foregroundColor = .blue
-                wordAttr.font = .system(size: 17, weight: .semibold)
-            } else {
-                wordAttr.foregroundColor = .primary.opacity(0.6)
-                wordAttr.font = .system(size: 17, weight: .regular)
-            }
-
-            if !searchQuery.isEmpty && timing.word.localizedStandardContains(searchQuery) {
-                wordAttr.backgroundColor = .yellow.opacity(0.4)
-            }
-
-            result.append(wordAttr)
-
-            if !isCJKText && index < wordTimings.count - 1 {
-                result.append(AttributedString(" "))
-            }
-        }
-
-        return result
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .glassEffect(.regular, in: .capsule)
     }
 }
 
@@ -569,15 +568,12 @@ struct TranscriptPreviewView: View {
             let isActive = activeSegmentInSentence?.id == segment.id
 
             if isActive {
-                // ACTIVE: blue, bold
                 attrText.foregroundColor = .blue
                 attrText.font = .system(size: 17, weight: .bold)
             } else if let time = currentTime, time > segment.endTime {
-                // PAST: light blue, medium weight
-                attrText.foregroundColor = .blue.opacity(0.7)
-                attrText.font = .system(size: 17, weight: .medium)
+                attrText.foregroundColor = .secondary
+                attrText.font = .system(size: 17, weight: .regular)
             } else {
-                // FUTURE: gray, regular weight
                 attrText.foregroundColor = .primary.opacity(0.6)
                 attrText.font = .system(size: 17, weight: .regular)
             }
@@ -604,7 +600,9 @@ struct FullTranscriptContent: View {
     let filteredSegments: [TranscriptSegment]
     let onSegmentTap: (TranscriptSegment) -> Void
 
-    /// Sentences for scroll tracking
+    @State private var settings = SubtitleSettingsManager.shared
+
+    /// Sentences for display (from filtered segments)
     private var sentences: [TranscriptSentence] {
         TranscriptGrouping.groupIntoSentences(filteredSegments)
     }
@@ -614,6 +612,17 @@ struct FullTranscriptContent: View {
         guard let time = currentTime else { return nil }
         return sentences.first { $0.containsTime(time) }?.id
     }
+
+    /// Search match IDs
+    private var searchMatchIds: Set<Int> {
+        guard !searchQuery.isEmpty else { return [] }
+        return Set(sentences.compactMap { sentence in
+            sentence.text.localizedStandardContains(searchQuery) ? sentence.id : nil
+        })
+    }
+
+    @State private var currentSearchIndex: Int = 0
+    @State private var searchMatchIdsList: [Int] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -644,25 +653,67 @@ struct FullTranscriptContent: View {
 
             // Transcript with sentence grouping
             ScrollViewReader { proxy in
-                ScrollView {
-                    SentenceBasedTranscriptView(
-                        segments: filteredSegments,
-                        currentTime: currentTime,
-                        searchQuery: searchQuery,
-                        onSegmentTap: onSegmentTap,
-                        showTimestamps: false,
-                        enableWordHighlighting: false
-                    )
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
-                }
-                .onChange(of: currentSentenceId) { _, newId in
-                    if let id = newId, searchQuery.isEmpty {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            proxy.scrollTo("sentence-\(id)", anchor: .center)
+                ZStack(alignment: .bottom) {
+                    ScrollView {
+                        SentenceBasedTranscriptView(
+                            sentences: sentences,
+                            currentTime: currentTime,
+                            searchQuery: searchQuery,
+                            onSegmentTap: onSegmentTap,
+                            showTimestamps: false,
+                            subtitleMode: settings.displayMode,
+                            searchMatchIds: searchMatchIds,
+                            currentSearchMatchId: searchMatchIdsList.isEmpty ? nil : searchMatchIdsList[currentSearchIndex]
+                        )
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .padding(.bottom, !searchQuery.isEmpty && !searchMatchIdsList.isEmpty ? 60 : 0)
+                    }
+                    .onChange(of: currentSentenceId) { _, newId in
+                        if let id = newId, searchQuery.isEmpty {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(id, anchor: .center)
+                            }
                         }
                     }
+
+                    // Search navigation bar
+                    if !searchQuery.isEmpty && !searchMatchIdsList.isEmpty {
+                        TranscriptSearchNavigationBar(
+                            matchCount: searchMatchIdsList.count,
+                            currentIndex: currentSearchIndex,
+                            onPrevious: {
+                                if !searchMatchIdsList.isEmpty {
+                                    currentSearchIndex = (currentSearchIndex - 1 + searchMatchIdsList.count) % searchMatchIdsList.count
+                                    withAnimation {
+                                        proxy.scrollTo(searchMatchIdsList[currentSearchIndex], anchor: .center)
+                                    }
+                                }
+                            },
+                            onNext: {
+                                if !searchMatchIdsList.isEmpty {
+                                    currentSearchIndex = (currentSearchIndex + 1) % searchMatchIdsList.count
+                                    withAnimation {
+                                        proxy.scrollTo(searchMatchIdsList[currentSearchIndex], anchor: .center)
+                                    }
+                                }
+                            }
+                        )
+                        .padding(.bottom, 8)
+                    }
                 }
+            }
+        }
+        .onChange(of: searchQuery) { _, newQuery in
+            // Recompute search matches
+            if newQuery.isEmpty {
+                searchMatchIdsList = []
+                currentSearchIndex = 0
+            } else {
+                searchMatchIdsList = sentences.compactMap { sentence in
+                    sentence.text.localizedStandardContains(newQuery) ? sentence.id : nil
+                }
+                currentSearchIndex = 0
             }
         }
     }

@@ -45,6 +45,9 @@ struct EpisodeDetailView: View {
     @State private var playbackTimerActive = false
     @State private var currentPlaybackTime: TimeInterval = 0
 
+    // Auto-scroll state
+    @State private var autoScrollEnabled = true
+
     // Translation configuration for .translationTask
     @State private var transcriptTranslationConfig: TranslationSession.Configuration?
     @State private var descriptionTranslationConfig: TranslationSession.Configuration?
@@ -106,9 +109,40 @@ struct EpisodeDetailView: View {
         }
     }
 
+    /// Current sentence ID for auto-scroll
+    private var currentSentenceId: Int? {
+        guard viewModel.isCurrentEpisode else { return nil }
+        let time = currentPlaybackTime
+        return viewModel.groupedSentences.first { $0.containsTime(time) }?.id
+    }
+
     var body: some View {
-        ScrollView {
-            scrollContent
+        ScrollViewReader { proxy in
+            ScrollView {
+                scrollContent
+            }
+            .onScrollPhaseChange { _, newPhase in
+                // Disable auto-scroll when user interacts
+                if newPhase == .interacting {
+                    autoScrollEnabled = false
+                }
+            }
+            .onChange(of: currentSentenceId) { _, newId in
+                if autoScrollEnabled, let id = newId, selectedTab == 1, viewModel.transcriptSearchQuery.isEmpty {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        proxy.scrollTo(id, anchor: .center)
+                    }
+                }
+            }
+            .onChange(of: viewModel.currentMatchIndex) { _, _ in
+                // Scroll to the current search match
+                if !viewModel.searchMatchIds.isEmpty {
+                    let matchId = viewModel.searchMatchIds[viewModel.currentMatchIndex]
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        proxy.scrollTo(matchId, anchor: .center)
+                    }
+                }
+            }
         }
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: 80)
@@ -479,22 +513,47 @@ struct EpisodeDetailView: View {
 
     // MARK: - Live Captions Content (Apple Podcasts Style - Flowing Text)
     private var liveCaptionsContent: some View {
-        VStack(spacing: 0) {
+        let sentences = viewModel.transcriptSearchQuery.isEmpty
+            ? viewModel.groupedSentences
+            : viewModel.filteredGroupedSentences
+        let searchMatchIdSet = Set(viewModel.searchMatchIds)
+
+        return VStack(spacing: 0) {
             // Compact header with search and menu
             transcriptHeader
 
-            // Flowing transcript content (no ScrollView - parent provides scrolling)
-            // Always pass currentTime when this is the current episode (like ExpandedPlayerView)
-            FlowingTranscriptView(
-                segments: viewModel.filteredTranscriptSegments,
+            // Search navigation bar
+            if !viewModel.transcriptSearchQuery.isEmpty && !viewModel.searchMatchIds.isEmpty {
+                TranscriptSearchNavigationBar(
+                    matchCount: viewModel.searchMatchIds.count,
+                    currentIndex: viewModel.currentMatchIndex,
+                    onPrevious: {
+                        _ = viewModel.previousMatch()
+                    },
+                    onNext: {
+                        _ = viewModel.nextMatch()
+                    }
+                )
+                .padding(.vertical, 4)
+            }
+
+            // Sentence-based transcript content
+            SentenceBasedTranscriptView(
+                sentences: sentences,
                 currentTime: viewModel.isCurrentEpisode ? currentPlaybackTime : nil,
                 searchQuery: viewModel.transcriptSearchQuery,
                 onSegmentTap: { segment in
                     viewModel.seekToSegment(segment)
-                }
+                },
+                subtitleMode: SubtitleSettingsManager.shared.displayMode,
+                searchMatchIds: searchMatchIdSet,
+                currentSearchMatchId: viewModel.searchMatchIds.isEmpty ? nil : viewModel.searchMatchIds[viewModel.currentMatchIndex]
             )
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
+        }
+        .onChange(of: viewModel.transcriptSearchQuery) { _, newQuery in
+            viewModel.updateSearchMatches(query: newQuery)
         }
     }
 
@@ -543,6 +602,15 @@ struct EpisodeDetailView: View {
                 }
             }
             .disabled(viewModel.translationStatus.isTranslating)
+
+            // Auto-scroll toggle
+            Button {
+                autoScrollEnabled.toggle()
+            } label: {
+                Image(systemName: "arrow.up.and.down.text.horizontal")
+                    .font(.system(size: 18))
+                    .foregroundStyle(autoScrollEnabled ? .blue : .secondary)
+            }
 
             // Settings button
             Button {
@@ -869,6 +937,6 @@ struct TranscriptSegmentRow: View {
     }
 }
 
-// NOTE: CJKTextUtils, FlowingTranscriptView, FlowingSegmentText, WordHighlightedText,
-// SearchHighlightedText are now in Views/Components/TranscriptViews.swift
+// NOTE: CJKTextUtils, SentenceBasedTranscriptView, SentenceView, SearchHighlightedText
+// are in Views/Components/TranscriptViews.swift
 
