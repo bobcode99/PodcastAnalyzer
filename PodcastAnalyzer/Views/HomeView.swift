@@ -586,9 +586,8 @@ struct PodcastPreviewSheet: View {
                   .font(.caption)
                   .padding(.horizontal, 10)
                   .padding(.vertical, 4)
-                  .background(Color.blue.opacity(0.15))
                   .foregroundStyle(.blue)
-                  .clipShape(.rect(cornerRadius: 12))
+                  .glassEffect(.regular.tint(.blue), in: .rect(cornerRadius: 12))
               }
             }
           }
@@ -604,8 +603,7 @@ struct PodcastPreviewSheet: View {
             }
             .frame(maxWidth: .infinity)
             .padding()
-            .background(Color.green.opacity(0.15))
-            .clipShape(.rect(cornerRadius: 12))
+            .glassEffect(.regular.tint(.green), in: .rect(cornerRadius: 12))
             .padding(.horizontal)
           } else if viewModel.isSubscribing {
             ProgressView("Subscribing...")
@@ -625,10 +623,8 @@ struct PodcastPreviewSheet: View {
                 .font(.headline)
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(Color.blue)
-                .foregroundStyle(.white)
-                .clipShape(.rect(cornerRadius: 12))
             }
+            .buttonStyle(.glassProminent)
             .padding(.horizontal)
           }
 

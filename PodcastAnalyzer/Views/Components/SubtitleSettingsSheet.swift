@@ -84,6 +84,7 @@ struct SubtitleSettingsSheet: View {
           Text("About")
         }
       }
+      .formStyle(.grouped)
       .navigationTitle("Subtitle Settings")
       #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)

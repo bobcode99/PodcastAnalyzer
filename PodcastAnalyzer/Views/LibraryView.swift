@@ -176,8 +176,7 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color.platformSystemGray6)
-        .clipShape(.rect(cornerRadius: 12))
+        .glassEffect(.regular, in: .rect(cornerRadius: 12))
       }
       .buttonStyle(.plain)
     }
@@ -199,10 +198,10 @@ struct LibraryView: View {
       forName: .podcastSyncCompleted,
       object: nil,
       queue: .main
-    ) { _ in
-      Task { @MainActor [viewModel, modelContext] in
-        // Refresh the view model data
-        viewModel.setModelContext(modelContext)
+    ) { @Sendable [viewModel] _ in
+      Task { @MainActor in
+        // Trigger view model refresh - it will use its own model context
+        viewModel.refreshData()
       }
     }
 
@@ -211,9 +210,9 @@ struct LibraryView: View {
       forName: .episodeDownloadCompleted,
       object: nil,
       queue: .main
-    ) { _ in
-      Task { @MainActor [viewModel, modelContext] in
-        viewModel.setModelContext(modelContext)
+    ) { @Sendable [viewModel] _ in
+      Task { @MainActor in
+        viewModel.refreshData()
       }
     }
   }

@@ -226,8 +226,7 @@ struct EpisodeRowView: View {
         .font(.system(size: 12, weight: .bold))
         .foregroundStyle(.white)
         .padding(4)
-        .background(Color.blue)
-        .clipShape(.rect(cornerRadius: 4))
+        .glassEffect(.regular.tint(.blue), in: .rect(cornerRadius: 4))
         .padding(4)
       }
     }
@@ -302,8 +301,7 @@ struct EpisodeRowView: View {
         .foregroundStyle(.orange)
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(Color.orange.opacity(0.15))
-        .clipShape(Capsule())
+        .glassEffect(.regular.tint(.orange), in: .capsule)
       } else if case .finishing = downloadState {
         HStack(spacing: 2) {
           ProgressView().scaleEffect(0.4)
@@ -312,8 +310,7 @@ struct EpisodeRowView: View {
         .foregroundStyle(.blue)
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(Color.blue.opacity(0.15))
-        .clipShape(Capsule())
+        .glassEffect(.regular.tint(.blue), in: .capsule)
       }
 
       // Status indicators

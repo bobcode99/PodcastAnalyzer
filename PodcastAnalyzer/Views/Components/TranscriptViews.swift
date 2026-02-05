@@ -503,8 +503,7 @@ struct TranscriptPreviewView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
-                    .background(Color.blue.opacity(0.1))
-                    .clipShape(.rect(cornerRadius: 12))
+                    .glassEffect(.regular.tint(.blue), in: .rect(cornerRadius: 12))
                     .padding(.horizontal, 16)
             }
 
@@ -540,8 +539,7 @@ struct TranscriptPreviewView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .background(Color.platformSystemGray6)
-            .clipShape(.rect(cornerRadius: 12))
+            .glassEffect(.regular, in: .rect(cornerRadius: 12))
             .padding(.horizontal, 16)
         }
     }

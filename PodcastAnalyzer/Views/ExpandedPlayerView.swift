@@ -420,8 +420,7 @@ struct ExpandedPlayerView: View {
           .font(.system(size: 16, weight: .medium))
           .foregroundStyle(.primary)
           .frame(width: 48, height: 48)
-          .background(Color.gray.opacity(0.2))
-          .clipShape(Circle())
+          .glassEffect(.regular, in: .circle)
       }
       .frame(width: 56, height: 56)
       .contentShape(Rectangle())
@@ -829,13 +828,11 @@ struct SpeedPickerOverlay: View {
           Button("Apply") {
             onSelectSpeed(sliderValue)
           }
+          .buttonStyle(.glassProminent)
           .font(.subheadline)
           .fontWeight(.semibold)
-          .foregroundStyle(.white)
           .padding(.horizontal, 20)
           .padding(.vertical, 8)
-          .background(Color.blue)
-          .clipShape(.rect(cornerRadius: 20))
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 16)
@@ -1007,8 +1004,7 @@ struct TranscriptFullScreenView: View {
       }
     }
     .padding(12)
-    .background(Color.platformSystemGray6)
-    .clipShape(.rect(cornerRadius: 12))
+    .glassEffect(.regular, in: .rect(cornerRadius: 12))
   }
 }
 

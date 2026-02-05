@@ -581,8 +581,7 @@ struct EpisodeDetailView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.platformSystemGray6)
-            .clipShape(.rect(cornerRadius: 10))
+            .glassEffect(.regular, in: .rect(cornerRadius: 10))
 
             // Translate button with circular progress - shows language picker
             Button {
@@ -679,8 +678,7 @@ struct EpisodeDetailView: View {
         EpisodeTranscriptStatusView(viewModel: viewModel)
             .frame(maxWidth: .infinity)
             .padding()
-            .background(Color.gray.opacity(0.1))
-            .clipShape(.rect(cornerRadius: 12))
+            .glassEffect(.regular, in: .rect(cornerRadius: 12))
             .padding(.horizontal)
     }
 

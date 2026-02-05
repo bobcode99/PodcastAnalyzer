@@ -385,6 +385,18 @@ final class LibraryViewModel {
     isRefreshing = false
   }
 
+  /// Refresh all data sections - called from notification observers
+  func refreshData() {
+    guard modelContext != nil else { return }
+    
+    // Reload all sections
+    Task {
+      await loadSavedSection()
+      await loadDownloadedSection()
+      await loadLatestSection()
+    }
+  }
+
   /// Ensure observers and timer are running - safe to call multiple times
   private func ensureObserversAndTimerRunning() {
     // Re-setup observers if they were cleaned up

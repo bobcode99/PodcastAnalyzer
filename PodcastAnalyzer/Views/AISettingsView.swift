@@ -60,6 +60,7 @@ struct AISettingsView: View {
         Form {
             formContent
         }
+        .formStyle(.grouped)
         .navigationTitle("AI Settings")
         .alert(testResultSuccess ? "Success" : "Error", isPresented: $showingTestResult) {
             Button("OK", role: .cancel) {}
