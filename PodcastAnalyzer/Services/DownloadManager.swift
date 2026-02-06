@@ -264,7 +264,7 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
           )
 
           // Trigger auto-transcript if enabled
-          if manager.autoTranscriptEnabled {
+          if SubtitleSettingsManager.shared.autoGenerateTranscripts {
             TranscriptManager.shared.queueTranscript(
               episodeTitle: episodeTitle,
               podcastTitle: podcastTitle,
@@ -361,13 +361,6 @@ final class DownloadManager {
 
   var downloadStates: [String: DownloadState] = [:]
 
-  // Auto-transcript setting
-  var autoTranscriptEnabled: Bool {
-    didSet {
-      UserDefaults.standard.set(autoTranscriptEnabled, forKey: "autoTranscriptEnabled")
-    }
-  }
-
   @ObservationIgnored
   private let sessionDelegate = DownloadSessionDelegate()
 
@@ -386,9 +379,7 @@ final class DownloadManager {
   @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
 
-  private init() {
-    self.autoTranscriptEnabled = UserDefaults.standard.bool(forKey: "autoTranscriptEnabled")
-  }
+  private init() {}
 
   // MARK: - State Restoration
 

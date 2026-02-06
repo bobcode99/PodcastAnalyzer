@@ -406,15 +406,6 @@ struct EpisodeListView: View {
 
           Divider()
 
-          Toggle(isOn: $downloadManager.autoTranscriptEnabled) {
-            Label(
-              "Auto-Generate Transcripts",
-              systemImage: "text.bubble"
-            )
-          }
-
-          Divider()
-
           Button(action: {
             Task { await viewModel.refreshPodcast() }
           }) {

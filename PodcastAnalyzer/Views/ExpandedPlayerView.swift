@@ -19,7 +19,6 @@ struct ExpandedPlayerView: View {
   @State private var showSpeedPicker = false
   @State private var showQueue = false
   @State private var showEllipsisMenu = false
-  @State private var showFullTranscript = false
   @State private var showSleepTimerPicker = false
 
   // Scrubbing state for smooth slider interaction
@@ -72,15 +71,7 @@ struct ExpandedPlayerView: View {
 
                 // 3. Bottom Actions
                 bottomActionsSection
-                    .padding(.bottom, (viewModel.hasTranscript && !viewModel.transcriptSegments.isEmpty) ? 20 : 40)
-
-                // 4. Transcript - ONLY renders if data exists
-                if viewModel.hasTranscript && !viewModel.transcriptSegments.isEmpty {
-                    transcriptPreviewSection
-                        .padding(.top, 10)
-                        .padding(.bottom, 40)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
+                    .padding(.bottom, 40)
             }
             .containerRelativeFrame(.vertical, alignment: .center)
         }
@@ -134,24 +125,7 @@ struct ExpandedPlayerView: View {
       .onDisappear {
         viewModel.cleanup()
       }
-      .sheet(isPresented: $showFullTranscript) {
-        TranscriptFullScreenView(viewModel: viewModel)
-      }
     }
-  }
-
-  // MARK: - Transcript Preview Section
-  private var transcriptPreviewSection: some View {
-    TranscriptPreviewView(
-      segments: viewModel.transcriptSegments,
-      currentSegmentId: viewModel.currentSegmentId,
-      currentTime: viewModel.currentTime,
-      onSegmentTap: { segment in
-        viewModel.seekToSegment(segment)
-      },
-      onExpandTap: { showFullTranscript = true },
-      previewCount: 4
-    )
   }
 
   // MARK: - Artwork Section

@@ -230,6 +230,23 @@ struct SettingsView: View {
 
             transcriptActionButton
           }
+
+          Toggle(isOn: Binding(
+            get: { SubtitleSettingsManager.shared.autoGenerateTranscripts },
+            set: { SubtitleSettingsManager.shared.autoGenerateTranscripts = $0 }
+          )) {
+            HStack {
+              Image(systemName: "waveform")
+                .foregroundStyle(.orange)
+                .frame(width: 24)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Auto-Generate Transcripts")
+                Text("Generate when episodes are downloaded")
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+              }
+            }
+          }
         } header: {
           Text("Transcript")
         } footer: {

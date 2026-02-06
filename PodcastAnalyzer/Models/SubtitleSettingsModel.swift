@@ -142,6 +142,11 @@ final class SubtitleSettingsManager {
     didSet { saveSettings() }
   }
 
+  /// Automatically generate transcripts for downloaded episodes
+  var autoGenerateTranscripts: Bool = false {
+    didSet { saveSettings() }
+  }
+
   // MARK: - UserDefaults Keys
 
   private enum Keys {
@@ -150,6 +155,7 @@ final class SubtitleSettingsManager {
     static let autoTranslate = "subtitle_auto_translate"
     static let autoDownloadTranscripts = "subtitle_auto_download_transcripts"
     static let groupSegmentsIntoSentences = "subtitle_group_segments_into_sentences"
+    static let autoGenerateTranscripts = "subtitle_auto_generate_transcripts"
   }
 
   // MARK: - Initialization
@@ -188,6 +194,10 @@ final class SubtitleSettingsManager {
     } else {
       groupSegmentsIntoSentences = defaults.bool(forKey: Keys.groupSegmentsIntoSentences)
     }
+
+    if defaults.object(forKey: Keys.autoGenerateTranscripts) != nil {
+      autoGenerateTranscripts = defaults.bool(forKey: Keys.autoGenerateTranscripts)
+    }
   }
 
   private func saveSettings() {
@@ -197,6 +207,7 @@ final class SubtitleSettingsManager {
     defaults.set(autoTranslateOnLoad, forKey: Keys.autoTranslate)
     defaults.set(autoDownloadTranscripts, forKey: Keys.autoDownloadTranscripts)
     defaults.set(groupSegmentsIntoSentences, forKey: Keys.groupSegmentsIntoSentences)
+    defaults.set(autoGenerateTranscripts, forKey: Keys.autoGenerateTranscripts)
   }
 
   // MARK: - Translation Availability
