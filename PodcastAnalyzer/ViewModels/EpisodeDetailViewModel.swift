@@ -23,6 +23,16 @@ import AppKit
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "EpisodeDetailViewModel")
 
+// MARK: - Transcript State
+
+enum TranscriptState: Equatable {
+  case idle
+  case downloadingModel(progress: Double)
+  case transcribing(progress: Double)
+  case completed
+  case error(String)
+}
+
 /// Represents word-level timing information for accurate highlighting
 struct WordTiming: Equatable, Sendable {
   let word: String
@@ -1128,6 +1138,16 @@ final class EpisodeDetailViewModel {
 
     // Start observing TranscriptManager state
     observeTranscriptManager()
+  }
+
+  /// Cancels an in-progress transcript generation job
+  func cancelTranscript() {
+    TranscriptManager.shared.cancelJob(
+      episodeTitle: episode.title,
+      podcastTitle: podcastTitle
+    )
+    isObservingTranscriptManager = false
+    transcriptState = .idle
   }
 
   /// Observes TranscriptManager for job status updates

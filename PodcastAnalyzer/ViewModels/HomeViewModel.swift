@@ -263,9 +263,8 @@ final class HomeViewModel {
       return
     }
 
-    // Always join existing task if it matches our region (prevents duplicate requests)
+    // Join existing task if it matches our region (prevents duplicate requests)
     if let task = Self.loadingTask, Self.loadingRegion == regionToLoad {
-      logger.debug("Joining existing top podcasts load task for \(regionToLoad)")
       isLoadingTopPodcasts = true
       do {
         let podcasts = try await task.value

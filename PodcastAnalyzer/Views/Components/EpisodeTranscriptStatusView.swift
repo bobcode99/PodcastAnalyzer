@@ -4,6 +4,11 @@ import SwiftUI
 struct EpisodeTranscriptStatusView: View {
     @Bindable var viewModel: EpisodeDetailViewModel
 
+    private var transcriptLanguageName: String {
+        let code = viewModel.selectedTranscriptLanguage ?? viewModel.podcastLanguage
+        return SettingsViewModel.availableTranscriptLocales.first { $0.id == code }?.name ?? code
+    }
+
     var body: some View {
         VStack(spacing: 16) {
             switch viewModel.transcriptState {
@@ -108,12 +113,17 @@ struct EpisodeTranscriptStatusView: View {
 
                     Text("\(Int(progress * 100))%")
                         .font(.caption).foregroundStyle(.secondary)
+
+                    Button("Cancel", role: .cancel) {
+                        viewModel.cancelTranscript()
+                    }
+                    .buttonStyle(.bordered)
                 }
 
             case .transcribing(let progress):
                 VStack(spacing: 12) {
                     ProgressView(value: progress) {
-                        Text("Generating Transcript...")
+                        Text("Generating Transcript (\(transcriptLanguageName))...")
                             .font(.caption)
                     }
                     .progressViewStyle(.linear)
@@ -121,7 +131,11 @@ struct EpisodeTranscriptStatusView: View {
 
                     Text("\(Int(progress * 100))%")
                         .font(.caption).foregroundStyle(.secondary)
-                    
+
+                    Button("Cancel", role: .cancel) {
+                        viewModel.cancelTranscript()
+                    }
+                    .buttonStyle(.bordered)
                 }
 
             case .completed:
