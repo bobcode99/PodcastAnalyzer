@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 import SwiftUI
-import os.log
+import OSLog
 
 // MARK: - Transcript Model Status
 enum TranscriptModelStatus: Equatable {

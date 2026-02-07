@@ -15,7 +15,7 @@
 import AVFoundation
 import Foundation
 import MediaPlayer
-import os.log
+import OSLog
 import WidgetKit
 
 #if os(iOS)

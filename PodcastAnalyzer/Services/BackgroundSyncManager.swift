@@ -12,7 +12,7 @@ import Foundation
 import Observation
 import SwiftData
 import UserNotifications
-import os.log
+import OSLog
 
 // MARK: - Sync Notifications
 

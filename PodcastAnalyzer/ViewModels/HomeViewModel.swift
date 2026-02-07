@@ -9,7 +9,7 @@ import Foundation
 import Observation
 import SwiftData
 import SwiftUI
-import os.log
+import OSLog
 
 @MainActor
 @Observable

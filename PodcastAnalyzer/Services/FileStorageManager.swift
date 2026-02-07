@@ -13,7 +13,7 @@
 //
 
 import Foundation
-import os.log
+import OSLog
 
 enum FileStorageError: LocalizedError {
   case invalidURL

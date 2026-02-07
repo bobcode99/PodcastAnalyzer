@@ -9,7 +9,7 @@ import Observation
 import SwiftData
 import SwiftUI
 import ZMarkupParser
-import os.log
+import OSLog
 
 #if canImport(Translation)
 @preconcurrency import Translation

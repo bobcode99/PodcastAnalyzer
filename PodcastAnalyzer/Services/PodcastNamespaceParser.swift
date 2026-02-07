@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import os.log
+import OSLog
 
 /// Information about a podcast transcript from RSS
 public struct TranscriptInfo: Sendable, Equatable {

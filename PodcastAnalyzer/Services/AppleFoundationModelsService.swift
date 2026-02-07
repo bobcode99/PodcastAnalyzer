@@ -9,7 +9,7 @@
 
 import Foundation
 import FoundationModels
-import os.log
+import OSLog
 
 private nonisolated let logger = Logger(subsystem: "com.podcastanalyzer", category: "AppleFoundationModelsService")
 

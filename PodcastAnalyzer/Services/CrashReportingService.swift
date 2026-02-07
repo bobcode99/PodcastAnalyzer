@@ -7,7 +7,7 @@
 
 import Foundation
 import MetricKit
-import os.log
+import OSLog
 
 final class CrashReportingService: NSObject {
   static let shared = CrashReportingService()

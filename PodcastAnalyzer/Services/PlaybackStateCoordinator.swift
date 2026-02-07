@@ -7,7 +7,7 @@
 
 import Foundation
 import SwiftData
-import os.log
+import OSLog
 
 @MainActor
 @Observable

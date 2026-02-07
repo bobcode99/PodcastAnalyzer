@@ -7,7 +7,7 @@
 
 import FeedKit
 import Foundation
-import os.log
+import OSLog
 internal import XMLKit
 
 

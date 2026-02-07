@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import os.log
+import OSLog
 #if os(iOS)
 import UIKit
 #endif

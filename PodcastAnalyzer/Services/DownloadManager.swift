@@ -14,7 +14,7 @@
 
 import Foundation
 import Observation
-import os.log
+import OSLog
 
 #if DEBUG
 private let signpostLog = OSLog(subsystem: "com.podcast.analyzer", category: "PointsOfInterest")

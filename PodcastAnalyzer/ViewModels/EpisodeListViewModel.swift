@@ -15,7 +15,7 @@ import UIKit
 import AppKit
 #endif
 
-import os.log
+import OSLog
 
 private let viewModelLogger = Logger(subsystem: "com.podcast.analyzer", category: "ViewModelLifecycle")
 

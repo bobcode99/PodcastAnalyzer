@@ -8,7 +8,7 @@
 
 import Foundation
 import OSLog
-import os.log
+import OSLog
 
 @MainActor
 final class PersistentLogService {

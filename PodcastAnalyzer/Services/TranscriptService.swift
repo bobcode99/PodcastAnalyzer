@@ -9,7 +9,7 @@ import AVFoundation
 import Foundation
 import NaturalLanguage
 import Speech
-import os.log
+import OSLog
 
 // Change availability to iOS and a more realistic version number (e.g., 17.0)
 @available(iOS 17.0, *)

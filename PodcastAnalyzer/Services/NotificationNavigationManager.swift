@@ -10,7 +10,7 @@ import Observation
 import SwiftData
 import SwiftUI
 import UserNotifications
-import os.log
+import OSLog
 
 // MARK: - Notification Navigation Target
 

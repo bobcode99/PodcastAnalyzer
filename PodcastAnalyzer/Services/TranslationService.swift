@@ -8,7 +8,7 @@
 //
 
 import Foundation
-import os.log
+import OSLog
 
 #if canImport(Translation)
 import Translation

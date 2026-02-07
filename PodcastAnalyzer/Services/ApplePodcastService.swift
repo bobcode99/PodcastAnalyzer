@@ -1,5 +1,5 @@
 import Foundation
-import os.log
+import OSLog
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "ApplePodcastService")
 

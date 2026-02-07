@@ -8,7 +8,7 @@
 import Foundation
 import SwiftData
 import SwiftUI
-import os.log
+import OSLog
 
 #if DEBUG
 private let signpostLog = OSLog(subsystem: "com.podcast.analyzer", category: "PointsOfInterest")

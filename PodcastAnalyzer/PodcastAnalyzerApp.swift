@@ -7,7 +7,7 @@
 
 import SwiftData
 import SwiftUI
-import os.log
+import OSLog
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "App")
 

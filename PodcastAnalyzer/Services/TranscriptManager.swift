@@ -7,7 +7,7 @@
 
 import Foundation
 import SwiftData
-import os.log
+import OSLog
 
 /// Tracks the status of a transcript generation job
 enum TranscriptJobStatus: Equatable {
