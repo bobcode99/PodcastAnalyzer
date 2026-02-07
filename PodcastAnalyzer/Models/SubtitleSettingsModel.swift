@@ -98,6 +98,28 @@ enum TranslationTargetLanguage: String, CaseIterable, Codable, Sendable {
     }
   }
 
+  /// Short abbreviated name for compact display (e.g., badge)
+  var shortName: String {
+    switch self {
+    case .deviceLanguage: return "Auto"
+    case .english: return "EN"
+    case .traditionalChinese: return "繁中"
+    case .simplifiedChinese: return "简中"
+    case .japanese: return "日本"
+    case .korean: return "한국"
+    case .spanish: return "ES"
+    case .french: return "FR"
+    case .german: return "DE"
+    case .portuguese: return "PT"
+    case .italian: return "IT"
+    case .russian: return "RU"
+    case .arabic: return "AR"
+    case .hindi: return "HI"
+    case .thai: return "TH"
+    case .vietnamese: return "VI"
+    }
+  }
+
   /// Returns the language identifier string
   var languageIdentifier: String {
     switch self {

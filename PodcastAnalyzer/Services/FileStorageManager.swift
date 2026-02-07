@@ -71,6 +71,11 @@ actor FileStorageManager {
     documentsDirectory.appendingPathComponent("Captions", isDirectory: true)
   }
 
+  // Log files in Documents (user can access via Files app)
+  var logsDirectory: URL {
+    documentsDirectory.appendingPathComponent("Logs", isDirectory: true)
+  }
+
   // Temporary downloads
   private var tempDirectory: URL {
     fileManager.temporaryDirectory.appendingPathComponent("Downloads", isDirectory: true)
@@ -85,7 +90,7 @@ actor FileStorageManager {
   // MARK: - Directory Management
 
   private func createDirectories() {
-    let directories = [audioDirectory, captionsDirectory, tempDirectory]
+    let directories = [audioDirectory, captionsDirectory, logsDirectory, tempDirectory]
 
     for directory in directories {
       // Only create if it doesn't exist
@@ -686,6 +691,19 @@ actor FileStorageManager {
       logger.info("Cleared all caption files (\(contents.count) files)")
     } catch {
       logger.error("Failed to clear caption files: \(error.localizedDescription)")
+    }
+  }
+
+  /// Clears all log files from storage
+  func clearAllLogFiles() {
+    do {
+      let contents = try fileManager.contentsOfDirectory(at: logsDirectory, includingPropertiesForKeys: nil)
+      for fileURL in contents {
+        try fileManager.removeItem(at: fileURL)
+      }
+      logger.info("Cleared all log files (\(contents.count) files)")
+    } catch {
+      logger.error("Failed to clear log files: \(error.localizedDescription)")
     }
   }
 

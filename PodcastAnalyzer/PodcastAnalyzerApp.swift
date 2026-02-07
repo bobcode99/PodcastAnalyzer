@@ -61,6 +61,9 @@ struct PodcastAnalyzerApp: App {
 
     // Register MetricKit crash reporting subscriber
     CrashReportingService.shared.start()
+
+    // Export previous session's os.log entries to Documents/Logs
+    PersistentLogService.shared.exportLogsInBackground()
   }
 
   var body: some Scene {

@@ -36,6 +36,7 @@ struct EpisodeDetailView: View {
     @State private var showDeleteConfirmation = false
     @State private var showSubtitleSettings = false
     @State private var showTranslationLanguagePicker = false
+    @State private var subtitleSettings = SubtitleSettingsManager.shared
 
     // Translation error alert
     @State private var showTranslationError = false
@@ -545,7 +546,7 @@ struct EpisodeDetailView: View {
                 onSegmentTap: { segment in
                     viewModel.seekToSegment(segment)
                 },
-                subtitleMode: SubtitleSettingsManager.shared.displayMode,
+                subtitleMode: subtitleSettings.displayMode,
                 searchMatchIds: searchMatchIdSet,
                 currentSearchMatchId: viewModel.searchMatchIds.isEmpty ? nil : viewModel.searchMatchIds[viewModel.currentMatchIndex]
             )
@@ -594,10 +595,26 @@ struct EpisodeDetailView: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 20))
                         .foregroundStyle(.red)
+                } else if viewModel.hasExistingTranslation {
+                    ZStack(alignment: .bottomTrailing) {
+                        Image(systemName: "translate.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.blue)
+                        if let lang = viewModel.selectedTranslationLanguage {
+                            Text(lang.shortName)
+                                .font(.system(size: 8, weight: .bold))
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 1)
+                                .background(.blue)
+                                .foregroundStyle(.white)
+                                .clipShape(Capsule())
+                                .offset(x: 4, y: 4)
+                        }
+                    }
                 } else {
-                    Image(systemName: viewModel.hasExistingTranslation ? "translate.fill" : "translate")
+                    Image(systemName: "translate")
                         .font(.system(size: 20))
-                        .foregroundStyle(viewModel.hasExistingTranslation ? .blue : .secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
             .disabled(viewModel.translationStatus.isTranslating)
@@ -611,13 +628,39 @@ struct EpisodeDetailView: View {
                     .foregroundStyle(autoScrollEnabled ? .blue : .secondary)
             }
 
-            // Settings button
-            Button {
-                showSubtitleSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 20))
-                    .foregroundStyle(.secondary)
+            // Display mode picker (when translation exists) or settings button
+            if viewModel.hasExistingTranslation {
+                Menu {
+                    ForEach(SubtitleDisplayMode.allCases, id: \.self) { mode in
+                        Button {
+                            subtitleSettings.displayMode = mode
+                        } label: {
+                            if subtitleSettings.displayMode == mode {
+                                Label(mode.displayName, systemImage: "checkmark")
+                            } else {
+                                Label(mode.displayName, systemImage: mode.icon)
+                            }
+                        }
+                    }
+                    Divider()
+                    Button {
+                        showSubtitleSettings = true
+                    } label: {
+                        Label("More Settings...", systemImage: "gearshape")
+                    }
+                } label: {
+                    Image(systemName: "textformat.alt")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.blue)
+                }
+            } else {
+                Button {
+                    showSubtitleSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             // Options menu

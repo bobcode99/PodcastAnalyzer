@@ -675,7 +675,12 @@ final class EpisodeDetailViewModel {
       ) {
         await MainActor.run {
           self.transcriptSegments = translated
+          self.regroupSentences()
           self.translationStatus = .completed
+          // Auto-switch display mode so translated text is visible
+          if self.subtitleSettings.displayMode == .originalOnly {
+            self.subtitleSettings.displayMode = .dualTranslatedFirst
+          }
           logger.info("Loaded cached translation for \(self.episode.title) in \(language.displayName)")
         }
         return
@@ -798,6 +803,10 @@ final class EpisodeDetailViewModel {
       self.translationStatus = .completed
       // Update available translations
       self.availableTranslationLanguages.insert(targetLang)
+      // Auto-switch display mode so translated text is visible
+      if self.subtitleSettings.displayMode == .originalOnly {
+        self.subtitleSettings.displayMode = .dualTranslatedFirst
+      }
     }
 
     logger.info("Completed translation for \(self.episode.title)")
@@ -892,6 +901,10 @@ final class EpisodeDetailViewModel {
         await MainActor.run {
           self.transcriptSegments = translated
           self.regroupSentences()
+          // Auto-switch display mode so translated text is visible
+          if self.subtitleSettings.displayMode == .originalOnly {
+            self.subtitleSettings.displayMode = .dualTranslatedFirst
+          }
           logger.info("Loaded existing translations for \(self.episode.title)")
         }
       }
