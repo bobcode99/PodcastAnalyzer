@@ -53,7 +53,7 @@ struct LivePlaybackButton: View {
   
   // MARK: - Live State from AudioManager
   
-  @State private var audioManager = EnhancedAudioManager.shared
+  private var audioManager: EnhancedAudioManager { .shared }
   
   /// Unique key for this episode (matches episodeKey format)
   private var episodeKey: String {

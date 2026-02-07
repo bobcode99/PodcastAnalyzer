@@ -18,6 +18,7 @@ import UIKit
 
 struct LibraryView: View {
   @State private var viewModel = LibraryViewModel(modelContext: nil)
+  @State private var settingsViewModel = SettingsViewModel()
   @Environment(\.modelContext) private var modelContext
 
   // Use @Query for instant persistence and automatic updates
@@ -126,7 +127,7 @@ struct LibraryView: View {
       // Row of quick access cards
       HStack(spacing: 12) {
         // Saved (Starred) card
-        NavigationLink(destination: SavedEpisodesView(viewModel: viewModel)) {
+        NavigationLink(destination: SavedEpisodesView(viewModel: viewModel, showEpisodeArtwork: settingsViewModel.showEpisodeArtwork)) {
           QuickAccessCard(
             icon: "star.fill",
             iconColor: .yellow,
@@ -138,7 +139,7 @@ struct LibraryView: View {
         .buttonStyle(.plain)
 
         // Downloaded card - include actively downloading episodes in the count
-        NavigationLink(destination: DownloadedEpisodesView(viewModel: viewModel)) {
+        NavigationLink(destination: DownloadedEpisodesView(viewModel: viewModel, showEpisodeArtwork: settingsViewModel.showEpisodeArtwork)) {
           QuickAccessCard(
             icon: "arrow.down.circle.fill",
             iconColor: .green,
@@ -151,7 +152,7 @@ struct LibraryView: View {
       }
 
       // Latest episodes row
-      NavigationLink(destination: LatestEpisodesView(viewModel: viewModel)) {
+      NavigationLink(destination: LatestEpisodesView(viewModel: viewModel, showEpisodeArtwork: settingsViewModel.showEpisodeArtwork)) {
         HStack {
           HStack(spacing: 8) {
             Image(systemName: "clock.fill")
@@ -430,8 +431,8 @@ struct PodcastGridCell: View {
 
 struct SavedEpisodesView: View {
   @Bindable var viewModel: LibraryViewModel
+  let showEpisodeArtwork: Bool
   @Environment(\.modelContext) private var modelContext
-  @State private var settingsViewModel = SettingsViewModel()
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
 
@@ -444,7 +445,7 @@ struct SavedEpisodesView: View {
           EpisodeRowView(
             libraryEpisode: episode,
             episodeModel: fetchEpisodeModel(for: episode),
-            showArtwork: settingsViewModel.showEpisodeArtwork,
+            showArtwork: showEpisodeArtwork,
             onToggleStar: { toggleStar(episode) },
             onDownload: { downloadEpisode(episode) },
             onDeleteRequested: {
@@ -567,8 +568,8 @@ struct SavedEpisodesView: View {
 
 struct DownloadedEpisodesView: View {
   @Bindable var viewModel: LibraryViewModel
+  let showEpisodeArtwork: Bool
   @Environment(\.modelContext) private var modelContext
-  @State private var settingsViewModel = SettingsViewModel()
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
 
@@ -601,7 +602,7 @@ struct DownloadedEpisodesView: View {
                 EpisodeRowView(
                   libraryEpisode: episode,
                   episodeModel: fetchEpisodeModel(for: episode),
-                  showArtwork: settingsViewModel.showEpisodeArtwork,
+                  showArtwork: showEpisodeArtwork,
                   onToggleStar: { toggleStar(episode) },
                   onDownload: { downloadEpisode(episode) },
                   onDeleteRequested: {
@@ -798,8 +799,8 @@ struct DownloadingEpisodeRow: View {
 
 struct LatestEpisodesView: View {
   @Bindable var viewModel: LibraryViewModel
+  let showEpisodeArtwork: Bool
   @Environment(\.modelContext) private var modelContext
-  @State private var settingsViewModel = SettingsViewModel()
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
 
@@ -812,7 +813,7 @@ struct LatestEpisodesView: View {
           EpisodeRowView(
             libraryEpisode: episode,
             episodeModel: fetchEpisodeModel(for: episode),
-            showArtwork: settingsViewModel.showEpisodeArtwork,
+            showArtwork: showEpisodeArtwork,
             onToggleStar: { toggleStar(episode) },
             onDownload: { downloadEpisode(episode) },
             onDeleteRequested: {

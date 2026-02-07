@@ -87,6 +87,18 @@ struct TranscriptSegment: Identifiable, Equatable {
 @MainActor @Observable
 final class EpisodeDetailViewModel {
 
+  // Pre-compiled SRT regex (compiled once, reused for every parse)
+  private static let srtRegex: NSRegularExpression? = {
+    let entryPattern =
+      #"(?:^|\n)(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n"#
+    return try? NSRegularExpression(pattern: entryPattern, options: [])
+  }()
+
+  // Pre-compiled numeric HTML entity regex
+  private static let numericEntityRegex: NSRegularExpression? = {
+    return try? NSRegularExpression(pattern: "&#(\\d+);", options: [])
+  }()
+
   enum DescriptionContent {
     case loading
     case empty
@@ -104,15 +116,17 @@ final class EpisodeDetailViewModel {
   @ObservationIgnored
   private let fallbackImageURL: String?
 
-  // Reference singletons
-  @ObservationIgnored
+  // Reference singletons — NOT @ObservationIgnored so SwiftUI can observe through them
   let audioManager = EnhancedAudioManager.shared
-
-  @ObservationIgnored
   private let downloadManager = DownloadManager.shared
 
-  // Download state
-  var downloadState: DownloadState = .notDownloaded
+  // Download state (computed from @Observable DownloadManager)
+  var downloadState: DownloadState {
+    downloadManager.getDownloadState(
+      episodeTitle: episode.title,
+      podcastTitle: podcastTitle
+    )
+  }
 
   // Transcript state
   var transcriptState: TranscriptState = .idle
@@ -168,12 +182,13 @@ final class EpisodeDetailViewModel {
   @ObservationIgnored
   private var modelContext: ModelContext?
 
-  // Timer tasks - replaced Combine timers with Task-based timers for Swift 6
+  // Notification-driven playback position observer (replaces polling)
   @ObservationIgnored
-  private var downloadTimerTask: Task<Void, Never>?
+  private var playbackObserverTask: Task<Void, Never>?
 
+  // Translation task for cancellation
   @ObservationIgnored
-  private var playbackTimerTask: Task<Void, Never>?
+  private var translationTask: Task<Void, Never>?
 
   // Additional tracked tasks for proper cleanup
   @ObservationIgnored
@@ -199,12 +214,6 @@ final class EpisodeDetailViewModel {
     self.podcastLanguage = podcastLanguage
     parseDescription()
 
-    // Initialize download state
-    updateDownloadState()
-
-    // Observe download state changes
-    observeDownloadState()
-
     // Check for active transcript job and start observing
     checkAndObserveTranscriptJob()
   }
@@ -224,7 +233,7 @@ final class EpisodeDetailViewModel {
   func setModelContext(_ context: ModelContext) {
     self.modelContext = context
     loadEpisodeModel()
-    observePlaybackState()
+    observePlaybackPosition()
     loadAIAnalysisFromSwiftData()
   }
 
@@ -418,35 +427,11 @@ final class EpisodeDetailViewModel {
     downloadManager.deleteDownload(episodeTitle: episode.title, podcastTitle: podcastTitle)
   }
 
-  private func updateDownloadState() {
-    downloadState = downloadManager.getDownloadState(
-      episodeTitle: episode.title,
-      podcastTitle: podcastTitle
-    )
-  }
-
-  private func observeDownloadState() {
-    // Cancel any existing download timer first
-    downloadTimerTask?.cancel()
-
-    // Poll for download state changes using Task-based timer
-    downloadTimerTask = Task { @MainActor [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .milliseconds(500))
-        guard !Task.isCancelled else { break }
-        self?.updateDownloadState()
-      }
-    }
-  }
-
-  private func observePlaybackState() {
-    // Cancel any existing playback timer first
-    playbackTimerTask?.cancel()
-
-    // Poll for playback state changes using Task-based timer
-    playbackTimerTask = Task { @MainActor [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .seconds(2))
+  /// Listen for playback position updates via notification (posted every 5s by EnhancedAudioManager)
+  private func observePlaybackPosition() {
+    playbackObserverTask?.cancel()
+    playbackObserverTask = Task { @MainActor [weak self] in
+      for await _ in NotificationCenter.default.notifications(named: .playbackPositionDidUpdate) {
         guard !Task.isCancelled else { break }
         self?.refreshEpisodeModel()
       }
@@ -675,7 +660,8 @@ final class EpisodeDetailViewModel {
       return
     }
 
-    Task {
+    translationTask?.cancel()
+    translationTask = Task {
       // Try to load existing transcript translation first
       if let translated = await translationService.loadExistingTranslation(
         segments: transcriptSegments,
@@ -728,7 +714,8 @@ final class EpisodeDetailViewModel {
     // Use selected language or fall back to settings default
     let targetLang = (selectedTranslationLanguage ?? subtitleSettings.targetLanguage).languageIdentifier
 
-    Task {
+    translationTask?.cancel()
+    translationTask = Task {
       // Try to load existing translation first
       if let translated = await translationService.loadExistingTranslation(
         segments: transcriptSegments,
@@ -901,7 +888,8 @@ final class EpisodeDetailViewModel {
     let settings = SubtitleSettingsManager.shared
     let targetLang = settings.targetLanguage.languageIdentifier
 
-    Task {
+    translationTask?.cancel()
+    translationTask = Task {
       if let translated = await translationService.loadExistingTranslation(
         segments: transcriptSegments,
         episodeTitle: episode.title,
@@ -1339,13 +1327,9 @@ final class EpisodeDetailViewModel {
       .replacingOccurrences(of: "\r", with: "\n")
       .trimmingCharacters(in: .whitespacesAndNewlines)
 
-    // Use regex to split SRT into entries
-    // Pattern matches: index number at start of line, followed by timestamp line
-    let entryPattern =
-      #"(?:^|\n)(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n"#
-
-    guard let regex = try? NSRegularExpression(pattern: entryPattern, options: []) else {
-      logger.error("Failed to create SRT regex pattern")
+    // Use pre-compiled static regex for SRT parsing
+    guard let regex = Self.srtRegex else {
+      logger.error("SRT regex not available")
       return
     }
 
@@ -1564,7 +1548,7 @@ final class EpisodeDetailViewModel {
     }
 
     // Handle numeric HTML entities (&#NNN;)
-    if let regex = try? NSRegularExpression(pattern: "&#(\\d+);", options: []) {
+    if let regex = Self.numericEntityRegex {
       let nsString = result as NSString
       let matches = regex.matches(in: result, options: [], range: NSRange(location: 0, length: nsString.length))
 
@@ -2351,12 +2335,13 @@ final class EpisodeDetailViewModel {
     shareTask?.cancel()
     shareTask = nil
 
-    // Explicitly cancel timer tasks (critical for preventing memory leaks)
-    downloadTimerTask?.cancel()
-    downloadTimerTask = nil
+    // Cancel playback observer
+    playbackObserverTask?.cancel()
+    playbackObserverTask = nil
 
-    playbackTimerTask?.cancel()
-    playbackTimerTask = nil
+    // Cancel translation task
+    translationTask?.cancel()
+    translationTask = nil
 
     // Cancel additional tracked tasks
     parseDescriptionTask?.cancel()
@@ -2368,8 +2353,8 @@ final class EpisodeDetailViewModel {
 
   deinit {
     // Ensure cleanup even if cleanup() wasn't called (defensive programming)
-    downloadTimerTask?.cancel()
-    playbackTimerTask?.cancel()
+    playbackObserverTask?.cancel()
+    translationTask?.cancel()
     shareTask?.cancel()
     parseDescriptionTask?.cancel()
     checkTranscriptTask?.cancel()

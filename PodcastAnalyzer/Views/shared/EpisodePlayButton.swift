@@ -24,7 +24,7 @@ struct LiveEpisodePlayButton: View {
   let isDisabled: Bool
   let onPlay: () -> Void
 
-  @State private var audioManager = EnhancedAudioManager.shared
+  private var audioManager: EnhancedAudioManager { .shared }
 
   /// Unique key for this episode (matches episodeKey format)
   private var episodeKey: String {

@@ -125,6 +125,9 @@ struct ExpandedPlayerView: View {
       .onDisappear {
         viewModel.cleanup()
       }
+      .onChange(of: viewModel.currentEpisode?.id) {
+        viewModel.checkEpisodeChange()
+      }
     }
   }
 

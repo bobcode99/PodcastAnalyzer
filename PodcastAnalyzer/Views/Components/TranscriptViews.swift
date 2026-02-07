@@ -650,7 +650,7 @@ struct FullTranscriptContent: View {
     let filteredSegments: [TranscriptSegment]
     let onSegmentTap: (TranscriptSegment) -> Void
 
-    @State private var settings = SubtitleSettingsManager.shared
+    private var settings: SubtitleSettingsManager { .shared }
 
     /// Sentences for display (from filtered segments)
     private var sentences: [TranscriptSentence] {

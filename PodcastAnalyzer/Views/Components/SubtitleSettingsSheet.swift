@@ -9,7 +9,7 @@ import SwiftUI
 
 struct SubtitleSettingsSheet: View {
   @Environment(\.dismiss) private var dismiss
-  @State private var settings = SubtitleSettingsManager.shared
+  private var settings: SubtitleSettingsManager { .shared }
 
   var body: some View {
     NavigationStack {

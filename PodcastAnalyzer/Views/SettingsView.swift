@@ -8,7 +8,7 @@ import UIKit
 
 struct SettingsView: View {
   @State private var viewModel = SettingsViewModel()
-  @State private var syncManager = BackgroundSyncManager.shared
+  private var syncManager: BackgroundSyncManager { .shared }
   @Environment(\.modelContext) var modelContext
   @State private var showAddFeedSheet = false
 

@@ -9,7 +9,7 @@
 import SwiftUI
 
 struct MacMiniPlayerBar: View {
-  @State private var audioManager = EnhancedAudioManager.shared
+  private var audioManager: EnhancedAudioManager { .shared }
   @State private var showExpandedPlayer = false
   @State private var isHoveringProgress = false
   @State private var isDraggingProgress = false
@@ -208,7 +208,7 @@ struct MacMiniPlayerBar: View {
 
 struct MacExpandedPlayerView: View {
   @Environment(\.dismiss) private var dismiss
-  @State private var audioManager = EnhancedAudioManager.shared
+  private var audioManager: EnhancedAudioManager { .shared }
 
   private var progressPercentage: Double {
     guard audioManager.duration > 0 else { return 0 }

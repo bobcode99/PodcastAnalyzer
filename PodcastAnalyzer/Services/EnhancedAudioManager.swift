@@ -119,10 +119,18 @@ class EnhancedAudioManager: NSObject {
   private var interruptionTask: Task<Void, Never>?
   private var playerEndedTask: Task<Void, Never>?
   private var playerStalledTask: Task<Void, Never>?
+  private var artworkFetchTask: Task<Void, Never>?
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "AudioManager")
 
   // Use Unit Separator (U+001F) as delimiter - same as EpisodeDownloadModel
   private static let episodeKeyDelimiter = "\u{1F}"
+
+  // Pre-compiled SRT regex (compiled once, reused for every caption parse)
+  private static let srtRegex: NSRegularExpression? = {
+    let entryPattern =
+      #"(?:^|\n)(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n"#
+    return try? NSRegularExpression(pattern: entryPattern, options: [])
+  }()
 
   private enum Keys {
     static let lastEpisodeTitle = "lastEpisodeTitle"
@@ -635,6 +643,8 @@ private func handleAudioInterruption(_ notification: Notification) {
       while !Task.isCancelled {
         try? await Task.sleep(for: .seconds(1))
         guard let self else { return }
+        // Exit loop if timer was turned off (e.g. triggerSleepTimer sets .off)
+        guard self.sleepTimerOption != .off else { break }
         self.updateSleepTimer()
       }
     }
@@ -737,13 +747,9 @@ private func handleAudioInterruption(_ notification: Notification) {
       .replacingOccurrences(of: "\r", with: "\n")
       .trimmingCharacters(in: .whitespacesAndNewlines)
 
-    // Use regex to split SRT into entries (handles single or double newline separators)
-    // Pattern matches: index number at start of line, followed by timestamp line
-    let entryPattern =
-      #"(?:^|\n)(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n"#
-
-    guard let regex = try? NSRegularExpression(pattern: entryPattern, options: []) else {
-      logger.error("Failed to create SRT regex pattern")
+    // Use pre-compiled static regex for SRT parsing
+    guard let regex = Self.srtRegex else {
+      logger.error("SRT regex not available")
       return segments
     }
 
@@ -815,17 +821,35 @@ private func handleAudioInterruption(_ notification: Notification) {
 
   private func updateCurrentCaption() {
     guard !captionSegments.isEmpty else {
-      currentCaption = ""
+      if !currentCaption.isEmpty { currentCaption = "" }
       return
     }
 
-    // Find the caption segment for current time
-    if let segment = captionSegments.first(where: { segment in
-      currentTime >= segment.startTime && currentTime <= segment.endTime
-    }) {
-      currentCaption = segment.text
-    } else {
-      currentCaption = ""
+    // Binary search for the caption segment at currentTime
+    // captionSegments are sorted by startTime
+    let time = currentTime
+    var low = 0
+    var high = captionSegments.count - 1
+    var foundText = ""
+
+    while low <= high {
+      let mid = (low + high) / 2
+      let segment = captionSegments[mid]
+
+      if time < segment.startTime {
+        high = mid - 1
+      } else if time > segment.endTime {
+        low = mid + 1
+      } else {
+        // time is within [startTime, endTime]
+        foundText = segment.text
+        break
+      }
+    }
+
+    // Only write when value actually changed
+    if currentCaption != foundText {
+      currentCaption = foundText
     }
   }
 
@@ -847,7 +871,8 @@ private func handleAudioInterruption(_ notification: Notification) {
     if let imageURLString = imageURL ?? episode.imageURL,
       let url = URL(string: imageURLString)
     {
-      Task.detached { [weak self] in
+      artworkFetchTask?.cancel()
+      artworkFetchTask = Task.detached { [weak self] in
         do {
           let (data, _) = try await URLSession.shared.data(from: url)
           #if os(iOS)
@@ -1010,14 +1035,18 @@ private func handleAudioInterruption(_ notification: Notification) {
   // MARK: - Time Observer
 
   private func setupTimeObserver() {
-    let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+    let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
     timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) {
       [weak self] time in
       // Since we're on .main queue, we can safely assume MainActor isolation
       MainActor.assumeIsolated {
         guard let self = self else { return }
 
-        self.currentTime = time.seconds
+        // Throttle currentTime writes — only update when changed by >0.2s
+        let newTime = time.seconds
+        if abs(newTime - self.currentTime) > 0.2 {
+          self.currentTime = newTime
+        }
 
         // Track if duration was previously unknown
         let previousDuration = self.duration
@@ -1025,7 +1054,9 @@ private func handleAudioInterruption(_ notification: Notification) {
         if let newDuration = self.player?.currentItem?.duration.seconds,
           newDuration.isFinite
         {
-          self.duration = newDuration
+          if self.duration != newDuration {
+            self.duration = newDuration
+          }
 
           // Update Now Playing duration when it first becomes available
           // (transition from 0 or invalid to valid duration)
@@ -1037,13 +1068,15 @@ private func handleAudioInterruption(_ notification: Notification) {
         // Update current caption
         self.updateCurrentCaption()
 
-        // Update Now Playing time every second
-        if Int(self.currentTime * 10) % 10 == 0 {
+        // Update Now Playing time every second (at 0.25s interval, ~every 4th tick)
+        if Int(newTime) != Int(newTime - 0.25) {
           self.updateNowPlayingCurrentTime()
         }
 
         // Auto-save every 5 seconds and post notification for SwiftData persistence
-        if Int(self.currentTime) % 5 == 0 {
+        let currentSecond = Int(newTime)
+        let previousSecond = Int(newTime - 0.25)
+        if currentSecond % 5 == 0 && currentSecond != previousSecond {
           self.savePlaybackState()
           self.postPlaybackPositionUpdate()
           self.updateWidgetPlaybackData()
@@ -1135,6 +1168,8 @@ private func handleAudioInterruption(_ notification: Notification) {
     playerEndedTask = nil
     playerStalledTask?.cancel()
     playerStalledTask = nil
+    artworkFetchTask?.cancel()
+    artworkFetchTask = nil
 
     player?.pause()
     player = nil

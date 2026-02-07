@@ -110,7 +110,7 @@ struct AppearanceSettingsTab: View {
 // MARK: - Sync Settings Tab
 
 struct SyncSettingsTab: View {
-  @State private var syncManager = BackgroundSyncManager.shared
+  private var syncManager: BackgroundSyncManager { .shared }
 
   var body: some View {
     Form {

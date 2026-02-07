@@ -57,7 +57,43 @@ final class LibraryViewModel {
   var podcastInfoModelList: [PodcastInfoModel] = []
   var savedEpisodes: [LibraryEpisode] = []
   var downloadedEpisodes: [LibraryEpisode] = []
-  var downloadingEpisodes: [DownloadingEpisode] = []
+  var downloadingEpisodes: [DownloadingEpisode] {
+    var downloading: [DownloadingEpisode] = []
+
+    for (episodeKey, state) in downloadManager.downloadStates {
+      let progressValue: Double
+      let isActive: Bool
+
+      switch state {
+      case .downloading(let progress):
+        progressValue = progress
+        isActive = true
+      case .finishing:
+        progressValue = 1.0
+        isActive = true
+      default:
+        progressValue = 0
+        isActive = false
+      }
+
+      if isActive {
+        if let (podcastTitle, episodeTitle) = parseDownloadEpisodeKey(episodeKey) {
+          let imageURL = podcastTitleMap[podcastTitle]?.podcastInfo.imageURL
+
+          downloading.append(DownloadingEpisode(
+            id: episodeKey,
+            episodeTitle: episodeTitle,
+            podcastTitle: podcastTitle,
+            imageURL: imageURL,
+            progress: progressValue,
+            state: state
+          ))
+        }
+      }
+    }
+
+    return downloading.sorted { $0.progress < $1.progress }
+  }
   var latestEpisodes: [LibraryEpisode] = []
   var isLoading = false
   var error: String?
@@ -144,7 +180,6 @@ final class LibraryViewModel {
   private var podcastTitleMap: [String: PodcastInfoModel] = [:]
 
   private var syncCompletionObserver: NSObjectProtocol?
-  private var downloadingPollTask: Task<Void, Never>?
 
   init(modelContext: ModelContext?) {
     self.modelContext = modelContext
@@ -155,7 +190,6 @@ final class LibraryViewModel {
     }
     setupDownloadCompletionObserver()
     setupSyncCompletionObserver()
-    startDownloadingPollTimer()
   }
 
   deinit {
@@ -174,70 +208,6 @@ final class LibraryViewModel {
       NotificationCenter.default.removeObserver(observer)
       syncCompletionObserver = nil
     }
-    stopDownloadingPollTimer()
-  }
-
-  // MARK: - Downloading Episodes Poll Timer
-
-  private func startDownloadingPollTimer() {
-    stopDownloadingPollTimer()
-    downloadingPollTask = Task { [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .milliseconds(500))
-        guard let self, !Task.isCancelled else { return }
-        self.updateDownloadingEpisodes()
-      }
-    }
-  }
-
-  private func stopDownloadingPollTimer() {
-    downloadingPollTask?.cancel()
-    downloadingPollTask = nil
-  }
-
-  /// Update the list of currently downloading episodes from DownloadManager
-  private func updateDownloadingEpisodes() {
-    let downloadManager = DownloadManager.shared
-    var downloading: [DownloadingEpisode] = []
-
-    for (episodeKey, state) in downloadManager.downloadStates {
-      // Only include actively downloading or finishing episodes
-      let progressValue: Double
-      let isActive: Bool
-
-      switch state {
-      case .downloading(let progress):
-        progressValue = progress
-        isActive = true
-      case .finishing:
-        progressValue = 1.0
-        isActive = true
-      default:
-        progressValue = 0
-        isActive = false
-      }
-
-      if isActive {
-
-        // Parse episode key to get titles
-        if let (podcastTitle, episodeTitle) = parseDownloadEpisodeKey(episodeKey) {
-          // Try to find image URL from podcasts
-          let imageURL = podcastTitleMap[podcastTitle]?.podcastInfo.imageURL
-
-          downloading.append(DownloadingEpisode(
-            id: episodeKey,
-            episodeTitle: episodeTitle,
-            podcastTitle: podcastTitle,
-            imageURL: imageURL,
-            progress: progressValue,
-            state: state
-          ))
-        }
-      }
-    }
-
-    // Sort by progress (least progress first)
-    downloadingEpisodes = downloading.sorted { $0.progress < $1.progress }
   }
 
   /// Parse episode key for downloading episodes
@@ -397,7 +367,7 @@ final class LibraryViewModel {
     }
   }
 
-  /// Ensure observers and timer are running - safe to call multiple times
+  /// Ensure observers are running - safe to call multiple times
   private func ensureObserversAndTimerRunning() {
     // Re-setup observers if they were cleaned up
     if downloadCompletionObserver == nil {
@@ -405,10 +375,6 @@ final class LibraryViewModel {
     }
     if syncCompletionObserver == nil {
       setupSyncCompletionObserver()
-    }
-    // Restart timer if it was stopped
-    if downloadingPollTask == nil {
-      startDownloadingPollTimer()
     }
   }
 

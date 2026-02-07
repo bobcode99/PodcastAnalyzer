@@ -19,7 +19,7 @@ struct TranslationLanguagePickerSheet: View {
     /// Callback when a language is selected
     let onSelectLanguage: (TranslationTargetLanguage) -> Void
 
-    @State private var settings = SubtitleSettingsManager.shared
+    private var settings: SubtitleSettingsManager { .shared }
 
     var body: some View {
         NavigationStack {
