@@ -278,18 +278,18 @@ struct EpisodeRowView: View {
   @ViewBuilder
   private var bottomStatusBar: some View {
     HStack(spacing: 6) {
-      // Play button with progress (using reusable component)
-      EpisodePlayButton(
-        isPlaying: audioManager.isPlaying,
-        isPlayingThisEpisode: isPlayingThisEpisode,
-        isCompleted: isCompleted,
-        playbackProgress: playbackProgress,
+      // Play button with progress - uses live audio manager state
+      LivePlaybackButton(
+        episodeTitle: episode.title,
+        podcastTitle: podcastTitle,
         duration: episodeModel?.duration,
-        lastPlaybackPosition: episodeModel?.lastPlaybackPosition ?? 0,
         formattedDuration: episode.formattedDuration,
-        isDisabled: episode.audioURL == nil,
+        lastPlaybackPosition: episodeModel?.lastPlaybackPosition ?? 0,
+        playbackProgress: playbackProgress,
+        isCompleted: isCompleted,
+        onPlay: playAction,
         style: .compact,
-        action: playAction
+        isDisabled: episode.audioURL == nil
       )
 
       // Download progress

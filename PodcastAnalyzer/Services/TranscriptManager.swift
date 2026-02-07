@@ -180,7 +180,16 @@ class TranscriptManager {
       guard let self = self else { return }
       
       do {
+        // Verify audio file exists before starting
         let audioURL = URL(fileURLWithPath: job.audioPath)
+        guard FileManager.default.fileExists(atPath: job.audioPath) else {
+          throw NSError(
+            domain: "TranscriptManager", code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "Audio file not found: \(job.audioPath)"]
+          )
+        }
+        
+        // Create a fresh TranscriptService for each job to avoid state issues
         let transcriptService = TranscriptService(language: job.language)
 
         // Check if model is ready

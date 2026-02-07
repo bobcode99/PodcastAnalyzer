@@ -9,10 +9,11 @@ import Foundation
 import SwiftData
 import SwiftUI
 
-// MARK: - Live Episode Play Button
+// MARK: - Live Episode Play Button (Deprecated)
 
 /// Wrapper that provides live playback time updates when episode is currently playing
 /// Falls back to SwiftData values when episode is not playing
+@available(*, deprecated, renamed: "LivePlaybackButton", message: "Use LivePlaybackButton instead for live playback state")
 struct LiveEpisodePlayButton: View {
   let episodeTitle: String
   let podcastTitle: String
@@ -81,10 +82,11 @@ struct LiveEpisodePlayButton: View {
   }
 }
 
-// MARK: - Episode Play Button
+// MARK: - Episode Play Button (Deprecated)
 
 /// Reusable play button with progress indicator
 /// Shows play/pause/replay icon, progress bar when partially played, and duration text
+@available(*, deprecated, renamed: "LivePlaybackButton", message: "Use LivePlaybackButton instead for live playback state")
 struct EpisodePlayButton: View {
   /// Whether the audio manager is currently playing
   let isPlaying: Bool

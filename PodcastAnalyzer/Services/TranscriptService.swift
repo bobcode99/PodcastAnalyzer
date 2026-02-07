@@ -129,12 +129,11 @@ public actor TranscriptService {
       attributeOptions: needsAudioTimeRange ? [.audioTimeRange] : []
     )
     self.transcriber = newTranscriber
-      let detector = SpeechDetector()
 
     // Release and reserve locales
     await releaseAndReserveLocales()
 
-      let modules: [any SpeechModule] = [newTranscriber, detector]
+      let modules: [any SpeechModule] = [newTranscriber]
     let installed = await Set(SpeechTranscriber.installedLocales)
     logger.info("Installed locales: \(installed.map { $0.identifier }.joined(separator: ", "))")
 
@@ -404,6 +403,16 @@ public actor TranscriptService {
             }
           }
 
+          // Check if we actually got any transcript content
+          guard !transcript.characters.isEmpty else {
+            throw NSError(
+              domain: "TranscriptService", code: 3,
+              userInfo: [
+                NSLocalizedDescriptionKey:
+                  "Transcription produced no content. The audio may be silent or in an unsupported format."
+              ])
+          }
+
           // Convert transcript to SRT format (CPU-intensive, runs on background thread)
           // Call through actor since transcriptToSRT is actor-isolated
           let srtContent = await self.transcriptToSRT(transcript: transcript, maxLength: maxLength)
@@ -534,11 +543,12 @@ public actor TranscriptService {
           .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       }.compactMap(\.audioTimeRange)
 
-      guard !audioTimeRanges.isEmpty else { return nil }
+      guard let firstTimeRange = audioTimeRanges.first,
+            let lastTimeRange = audioTimeRanges.last else { return nil }
 
       // Calculate combined time range (start of first, end of last)
-      let start = audioTimeRanges.first!.start
-      let end = audioTimeRanges.last!.end
+      let start = firstTimeRange.start
+      let end = lastTimeRange.end
 
       // Create new AttributedString with the combined time range
       var attributes = AttributeContainer()
@@ -657,12 +667,13 @@ public actor TranscriptService {
         ))
       }
 
-      guard !wordTimings.isEmpty else { return nil }
+      guard let firstTiming = wordTimings.first,
+            let lastTiming = wordTimings.last else { return nil }
 
       return SegmentData(
         id: index + 1,
-        startTime: wordTimings.first!.startTime,
-        endTime: wordTimings.last!.endTime,
+        startTime: firstTiming.startTime,
+        endTime: lastTiming.endTime,
         text: segmentText,
         wordTimings: wordTimings
       )

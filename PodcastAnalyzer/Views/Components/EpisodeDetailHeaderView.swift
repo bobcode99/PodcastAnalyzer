@@ -158,18 +158,18 @@ struct EpisodeDetailHeaderView: View {
 
             // Play + Download buttons (icon-only capsules)
             HStack(spacing: 8) {
-                // Play button with progress (icon-only style)
-                EpisodePlayButton(
-                    isPlaying: viewModel.audioManager.isPlaying,
-                    isPlayingThisEpisode: viewModel.isPlayingThisEpisode,
-                    isCompleted: viewModel.isCompleted,
-                    playbackProgress: viewModel.playbackProgress,
+                // Play button with progress (icon-only style) - uses live audio manager state
+                LivePlaybackButton(
+                    episodeTitle: viewModel.title,
+                    podcastTitle: viewModel.podcastTitle,
                     duration: viewModel.savedDuration,
-                    lastPlaybackPosition: viewModel.lastPlaybackPosition,
                     formattedDuration: viewModel.formattedDuration,
-                    isDisabled: viewModel.isPlayDisabled,
+                    lastPlaybackPosition: viewModel.lastPlaybackPosition,
+                    playbackProgress: viewModel.playbackProgress,
+                    isCompleted: viewModel.isCompleted,
+                    onPlay: { viewModel.playAction() },
                     style: .iconOnly,
-                    action: { viewModel.playAction() }
+                    isDisabled: viewModel.isPlayDisabled
                 )
 
                 EpisodeDownloadButton(viewModel: viewModel)

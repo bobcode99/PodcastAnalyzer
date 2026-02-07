@@ -113,9 +113,10 @@ struct EpisodePlayButtonWithProgress: View {
   }
 }
 
-// MARK: - Reactive Play Button for LibraryEpisode
+// MARK: - Reactive Play Button for LibraryEpisode (Deprecated)
 
 /// A reactive version that observes EnhancedAudioManager for live playback updates
+@available(*, deprecated, renamed: "LivePlaybackButton", message: "Use LivePlaybackButton instead for live playback state")
 struct ReactiveEpisodePlayButton: View {
   let episode: LibraryEpisode
   let action: () -> Void
