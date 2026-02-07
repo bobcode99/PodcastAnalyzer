@@ -47,6 +47,26 @@ struct EpisodeTranscriptStatusView: View {
                                 .center
                             )
                         }
+
+                        // Language picker for transcript generation
+                        Picker("Language", selection: Binding(
+                            get: { viewModel.selectedTranscriptLanguage ?? viewModel.podcastLanguage },
+                            set: { newValue in
+                                viewModel.selectedTranscriptLanguage = (newValue == viewModel.podcastLanguage) ? nil : newValue
+                            }
+                        )) {
+                            ForEach(SettingsViewModel.availableTranscriptLocales) { locale in
+                                Text(locale.name).tag(locale.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .font(.subheadline)
+
+                        Text("Mixed-language episodes may not transcribe accurately")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+
                         Button(action: { viewModel.generateTranscript() }) {
                             Label(
                                 "Generate Transcript",

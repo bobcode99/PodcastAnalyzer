@@ -37,33 +37,6 @@ struct SubtitleSettingsSheet: View {
           Text(settings.displayMode.description)
         }
 
-        // Translation Section
-        Section {
-          Picker("Target Language", selection: $settings.targetLanguage) {
-            ForEach(TranslationTargetLanguage.allCases, id: \.self) { lang in
-              Text(lang.displayName).tag(lang)
-            }
-          }
-
-          Toggle("Auto-translate on load", isOn: $settings.autoTranslateOnLoad)
-        } header: {
-          Text("Translation")
-        } footer: {
-          if !settings.isTranslationAvailable {
-            Text("Translation requires iOS 17.4 or later")
-              .foregroundStyle(.orange)
-          }
-        }
-
-        // Download Section
-        Section {
-          Toggle("Auto-download with episode", isOn: $settings.autoDownloadTranscripts)
-        } header: {
-          Text("RSS Transcripts")
-        } footer: {
-          Text("Automatically download transcripts from RSS feeds when downloading episodes")
-        }
-
         // Info Section
         Section {
           VStack(alignment: .leading, spacing: 8) {

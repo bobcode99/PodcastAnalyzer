@@ -282,6 +282,7 @@ struct SentenceView: View, Equatable {
 
     static func == (lhs: SentenceView, rhs: SentenceView) -> Bool {
         lhs.sentence.id == rhs.sentence.id &&
+        lhs.sentence.translatedText == rhs.sentence.translatedText &&
         lhs.highlightState == rhs.highlightState &&
         lhs.searchQuery == rhs.searchQuery &&
         lhs.subtitleMode == rhs.subtitleMode &&
@@ -293,6 +294,38 @@ struct SentenceView: View, Equatable {
     private var isActive: Bool {
         if case .active = highlightState { return true }
         return false
+    }
+
+    /// Primary text to display based on subtitle mode
+    private var primaryText: String {
+        switch subtitleMode {
+        case .originalOnly, .dualOriginalFirst:
+            return sentence.text
+        case .translatedOnly, .dualTranslatedFirst:
+            return sentence.translatedText ?? sentence.text
+        }
+    }
+
+    /// Whether primary text uses translated content
+    private var primaryIsTranslated: Bool {
+        switch subtitleMode {
+        case .originalOnly, .dualOriginalFirst:
+            return false
+        case .translatedOnly, .dualTranslatedFirst:
+            return sentence.translatedText != nil
+        }
+    }
+
+    /// Secondary text for dual modes (nil for single modes)
+    private var secondaryText: String? {
+        switch subtitleMode {
+        case .originalOnly, .translatedOnly:
+            return nil
+        case .dualOriginalFirst:
+            return sentence.translatedText
+        case .dualTranslatedFirst:
+            return sentence.translatedText != nil ? sentence.text : nil
+        }
     }
 
     var body: some View {
@@ -318,10 +351,9 @@ struct SentenceView: View, Equatable {
                         .font(.system(size: 17, weight: .regular))
                         .lineSpacing(4)
 
-                    // Translation text for dual subtitle modes
-                    if let translatedText = sentence.translatedText,
-                       subtitleMode == .dualOriginalFirst || subtitleMode == .dualTranslatedFirst {
-                        Text(translatedText)
+                    // Secondary text for dual subtitle modes
+                    if let secondary = secondaryText {
+                        Text(secondary)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineSpacing(3)
@@ -350,11 +382,31 @@ struct SentenceView: View, Equatable {
     private func buildSentenceText() -> some View {
         if !searchQuery.isEmpty {
             // Show search highlighting with yellow backgrounds
-            SearchHighlightedText(text: sentence.text, query: searchQuery)
+            SearchHighlightedText(text: primaryText, query: searchQuery)
+        } else if primaryIsTranslated {
+            // Translated text doesn't have segment-level timing, show as plain styled text
+            Text(buildPlainStyledText(primaryText))
         } else {
-            // Build text with segment highlighting
+            // Original text with segment highlighting
             Text(buildSegmentHighlightedAttributedString())
         }
+    }
+
+    /// Builds a plain styled AttributedString for translated text (no segment-level highlighting)
+    private func buildPlainStyledText(_ text: String) -> AttributedString {
+        var attrText = AttributedString(text)
+        switch highlightState {
+        case .active:
+            attrText.foregroundColor = .blue
+            attrText.font = .system(size: 17, weight: .semibold)
+        case .played:
+            attrText.foregroundColor = .secondary
+            attrText.font = .system(size: 17, weight: .regular)
+        case .future:
+            attrText.foregroundColor = .primary
+            attrText.font = .system(size: 17, weight: .regular)
+        }
+        return attrText
     }
 
     /// Builds an AttributedString with refined highlighting colors:

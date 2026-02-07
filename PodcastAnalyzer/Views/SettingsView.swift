@@ -190,6 +190,22 @@ struct SettingsView: View {
               Text("Default Translation Language")
             }
           }
+          Toggle(isOn: Binding(
+            get: { SubtitleSettingsManager.shared.autoTranslateOnLoad },
+            set: { SubtitleSettingsManager.shared.autoTranslateOnLoad = $0 }
+          )) {
+            HStack {
+              Image(systemName: "text.bubble")
+                .foregroundStyle(.purple)
+                .frame(width: 24)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Auto-Translate on Load")
+                Text("Translate transcripts when loaded")
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+              }
+            }
+          }
         } header: {
           Text("Translation")
         } footer: {

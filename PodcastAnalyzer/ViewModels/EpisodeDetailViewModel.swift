@@ -108,6 +108,8 @@ final class EpisodeDetailViewModel {
   var transcriptState: TranscriptState = .idle
   var transcriptText: String = ""
   var isModelReady: Bool = false
+  /// Language override for transcript generation (nil = use podcast RSS language)
+  var selectedTranscriptLanguage: String?
 
   @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
@@ -792,6 +794,7 @@ final class EpisodeDetailViewModel {
 
     await MainActor.run {
       self.transcriptSegments = translatedSegments
+      self.regroupSentences()
       self.translationStatus = .completed
       // Update available translations
       self.availableTranslationLanguages.insert(targetLang)
@@ -888,6 +891,7 @@ final class EpisodeDetailViewModel {
       ) {
         await MainActor.run {
           self.transcriptSegments = translated
+          self.regroupSentences()
           logger.info("Loaded existing translations for \(self.episode.title)")
         }
       }
@@ -1101,7 +1105,7 @@ final class EpisodeDetailViewModel {
     }
 
     // Use TranscriptManager for background processing
-    let language = getPodcastLanguage()
+    let language = selectedTranscriptLanguage ?? getPodcastLanguage()
     TranscriptManager.shared.queueTranscript(
       episodeTitle: episode.title,
       podcastTitle: podcastTitle,
