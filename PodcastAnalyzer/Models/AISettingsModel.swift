@@ -143,14 +143,14 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
 
     var displayName: String {
         switch self {
-        case .applePCC: return "Apple Intelligence"
+        case .applePCC: return "Shortcuts"
         default: return rawValue
         }
     }
 
     var iconName: String {
         switch self {
-        case .applePCC: return "apple.intelligence"
+        case .applePCC: return "arrow.triangle.branch"
         case .openai: return "brain.head.profile"
         case .claude: return "sparkles"
         case .gemini: return "diamond"
@@ -176,7 +176,7 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
 
     var defaultModel: String {
         switch self {
-        case .applePCC: return "Apple Intelligence"
+        case .applePCC: return "Shortcuts"
         case .openai: return "gpt-4o-mini"
         case .claude: return "claude-sonnet-4-5-20250929"
         case .gemini: return "gemini-2.0-flash"
@@ -187,8 +187,8 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
 
     var availableModels: [String] {
         switch self {
-        // Apple Intelligence via Shortcuts
-        case .applePCC: return ["Apple Intelligence"]
+        // Shortcuts - depends on AI provider used in shortcut
+        case .applePCC: return ["Shortcuts"]
         // OpenAI models (Dec 2025)
         case .openai: return [
             "gpt-4o-mini",           // Fast, cheap
@@ -229,7 +229,7 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
 
     var contextWindowSize: Int {
         switch self {
-        case .applePCC: return 128_000  // Apple PCC via Shortcuts - large context
+        case .applePCC: return 128_000  // Shortcuts - depends on AI provider used
         case .openai: return 128_000
         case .claude: return 200_000
         case .gemini: return 1_000_000
@@ -240,7 +240,7 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
 
     var pricingNote: String {
         switch self {
-        case .applePCC: return "Free! Uses Apple Intelligence via Shortcuts"
+        case .applePCC: return "Free! Runs AI via iOS/macOS Shortcuts app"
         case .openai: return "gpt-4o-mini: $0.15/1M input tokens"
         case .claude: return "Haiku: $0.25/1M input tokens"
         case .gemini: return "Flash: Free tier available!"
@@ -315,6 +315,10 @@ final class AISettingsManager {
         didSet { saveSettings() }
     }
 
+    var shortcutsTimeout: TimeInterval {
+        didSet { UserDefaults.standard.set(shortcutsTimeout, forKey: "ai_shortcuts_timeout") }
+    }
+
     // MARK: - Initialization
 
     private init() {
@@ -349,6 +353,9 @@ final class AISettingsManager {
             self.transcriptFormat = .sentenceBased // Default to sentence-based for better AI comprehension
         }
 
+        // Load shortcuts timeout setting
+        self.shortcutsTimeout = UserDefaults.standard.object(forKey: "ai_shortcuts_timeout") as? TimeInterval ?? 120
+
         // Load API keys from Keychain (use static method to avoid 'self' issue)
         self.openAIKey = Self.loadKeyFromKeychain(for: .openai)
         self.claudeKey = Self.loadKeyFromKeychain(for: .claude)
@@ -380,7 +387,7 @@ final class AISettingsManager {
 
     var currentModel: String {
         switch selectedProvider {
-        case .applePCC: return "Apple Intelligence"
+        case .applePCC: return "Shortcuts"
         case .openai: return selectedOpenAIModel
         case .claude: return selectedClaudeModel
         case .gemini: return selectedGeminiModel

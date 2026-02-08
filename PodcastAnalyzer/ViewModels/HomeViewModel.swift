@@ -39,6 +39,14 @@ final class HomeViewModel {
     }
   }
 
+  // For You recommendations (on-device AI)
+  var recommendations: EpisodeRecommendations?
+  var isLoadingRecommendations = false
+  var recommendedEpisodes: [LibraryEpisode] = []
+
+  @ObservationIgnored
+  private var recommendationsTask: Task<Void, Never>?
+
   // Podcast preview/subscription
   var selectedPodcast: AppleRSSPodcast?
   var isSubscribing = false
@@ -123,6 +131,11 @@ final class HomeViewModel {
     async let upNextTask: () = loadUpNextEpisodes()
     async let topPodcastsTask: () = loadTopPodcasts(forceRefresh: forceRefresh)
     _ = await (upNextTask, topPodcastsTask)
+
+    // Load recommendations after feeds are loaded
+    if #available(iOS 26.0, macOS 26.0, *) {
+      loadRecommendations()
+    }
   }
 
   func refresh() async {
@@ -408,6 +421,134 @@ final class HomeViewModel {
     }
   }
 
+  // MARK: - For You Recommendations
+
+  @available(iOS 26.0, macOS 26.0, *)
+  func loadRecommendations() {
+    guard !isLoadingRecommendations else { return }
+
+    // Check if For You is enabled
+    guard UserDefaults.standard.object(forKey: "showForYouRecommendations") == nil ||
+          UserDefaults.standard.bool(forKey: "showForYouRecommendations") else {
+      recommendations = nil
+      recommendedEpisodes = []
+      return
+    }
+
+    guard let context = modelContext else { return }
+
+    recommendationsTask?.cancel()
+    isLoadingRecommendations = true
+
+    recommendationsTask = Task { [weak self] in
+      guard let self else { return }
+
+      let service = AppleFoundationModelsService()
+      let availability = await service.checkAvailability()
+      guard availability.isAvailable else {
+        isLoadingRecommendations = false
+        return
+      }
+
+      // Query SwiftData for listening history
+      let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+        sortBy: [SortDescriptor(\.lastPlayedDate, order: .reverse)]
+      )
+
+      guard let allModels = try? context.fetch(descriptor) else {
+        isLoadingRecommendations = false
+        return
+      }
+
+      let playedModels = allModels.filter { $0.playCount > 0 || $0.lastPlayedDate != nil }
+      let listeningHistory: [(title: String, podcastTitle: String, completed: Bool)] = playedModels.prefix(10).map {
+        (title: $0.episodeTitle, podcastTitle: $0.podcastTitle, completed: $0.isCompleted)
+      }
+
+      guard !listeningHistory.isEmpty else {
+        isLoadingRecommendations = false
+        return
+      }
+
+      // Build available episodes from subscribed podcasts (unplayed)
+      var availableEpisodes: [(title: String, podcastTitle: String, description: String)] = []
+      for podcastModel in podcastInfoModelList {
+        for episode in podcastModel.podcastInfo.episodes.prefix(5) {
+          let key = Self.makeEpisodeKey(podcastTitle: podcastModel.podcastInfo.title, episodeTitle: episode.title)
+          let epDescriptor = FetchDescriptor<EpisodeDownloadModel>(
+            predicate: #Predicate { $0.id == key }
+          )
+          let model = try? context.fetch(epDescriptor).first
+          if model?.isCompleted != true {
+            availableEpisodes.append((
+              title: episode.title,
+              podcastTitle: podcastModel.podcastInfo.title,
+              description: episode.podcastEpisodeDescription ?? ""
+            ))
+          }
+        }
+      }
+
+      let candidateEpisodes = Array(availableEpisodes.prefix(15))
+      guard !candidateEpisodes.isEmpty else {
+        isLoadingRecommendations = false
+        return
+      }
+
+      if Task.isCancelled { isLoadingRecommendations = false; return }
+
+      do {
+        let result = try await service.generateEpisodeRecommendations(
+          listeningHistory: listeningHistory,
+          availableEpisodes: candidateEpisodes
+        )
+        if !Task.isCancelled {
+          recommendations = result
+          resolveRecommendedEpisodes()
+        }
+      } catch {
+        logger.error("Failed to generate recommendations: \(error.localizedDescription)")
+      }
+      isLoadingRecommendations = false
+    }
+  }
+
+  /// Match recommended titles against subscribed podcast episodes and build LibraryEpisode array
+  private func resolveRecommendedEpisodes() {
+    guard let recommendations, let context = modelContext else {
+      recommendedEpisodes = []
+      return
+    }
+
+    var resolved: [LibraryEpisode] = []
+    for title in recommendations.recommendedTitles {
+      // Search through subscribed podcasts for the episode
+      for podcastModel in podcastInfoModelList {
+        if let episode = podcastModel.podcastInfo.episodes.first(where: { $0.title == title }) {
+          let key = Self.makeEpisodeKey(podcastTitle: podcastModel.podcastInfo.title, episodeTitle: episode.title)
+          let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+            predicate: #Predicate { $0.id == key }
+          )
+          let model = try? context.fetch(descriptor).first
+
+          resolved.append(LibraryEpisode(
+            id: key,
+            podcastTitle: podcastModel.podcastInfo.title,
+            imageURL: episode.imageURL ?? podcastModel.podcastInfo.imageURL,
+            language: podcastModel.podcastInfo.language,
+            episodeInfo: episode,
+            isStarred: model?.isStarred ?? false,
+            isDownloaded: model?.localAudioPath != nil,
+            isCompleted: model?.isCompleted ?? false,
+            lastPlaybackPosition: model?.lastPlaybackPosition ?? 0
+          ))
+          break
+        }
+      }
+    }
+    recommendedEpisodes = resolved
+  }
+
   deinit {
     MainActor.assumeIsolated {
       cleanup()
@@ -417,6 +558,8 @@ final class HomeViewModel {
   func cleanup() {
     regionObserverTask?.cancel()
     regionObserverTask = nil
+    recommendationsTask?.cancel()
+    recommendationsTask = nil
   }
 
   // MARK: - Find Podcast Model

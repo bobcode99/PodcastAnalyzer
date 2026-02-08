@@ -86,6 +86,22 @@ struct SettingsView: View {
               Text("Show Episode Artwork")
             }
           }
+          Toggle(isOn: Binding(
+            get: { viewModel.showForYouRecommendations },
+            set: { viewModel.setShowForYouRecommendations($0) }
+          )) {
+            HStack {
+              Image(systemName: "star.leadinghalfhalf")
+                .foregroundStyle(.purple)
+                .frame(width: 24)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("For You Recommendations")
+                Text("AI-powered episode suggestions on Home")
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+              }
+            }
+          }
         } header: {
           Text("Appearance")
         } footer: {
@@ -297,6 +313,24 @@ struct SettingsView: View {
           Text("AI Analysis")
         } footer: {
           Text("Configure cloud AI providers (OpenAI, Claude, Gemini, Grok) for transcript analysis")
+        }
+
+        // MARK: - Insights Section
+        Section {
+          NavigationLink {
+            ListeningStatsView()
+          } label: {
+            HStack {
+              Image(systemName: "chart.bar.fill")
+                .foregroundStyle(.indigo)
+                .frame(width: 24)
+              Text("Listening Stats")
+            }
+          }
+        } header: {
+          Text("Insights")
+        } footer: {
+          Text("View your listening history, top shows, and trends")
         }
 
         // MARK: - Data Management Section

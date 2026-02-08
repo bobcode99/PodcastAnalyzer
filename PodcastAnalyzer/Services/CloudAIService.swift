@@ -3,7 +3,7 @@
 //  PodcastAnalyzer
 //
 //  Service for cloud-based AI analysis using user-provided API keys (BYOK)
-//  Supports OpenAI, Claude, Gemini, Grok, and Apple Intelligence via Shortcuts
+//  Supports OpenAI, Claude, Gemini, Grok, and Shortcuts integration
 //
 
 import Foundation
@@ -46,8 +46,8 @@ final class CloudAIService {
     func fetchAvailableModels(for provider: CloudAIProvider, apiKey: String) async throws -> [String] {
         switch provider {
         case .applePCC:
-            // Apple PCC uses Shortcuts with Apple Intelligence - no model selection needed
-            return ["Apple Intelligence"]
+            // Shortcuts - no model selection needed
+            return ["Shortcuts"]
         case .openai:
             return try await fetchOpenAIModels(apiKey: apiKey)
         case .claude:
@@ -404,7 +404,7 @@ final class CloudAIService {
 
     // MARK: - Apple PCC via Shortcuts
 
-    /// Analyze transcript using Apple Intelligence via Shortcuts
+    /// Analyze transcript using Shortcuts
     private func analyzeWithShortcuts(
         transcript: String,
         episodeTitle: String,
@@ -433,7 +433,7 @@ final class CloudAIService {
         let shortcutsService = ShortcutsAIService.shared
 
         do {
-            let rawResult = try await shortcutsService.runShortcut(input: prompt, timeout: 180)
+            let rawResult = try await shortcutsService.runShortcut(input: prompt, timeout: settings.shortcutsTimeout * 1.5)
 
             progressCallback?("Parsing response...", 0.8)
 
@@ -494,7 +494,7 @@ final class CloudAIService {
                 parsedHighlights: parsedHighlights,
                 parsedFullAnalysis: parsedFullAnalysis,
                 provider: .applePCC,
-                model: "Apple Intelligence (via Shortcuts)",
+                model: "Shortcuts",
                 timestamp: Date(),
                 jsonParseWarning: jsonParseWarning
             )
@@ -540,7 +540,7 @@ final class CloudAIService {
         return response
     }
 
-    /// Ask a question using Apple Intelligence via Shortcuts
+    /// Ask a question using Shortcuts
     private func askQuestionWithShortcuts(
         question: String,
         transcript: String,
@@ -582,7 +582,7 @@ final class CloudAIService {
         let shortcutsService = ShortcutsAIService.shared
 
         do {
-            let rawResult = try await shortcutsService.runShortcut(input: prompt, timeout: 180)
+            let rawResult = try await shortcutsService.runShortcut(input: prompt, timeout: settings.shortcutsTimeout * 1.5)
 
             progressCallback?("Parsing response...", 0.8)
 
@@ -608,7 +608,7 @@ final class CloudAIService {
                 relatedTopics: parsed?.relatedTopics,
                 sources: parsed?.sources,
                 provider: .applePCC,
-                model: "Apple Intelligence (via Shortcuts)",
+                model: "Shortcuts",
                 timestamp: Date(),
                 jsonParseWarning: jsonParseWarning
             )
@@ -1641,7 +1641,7 @@ struct CloudAnalysisResult {
     let provider: CloudAIProvider
     let model: String
     let timestamp: Date
-    /// Warning message when JSON parsing fails (e.g., when using Apple Intelligence via Shortcuts)
+    /// Warning message when JSON parsing fails (e.g., when using Shortcuts)
     let jsonParseWarning: String?
 
     init(

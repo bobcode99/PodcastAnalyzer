@@ -189,7 +189,7 @@ struct AISettingsView: View {
                                 .fontWeight(.medium)
                         }
 
-                        Text("Apple Intelligence via Shortcuts uses Apple's Private Cloud Compute for AI analysis. Your data is processed securely on Apple's servers.")
+                        Text("Shortcuts calls your configured shortcut to process AI requests. You can use any AI provider (Apple Intelligence, ChatGPT, Gemini, etc.) inside your shortcut.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -215,10 +215,23 @@ struct AISettingsView: View {
                             Text("Open Shortcuts App")
                         }
                     }
+
+                    // Timeout setting
+                    HStack {
+                        Text("Timeout")
+                        Spacer()
+                        Picker("Timeout", selection: $settings.shortcutsTimeout) {
+                            Text("60s").tag(60.0 as TimeInterval)
+                            Text("120s").tag(120.0 as TimeInterval)
+                            Text("180s").tag(180.0 as TimeInterval)
+                            Text("300s").tag(300.0 as TimeInterval)
+                        }
+                        .pickerStyle(.menu)
+                    }
                 } header: {
                     Text("Shortcut Configuration")
                 } footer: {
-                    Text("Enter the exact name of your shortcut. The app will run this shortcut automatically.")
+                    Text("How long to wait for Shortcuts to return a result before timing out.")
                 }
 
                 Section {
@@ -247,7 +260,7 @@ struct AISettingsView: View {
                                 .font(.caption)
                                 .fontWeight(.semibold)
                         }
-                        Text("Use 'Ask Every Time' for the Model parameter to choose between Apple Intelligence (PCC), ChatGPT, or other models each time you run the shortcut.")
+                        Text("Use 'Ask Every Time' for the Model parameter to choose between ChatGPT, Apple Intelligence, Gemini, or other models each time you run the shortcut.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -355,7 +368,7 @@ struct AISettingsView: View {
             // MARK: - Other Provider Keys (Collapsed)
             Section {
                 DisclosureGroup("Configure Other Providers") {
-                    ForEach(CloudAIProvider.allCases.filter { $0 != settings.selectedProvider }, id: \.self) { provider in
+                    ForEach(CloudAIProvider.allCases.filter { $0 != settings.selectedProvider && $0.requiresAPIKey }, id: \.self) { provider in
                         VStack(alignment: .leading, spacing: 8) {
                             Label(provider.displayName, systemImage: provider.iconName)
                                 .font(.subheadline)
@@ -391,7 +404,7 @@ struct AISettingsView: View {
                         Text("Apple Foundation Models")
                             .font(.subheadline)
                             .fontWeight(.medium)
-                        Text("Used for quick tags & categorization (no API key needed)")
+                        Text("Used for quick tags, listening history summary & episode recommendations (no API key needed)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -412,10 +425,17 @@ struct AISettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                // On-device feature list
+                VStack(alignment: .leading, spacing: 6) {
+                    onDeviceFeatureRow(icon: "tag", title: "Quick Tags", description: "Auto-generate tags from episode metadata")
+                    onDeviceFeatureRow(icon: "clock.arrow.circlepath", title: "Listening History Summary", description: "Summarize your listening habits and patterns")
+                    onDeviceFeatureRow(icon: "star.leadinghalfhalf", title: "Episode Recommendations", description: "Get personalized episode suggestions")
+                }
             } header: {
                 Text("On-Device AI")
             } footer: {
-                Text("On-device AI handles simple tasks like generating tags from episode titles. No internet required, completely private.")
+                Text("On-device AI runs completely on your device. No internet required, completely private.")
             }
 
             // MARK: - Context Window Info
@@ -485,7 +505,7 @@ struct AISettingsView: View {
         let binding: Binding<String> = {
             switch provider {
             case .applePCC:
-                return .constant("Apple Intelligence")
+                return .constant("Shortcuts")
             case .openai:
                 return $settings.selectedOpenAIModel
             case .claude:
@@ -530,7 +550,7 @@ struct AISettingsView: View {
                     // If current model is not in the list, select the first available
                     let currentModel: String
                     switch provider {
-                    case .applePCC: currentModel = "Apple Intelligence"
+                    case .applePCC: currentModel = "Shortcuts"
                     case .openai: currentModel = settings.selectedOpenAIModel
                     case .claude: currentModel = settings.selectedClaudeModel
                     case .gemini: currentModel = settings.selectedGeminiModel
@@ -602,6 +622,23 @@ struct AISettingsView: View {
             return "Will respond in: English"
         case .matchPodcast:
             return "Will respond in: Same as podcast language"
+        }
+    }
+
+    private func onDeviceFeatureRow(icon: String, title: String, description: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(.blue)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Text(description)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

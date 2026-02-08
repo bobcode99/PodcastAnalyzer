@@ -38,7 +38,7 @@ class ShortcutsAIService {
     private var timeoutTask: Task<Void, Never>?
 
     // Default shortcut name
-    static let defaultShortcutName = "Podcast AI Analysis"
+    static let defaultShortcutName = "PA-WithAIViaGPT" // CHANGE THIS TO THE NAME OF YOUR SHORTCUT
 
     private init() {
         self.shortcutName = UserDefaults.standard.string(forKey: "shortcuts_ai_name")
@@ -374,14 +374,15 @@ class ShortcutsAIService {
 
     // MARK: - Analyze Transcript
 
-    /// Analyze transcript using Shortcuts with Apple Intelligence
+    /// Analyze transcript using Shortcuts
     func analyzeTranscript(
         transcript: String,
         episodeTitle: String,
         podcastTitle: String,
         analysisType: CloudAnalysisType,
-        timeout: TimeInterval = 180
+        timeout: TimeInterval? = nil
     ) async throws -> CloudAnalysisResult {
+        let timeout = timeout ?? (AISettingsManager.shared.shortcutsTimeout * 1.5)
         let prompt = buildPrompt(
             transcript: transcript,
             episodeTitle: episodeTitle,
@@ -399,7 +400,7 @@ class ShortcutsAIService {
             parsedHighlights: nil,
             parsedFullAnalysis: nil,
             provider: .applePCC,
-            model: "Apple Intelligence (via Shortcuts)",
+            model: "Shortcuts",
             timestamp: Date()
         )
     }

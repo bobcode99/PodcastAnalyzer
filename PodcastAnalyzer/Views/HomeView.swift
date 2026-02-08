@@ -27,6 +27,11 @@ struct HomeView: View {
         // Up Next Section
         upNextSection
 
+        // For You Section (on-device AI recommendations)
+        if #available(iOS 26.0, macOS 26.0, *) {
+          forYouSection
+        }
+
         // Popular Shows Section
         popularShowsSection
       }
@@ -130,6 +135,86 @@ struct HomeView: View {
             }
           }
           .padding(.horizontal)
+        }
+      }
+    }
+  }
+
+  // MARK: - For You Section
+
+  @available(iOS 26.0, macOS 26.0, *)
+  @ViewBuilder
+  private var forYouSection: some View {
+    let showForYou = UserDefaults.standard.object(forKey: "showForYouRecommendations") == nil ||
+                     UserDefaults.standard.bool(forKey: "showForYouRecommendations")
+
+    if showForYou && (!viewModel.recommendedEpisodes.isEmpty || viewModel.isLoadingRecommendations) {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack {
+          Image(systemName: "star.leadinghalfhalf")
+            .foregroundStyle(.purple)
+          Text("For You")
+            .font(.title2)
+            .fontWeight(.bold)
+
+          Spacer()
+
+          if viewModel.isLoadingRecommendations {
+            ProgressView()
+              .scaleEffect(0.8)
+          } else {
+            Button {
+              viewModel.recommendations = nil
+              viewModel.recommendedEpisodes = []
+              viewModel.loadRecommendations()
+            } label: {
+              Image(systemName: "arrow.clockwise")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+          }
+        }
+        .padding(.horizontal)
+
+        if viewModel.isLoadingRecommendations && viewModel.recommendedEpisodes.isEmpty {
+          HStack(spacing: 8) {
+            ProgressView()
+              .scaleEffect(0.7)
+            Text("Finding episodes for you...")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 24)
+        } else {
+          ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+              ForEach(Array(viewModel.recommendedEpisodes.enumerated()), id: \.element.id) { index, episode in
+                NavigationLink(
+                  destination: EpisodeDetailView(
+                    episode: episode.episodeInfo,
+                    podcastTitle: episode.podcastTitle,
+                    fallbackImageURL: episode.imageURL,
+                    podcastLanguage: episode.language
+                  )
+                ) {
+                  ForYouCard(
+                    episode: episode,
+                    reason: viewModel.recommendations?.reasons[safe: index]
+                  )
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                  UpNextContextMenu(
+                    episode: episode,
+                    viewModel: viewModel
+                  )
+                }
+              }
+            }
+            .padding(.horizontal)
+          }
         }
       }
     }
@@ -262,6 +347,111 @@ struct UpNextCard: View {
     .onDisappear {
       statusObserver?.cleanup()
     }
+  }
+}
+
+// MARK: - For You Card
+
+struct ForYouCard: View {
+  let episode: LibraryEpisode
+  let reason: String?
+  @Environment(\.modelContext) private var modelContext
+  @State private var statusObserver: EpisodeStatusObserver?
+
+  private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
+
+  private func playEpisode() {
+    guard episode.episodeInfo.audioURL != nil else { return }
+    guard let observer = statusObserver else { return }
+
+    let playbackEpisode = PlaybackEpisode(
+      id: EpisodeKeyUtils.makeKey(podcastTitle: episode.podcastTitle, episodeTitle: episode.episodeInfo.title),
+      title: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle,
+      audioURL: observer.playbackURL,
+      imageURL: episode.imageURL,
+      episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+      pubDate: episode.episodeInfo.pubDate,
+      duration: episode.episodeInfo.duration,
+      guid: episode.episodeInfo.guid
+    )
+
+    audioManager.play(
+      episode: playbackEpisode,
+      audioURL: observer.playbackURL,
+      startTime: episode.lastPlaybackPosition,
+      imageURL: episode.imageURL ?? "",
+      useDefaultSpeed: episode.lastPlaybackPosition == 0
+    )
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      // Episode artwork
+      ZStack(alignment: .bottomTrailing) {
+        CachedArtworkImage(urlString: episode.imageURL, size: 140, cornerRadius: 12)
+
+        // Status icons overlay
+        if let observer = statusObserver {
+          EpisodeStatusIcons(
+            isStarred: episode.isStarred,
+            isDownloaded: observer.isDownloaded,
+            hasTranscript: observer.hasTranscript,
+            hasAIAnalysis: observer.hasAIAnalysis,
+            isDownloading: observer.isDownloading,
+            downloadProgress: observer.downloadProgress,
+            isTranscribing: observer.isTranscribing,
+            isCompact: true
+          )
+        }
+      }
+
+      // Podcast title
+      Text(episode.podcastTitle)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+
+      // Episode title
+      Text(episode.episodeInfo.title)
+        .font(.subheadline)
+        .fontWeight(.medium)
+        .lineLimit(2)
+        .multilineTextAlignment(.leading)
+
+      // Recommendation reason
+      if let reason {
+        Text(reason)
+          .font(.caption2)
+          .foregroundStyle(.purple)
+          .lineLimit(2)
+      }
+
+      // Play button
+      LivePlaybackButton(
+        episode: episode,
+        style: .compact,
+        action: playEpisode
+      )
+    }
+    .frame(width: 140)
+    .onAppear {
+      if statusObserver == nil {
+        statusObserver = EpisodeStatusObserver(episode: episode)
+      }
+      statusObserver?.setModelContext(modelContext)
+    }
+    .onDisappear {
+      statusObserver?.cleanup()
+    }
+  }
+}
+
+// MARK: - Safe Array Subscript
+
+private extension Array {
+  subscript(safe index: Int) -> Element? {
+    indices.contains(index) ? self[index] : nil
   }
 }
 
