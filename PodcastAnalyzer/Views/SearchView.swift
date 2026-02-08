@@ -32,44 +32,42 @@ struct PodcastSearchView: View {
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Tab selector
-                tabSelector
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
+        VStack(spacing: 0) {
+            // Tab selector
+            tabSelector
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
 
-                // Search results
-                if searchText.isEmpty {
-                    emptySearchView
-                } else {
-                    switch selectedTab {
-                    case .applePodcasts:
-                        applePodcastsResultsView
-                    case .library:
-                        libraryResultsView
-                    }
+            // Search results
+            if searchText.isEmpty {
+                emptySearchView
+            } else {
+                switch selectedTab {
+                case .applePodcasts:
+                    applePodcastsResultsView
+                case .library:
+                    libraryResultsView
                 }
             }
-            .navigationTitle("Search")
-            .searchable(text: $searchText, prompt: "Podcasts & Episodes")
-            .onSubmit(of: .search) {
-                if selectedTab == .applePodcasts {
-                    viewModel.searchText = searchText
-                    viewModel.performSearch()
-                }
+        }
+        .navigationTitle("Search")
+        .searchable(text: $searchText, prompt: "Podcasts & Episodes")
+        .onSubmit(of: .search) {
+            if selectedTab == .applePodcasts {
+                viewModel.searchText = searchText
+                viewModel.performSearch()
             }
-            .onChange(of: searchText) { _, newValue in
-                viewModel.searchText = newValue
-                if selectedTab == .applePodcasts && !newValue.isEmpty {
-                    viewModel.performSearch()
-                }
+        }
+        .onChange(of: searchText) { _, newValue in
+            viewModel.searchText = newValue
+            if selectedTab == .applePodcasts && !newValue.isEmpty {
+                viewModel.performSearch()
             }
-            .onChange(of: selectedTab) { _, newTab in
-                if newTab == .applePodcasts && !searchText.isEmpty {
-                    viewModel.searchText = searchText
-                    viewModel.performSearch()
-                }
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            if newTab == .applePodcasts && !searchText.isEmpty {
+                viewModel.searchText = searchText
+                viewModel.performSearch()
             }
         }
     }
@@ -79,28 +77,18 @@ struct PodcastSearchView: View {
     private var tabSelector: some View {
         HStack(spacing: 0) {
             ForEach(SearchTab.allCases, id: \.self) { tab in
-                Button(action: {
+                SearchTabButton(
+                    title: tab.rawValue,
+                    isSelected: selectedTab == tab
+                ) {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         selectedTab = tab
                     }
-                }) {
-                    Text(tab.rawValue)
-                        .font(.subheadline)
-                        .fontWeight(selectedTab == tab ? .semibold : .regular)
-                        .foregroundColor(selectedTab == tab ? .primary : .secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(selectedTab == tab ? Color.platformSystemGray5 : Color.clear)
-                        )
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(4)
-        .background(Color.platformSystemGray6)
-        .cornerRadius(10)
+        .glassEffect(Glass.regular, in: .rect(cornerRadius: 10))
     }
 
     // MARK: - Empty Search View
@@ -110,15 +98,15 @@ struct PodcastSearchView: View {
             Spacer()
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 50))
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             Text("Search for podcasts")
                 .font(.title3)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             Text(selectedTab == .applePodcasts
                  ? "Find new podcasts to subscribe"
                  : "Search your subscribed podcasts and episodes")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
             Spacer()
@@ -139,7 +127,7 @@ struct PodcastSearchView: View {
                 VStack {
                     Spacer()
                     Text("No results found")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                 }
             } else {
@@ -177,7 +165,7 @@ struct PodcastSearchView: View {
                 VStack {
                     Spacer()
                     Text("No results in your library")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     Spacer()
                 }
             } else {
@@ -236,20 +224,20 @@ struct PodcastSearchView: View {
     }
 
     private func filterLibraryPodcasts() -> [PodcastInfoModel] {
-        let query = searchText.lowercased()
+        let query = searchText
         return subscribedPodcasts.filter { podcast in
-            podcast.podcastInfo.title.lowercased().contains(query)
+            podcast.podcastInfo.title.localizedStandardContains(query)
         }
     }
 
     private func filterLibraryEpisodes() -> [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] {
-        let query = searchText.lowercased()
+        let query = searchText
         var results: [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
 
         for podcast in subscribedPodcasts {
             let matchingEpisodes = podcast.podcastInfo.episodes.filter { episode in
-                episode.title.lowercased().contains(query) ||
-                (episode.podcastEpisodeDescription?.lowercased().contains(query) ?? false)
+                episode.title.localizedStandardContains(query) ||
+                (episode.podcastEpisodeDescription?.localizedStandardContains(query) ?? false)
             }
 
             for episode in matchingEpisodes {
@@ -286,11 +274,11 @@ struct ApplePodcastRow: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .lineLimit(1)
-                    .foregroundColor(.primary)
+                    .foregroundStyle(.primary)
 
                 Text("Show · \(podcast.artistName)")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
 
@@ -301,7 +289,7 @@ struct ApplePodcastRow: View {
                 Image(systemName: "checkmark")
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                    .foregroundColor(.green)
+                    .foregroundStyle(.green)
             } else if isSubscribing {
                 ProgressView()
                     .scaleEffect(0.8)
@@ -310,20 +298,21 @@ struct ApplePodcastRow: View {
                     isSubscribing = true
                     onSubscribe()
                     // Reset after a delay (subscription will update via @Query)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
                         isSubscribing = false
                     }
                 }) {
                     Image(systemName: "plus")
                         .font(.title3)
-                        .foregroundColor(.blue)
+                        .foregroundStyle(.blue)
                 }
                 .buttonStyle(.plain)
             }
 
             Image(systemName: "chevron.right")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
@@ -351,7 +340,7 @@ struct LibraryPodcastRow: View {
 
                     Text("Show · \(podcastModel.podcastInfo.episodes.count) episodes")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
 
                 Spacer()
@@ -359,7 +348,7 @@ struct LibraryPodcastRow: View {
                 Image(systemName: "checkmark")
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                    .foregroundColor(.primary)
+                    .foregroundStyle(.primary)
             }
             .padding(.vertical, 4)
         }
@@ -401,7 +390,7 @@ struct LibraryEpisodeRow: View {
                         }
                     }
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
 
                     // Title
                     Text(episode.title)
@@ -419,7 +408,7 @@ struct LibraryEpisodeRow: View {
                     }) {
                         Image(systemName: "play.fill")
                             .font(.title3)
-                            .foregroundColor(.white)
+                            .foregroundStyle(.white)
                             .frame(width: 32, height: 32)
                             .background(Color.purple)
                             .clipShape(Circle())
@@ -453,6 +442,37 @@ struct LibraryEpisodeRow: View {
             imageURL: episode.imageURL ?? podcastImageURL,
             useDefaultSpeed: true
         )
+    }
+}
+
+// MARK: - Search Tab Button
+
+struct SearchTabButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            tabLabel
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var tabLabel: some View {
+        let base = Text(title)
+            .font(.subheadline)
+            .fontWeight(isSelected ? .semibold : .regular)
+            .foregroundStyle(isSelected ? .primary : .secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+
+        if isSelected {
+            base.glassEffect(Glass.regular.interactive(), in: .rect(cornerRadius: 8))
+        } else {
+            base
+        }
     }
 }
 

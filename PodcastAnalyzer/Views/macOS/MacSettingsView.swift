@@ -10,55 +10,58 @@ import SwiftData
 import SwiftUI
 
 struct MacSettingsView: View {
-  private enum Tabs: Hashable {
+  private enum SettingsTab: Hashable, CaseIterable {
     case general, appearance, sync, playback, transcript, ai, storage
+
+    var title: String {
+      switch self {
+      case .general: "General"
+      case .appearance: "Appearance"
+      case .sync: "Sync"
+      case .playback: "Playback"
+      case .transcript: "Transcript"
+      case .ai: "AI"
+      case .storage: "Storage"
+      }
+    }
+
+    var systemImage: String {
+      switch self {
+      case .general: "gearshape"
+      case .appearance: "paintbrush"
+      case .sync: "arrow.triangle.2.circlepath"
+      case .playback: "play.circle"
+      case .transcript: "text.bubble"
+      case .ai: "sparkles"
+      case .storage: "internaldrive"
+      }
+    }
   }
 
+  @State private var selection: SettingsTab = .general
+
   var body: some View {
-    TabView {
-      GeneralSettingsTab()
-        .tabItem {
-          Label("General", systemImage: "gearshape")
+    TabView(selection: $selection) {
+      ForEach(SettingsTab.allCases, id: \.self) { tab in
+        Tab(tab.title, systemImage: tab.systemImage, value: tab) {
+          tabContent(for: tab)
         }
-        .tag(Tabs.general)
-
-      AppearanceSettingsTab()
-        .tabItem {
-          Label("Appearance", systemImage: "paintbrush")
-        }
-        .tag(Tabs.appearance)
-
-      SyncSettingsTab()
-        .tabItem {
-          Label("Sync", systemImage: "arrow.triangle.2.circlepath")
-        }
-        .tag(Tabs.sync)
-
-      PlaybackSettingsTab()
-        .tabItem {
-          Label("Playback", systemImage: "play.circle")
-        }
-        .tag(Tabs.playback)
-
-      TranscriptSettingsTab()
-        .tabItem {
-          Label("Transcript", systemImage: "text.bubble")
-        }
-        .tag(Tabs.transcript)
-
-      AISettingsTab()
-        .tabItem {
-          Label("AI", systemImage: "sparkles")
-        }
-        .tag(Tabs.ai)
-
-      StorageSettingsTab()
-        .tabItem {
-          Label("Storage", systemImage: "internaldrive")
-        }
-        .tag(Tabs.storage)
+      }
     }
     .frame(width: 500, height: 400)
+  }
+
+  @ViewBuilder
+  private func tabContent(for tab: SettingsTab) -> some View {
+    switch tab {
+    case .general: GeneralSettingsTab()
+    case .appearance: AppearanceSettingsTab()
+    case .sync: SyncSettingsTab()
+    case .playback: PlaybackSettingsTab()
+    case .transcript: TranscriptSettingsTab()
+    case .ai: AISettingsTab()
+    case .storage: StorageSettingsTab()
+    }
   }
 }
 
@@ -72,7 +75,7 @@ struct GeneralSettingsTab: View {
           Text("Version")
           Spacer()
           Text("1.0.0")
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         }
       }
     }
@@ -107,7 +110,7 @@ struct AppearanceSettingsTab: View {
 // MARK: - Sync Settings Tab
 
 struct SyncSettingsTab: View {
-  @State private var syncManager = BackgroundSyncManager.shared
+  private var syncManager: BackgroundSyncManager { .shared }
 
   var body: some View {
     Form {
@@ -122,7 +125,7 @@ struct SyncSettingsTab: View {
               Text("Last Sync")
               Spacer()
               Text(lastSync.formatted(date: .abbreviated, time: .shortened))
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             }
           }
 
@@ -230,12 +233,12 @@ struct TranscriptSettingsTab: View {
         ProgressView()
           .scaleEffect(0.7)
         Text("Checking...")
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
     case .notDownloaded:
       HStack(spacing: 8) {
         Text("Not installed")
-          .foregroundColor(.orange)
+          .foregroundStyle(.orange)
         Button("Download") {
           viewModel.downloadTranscriptModel()
         }
@@ -247,7 +250,7 @@ struct TranscriptSettingsTab: View {
         ProgressView(value: progress)
           .frame(width: 80)
         Text("\(Int(progress * 100))%")
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
         Button {
           viewModel.cancelTranscriptDownload()
         } label: {
@@ -258,14 +261,14 @@ struct TranscriptSettingsTab: View {
     case .ready:
       HStack(spacing: 4) {
         Image(systemName: "checkmark.circle.fill")
-          .foregroundColor(.green)
+          .foregroundStyle(.green)
         Text("Ready")
-          .foregroundColor(.green)
+          .foregroundStyle(.green)
       }
     case .error(let message):
       HStack(spacing: 8) {
         Text(message)
-          .foregroundColor(.red)
+          .foregroundStyle(.red)
           .lineLimit(1)
         Button("Retry") {
           viewModel.downloadTranscriptModel()
@@ -275,7 +278,7 @@ struct TranscriptSettingsTab: View {
       }
     case .simulatorNotSupported:
       Text("Requires physical device")
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
     }
   }
 }
@@ -294,10 +297,10 @@ struct AISettingsTab: View {
             Spacer()
             if AISettingsManager.shared.hasConfiguredProvider {
               Text(AISettingsManager.shared.selectedProvider.displayName)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             } else {
               Text("Not configured")
-                .foregroundColor(.orange)
+                .foregroundStyle(.orange)
             }
           }
         }
@@ -424,14 +427,14 @@ struct StorageSettingsTab: View {
   ) -> some View {
     HStack {
       Image(systemName: icon)
-        .foregroundColor(iconColor)
+        .foregroundStyle(iconColor)
         .frame(width: 20)
 
       VStack(alignment: .leading, spacing: 2) {
         Text(title)
         Text(size)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
 
       Spacer()
@@ -443,7 +446,7 @@ struct StorageSettingsTab: View {
         Button(isDestructive ? "Remove All" : "Clear") {
           action()
         }
-        .foregroundColor(isDestructive ? .red : .blue)
+        .foregroundStyle(isDestructive ? .red : .blue)
       }
     }
     .buttonStyle(.plain)

@@ -5,7 +5,6 @@
 //  Created by Bob on 2025/12/17.
 //
 
-import FeedKit
 import Foundation
 
 public struct PodcastEpisodeInfo: Sendable, Identifiable {
@@ -16,6 +15,31 @@ public struct PodcastEpisodeInfo: Sendable, Identifiable {
   public let imageURL: String?
   public let duration: Int?  // Duration in seconds from itunes:duration
   public let guid: String?  // Episode GUID from RSS feed
+  public let transcriptURL: String?  // URL to VTT/SRT transcript from podcast:transcript tag
+  public let transcriptType: String?  // MIME type of transcript (e.g., "text/vtt", "application/srt")
+
+  /// Memberwise initializer with defaults for new fields
+  public nonisolated init(
+    title: String,
+    podcastEpisodeDescription: String? = nil,
+    pubDate: Date? = nil,
+    audioURL: String? = nil,
+    imageURL: String? = nil,
+    duration: Int? = nil,
+    guid: String? = nil,
+    transcriptURL: String? = nil,
+    transcriptType: String? = nil
+  ) {
+    self.title = title
+    self.podcastEpisodeDescription = podcastEpisodeDescription
+    self.pubDate = pubDate
+    self.audioURL = audioURL
+    self.imageURL = imageURL
+    self.duration = duration
+    self.guid = guid
+    self.transcriptURL = transcriptURL
+    self.transcriptType = transcriptType
+  }
 
   /// Unique identifier for this episode (uses audioURL or title+pubDate combo)
   public var id: String {
@@ -51,7 +75,7 @@ public struct PodcastEpisodeInfo: Sendable, Identifiable {
 // Explicit Codable conformance to avoid MainActor isolation issues with SwiftData
 extension PodcastEpisodeInfo: Codable {
   private enum CodingKeys: String, CodingKey {
-    case title, podcastEpisodeDescription, pubDate, audioURL, imageURL, duration, guid
+    case title, podcastEpisodeDescription, pubDate, audioURL, imageURL, duration, guid, transcriptURL, transcriptType
   }
 
   public nonisolated init(from decoder: Decoder) throws {
@@ -63,6 +87,8 @@ extension PodcastEpisodeInfo: Codable {
     self.imageURL = try container.decodeIfPresent(String.self, forKey: .imageURL)
     self.duration = try container.decodeIfPresent(Int.self, forKey: .duration)
     self.guid = try container.decodeIfPresent(String.self, forKey: .guid)
+    self.transcriptURL = try container.decodeIfPresent(String.self, forKey: .transcriptURL)
+    self.transcriptType = try container.decodeIfPresent(String.self, forKey: .transcriptType)
   }
 
   public nonisolated func encode(to encoder: Encoder) throws {
@@ -74,5 +100,7 @@ extension PodcastEpisodeInfo: Codable {
     try container.encodeIfPresent(imageURL, forKey: .imageURL)
     try container.encodeIfPresent(duration, forKey: .duration)
     try container.encodeIfPresent(guid, forKey: .guid)
+    try container.encodeIfPresent(transcriptURL, forKey: .transcriptURL)
+    try container.encodeIfPresent(transcriptType, forKey: .transcriptType)
   }
 }

@@ -21,9 +21,10 @@ struct ContentView: View {
 
 #if os(iOS)
 struct iOSContentView: View {
-  @State private var audioManager = EnhancedAudioManager.shared
-  @State private var importManager = PodcastImportManager.shared
-  @State private var notificationManager = NotificationNavigationManager.shared
+  // Access singletons directly without @State to avoid unnecessary observation overhead
+  private var audioManager: EnhancedAudioManager { .shared }
+  private var importManager: PodcastImportManager { .shared }
+  private var notificationManager: NotificationNavigationManager { .shared }
   @Environment(\.modelContext) private var modelContext
 
   // Navigation state for notification-triggered navigation
@@ -32,6 +33,15 @@ struct iOSContentView: View {
   @State private var notificationImageURL: String?
   @State private var notificationLanguage: String = "en"
   @State private var showNotificationEpisode: Bool = false
+
+  // Navigation state for expanded player navigation
+  @State private var expandedPlayerNavigation: ExpandedPlayerNavigation = .none
+  @State private var expandedPlayerEpisode: PodcastEpisodeInfo?
+  @State private var expandedPlayerPodcastTitle: String = ""
+  @State private var expandedPlayerImageURL: String?
+  @State private var showExpandedPlayerEpisode: Bool = false
+  @State private var expandedPlayerPodcastModel: PodcastInfoModel?
+  @State private var showExpandedPlayerPodcast: Bool = false
 
     private var showMiniPlayer: Bool {
         // Change this to true so it always shows even if empty
@@ -43,35 +53,86 @@ struct iOSContentView: View {
       Tab(Constants.homeString, systemImage: Constants.homeIconName) {
         NavigationStack {
           HomeView()
-            .navigationDestination(isPresented: $showNotificationEpisode) {
-              if let episode = notificationEpisode {
-                EpisodeDetailView(
-                  episode: episode,
-                  podcastTitle: notificationPodcastTitle,
-                  fallbackImageURL: notificationImageURL,
-                  podcastLanguage: notificationLanguage
-                )
-              }
-            }
+            .playerNavigationDestinations(
+              showNotificationEpisode: $showNotificationEpisode,
+              notificationEpisode: notificationEpisode,
+              notificationPodcastTitle: notificationPodcastTitle,
+              notificationImageURL: notificationImageURL,
+              notificationLanguage: notificationLanguage,
+              showEpisodeDetail: $showExpandedPlayerEpisode,
+              episodeDetail: expandedPlayerEpisode,
+              episodePodcastTitle: expandedPlayerPodcastTitle,
+              episodeImageURL: expandedPlayerImageURL,
+              showPodcastList: $showExpandedPlayerPodcast,
+              podcastModel: expandedPlayerPodcastModel
+            )
         }
       }
 
       Tab(Constants.libraryString, systemImage: Constants.libraryIconName) {
-        LibraryView()
+        NavigationStack {
+          LibraryView()
+            .playerNavigationDestinations(
+              showNotificationEpisode: $showNotificationEpisode,
+              notificationEpisode: notificationEpisode,
+              notificationPodcastTitle: notificationPodcastTitle,
+              notificationImageURL: notificationImageURL,
+              notificationLanguage: notificationLanguage,
+              showEpisodeDetail: $showExpandedPlayerEpisode,
+              episodeDetail: expandedPlayerEpisode,
+              episodePodcastTitle: expandedPlayerPodcastTitle,
+              episodeImageURL: expandedPlayerImageURL,
+              showPodcastList: $showExpandedPlayerPodcast,
+              podcastModel: expandedPlayerPodcastModel
+            )
+        }
       }
 
       Tab(Constants.settingsString, systemImage: Constants.settingsIconName) {
-        SettingsView()
+        NavigationStack {
+          SettingsView()
+            .playerNavigationDestinations(
+              showNotificationEpisode: $showNotificationEpisode,
+              notificationEpisode: notificationEpisode,
+              notificationPodcastTitle: notificationPodcastTitle,
+              notificationImageURL: notificationImageURL,
+              notificationLanguage: notificationLanguage,
+              showEpisodeDetail: $showExpandedPlayerEpisode,
+              episodeDetail: expandedPlayerEpisode,
+              episodePodcastTitle: expandedPlayerPodcastTitle,
+              episodeImageURL: expandedPlayerImageURL,
+              showPodcastList: $showExpandedPlayerPodcast,
+              podcastModel: expandedPlayerPodcastModel
+            )
+        }
       }
 
       Tab(role: .search) {
-        PodcastSearchView()
+        NavigationStack {
+          PodcastSearchView()
+            .playerNavigationDestinations(
+              showNotificationEpisode: $showNotificationEpisode,
+              notificationEpisode: notificationEpisode,
+              notificationPodcastTitle: notificationPodcastTitle,
+              notificationImageURL: notificationImageURL,
+              notificationLanguage: notificationLanguage,
+              showEpisodeDetail: $showExpandedPlayerEpisode,
+              episodeDetail: expandedPlayerEpisode,
+              episodePodcastTitle: expandedPlayerPodcastTitle,
+              episodeImageURL: expandedPlayerImageURL,
+              showPodcastList: $showExpandedPlayerPodcast,
+              podcastModel: expandedPlayerPodcastModel
+            )
+        }
       }
     }
     .tabViewBottomAccessory {
       if showMiniPlayer {
-        MiniPlayerBar()
+        MiniPlayerBar(pendingNavigation: $expandedPlayerNavigation)
       }
+    }
+    .onChange(of: expandedPlayerNavigation) { _, newValue in
+      handleExpandedPlayerNavigation(newValue)
     }
     .tabBarMinimizeBehavior(.onScrollDown)
     .onAppear {
@@ -120,6 +181,31 @@ struct iOSContentView: View {
     // Clear the navigation state
     notificationManager.clearNavigation()
   }
+
+  private func handleExpandedPlayerNavigation(_ navigation: ExpandedPlayerNavigation) {
+    switch navigation {
+    case .none:
+      break
+    case let .episodeDetail(episode, podcastTitle, imageURL):
+      // Small delay to allow sheet dismissal animation to complete
+      Task {
+        try? await Task.sleep(for: .seconds(0.3))
+        expandedPlayerEpisode = episode
+        expandedPlayerPodcastTitle = podcastTitle
+        expandedPlayerImageURL = imageURL
+        showExpandedPlayerEpisode = true
+        expandedPlayerNavigation = .none
+      }
+    case let .podcastEpisodeList(podcastModel):
+      // Small delay to allow sheet dismissal animation to complete
+      Task {
+        try? await Task.sleep(for: .seconds(0.3))
+        expandedPlayerPodcastModel = podcastModel
+        showExpandedPlayerPodcast = true
+        expandedPlayerNavigation = .none
+      }
+    }
+  }
 }
 #endif
 
@@ -141,7 +227,7 @@ struct PodcastImportSheet: View {
 
             Text(importManager.importStatus)
               .font(.subheadline)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
 
             ProgressView()
               .scaleEffect(1.5)
@@ -153,7 +239,7 @@ struct PodcastImportSheet: View {
           VStack(spacing: 20) {
             Image(systemName: results.failed == 0 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
               .font(.system(size: 60))
-              .foregroundColor(results.failed == 0 ? .green : .orange)
+              .foregroundStyle(results.failed == 0 ? .green : .orange)
 
             Text("Import Complete")
               .font(.title2)
@@ -162,14 +248,14 @@ struct PodcastImportSheet: View {
             VStack(alignment: .leading, spacing: 8) {
               HStack {
                 Image(systemName: "checkmark.circle.fill")
-                  .foregroundColor(.green)
+                  .foregroundStyle(.green)
                 Text("\(results.successful) podcasts imported")
               }
 
               if results.skipped > 0 {
                 HStack {
                   Image(systemName: "arrow.right.circle.fill")
-                    .foregroundColor(.blue)
+                    .foregroundStyle(.blue)
                   Text("\(results.skipped) already subscribed")
                 }
               }
@@ -177,7 +263,7 @@ struct PodcastImportSheet: View {
               if results.failed > 0 {
                 HStack {
                   Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.red)
+                    .foregroundStyle(.red)
                   Text("\(results.failed) failed")
                 }
               }
@@ -188,24 +274,24 @@ struct PodcastImportSheet: View {
               VStack(alignment: .leading, spacing: 4) {
                 Text("Failed URLs:")
                   .font(.caption)
-                  .foregroundColor(.secondary)
+                  .foregroundStyle(.secondary)
 
                 ForEach(results.failedPodcasts.prefix(3), id: \.self) { url in
                   Text(url)
                     .font(.caption2)
-                    .foregroundColor(.red)
+                    .foregroundStyle(.red)
                     .lineLimit(1)
                 }
 
                 if results.failedPodcasts.count > 3 {
                   Text("... and \(results.failedPodcasts.count - 3) more")
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 }
               }
               .padding()
               .background(Color.gray.opacity(0.1))
-              .cornerRadius(8)
+              .clipShape(.rect(cornerRadius: 8))
             }
 
             Button("Done") {
@@ -222,7 +308,7 @@ struct PodcastImportSheet: View {
               .scaleEffect(1.5)
             Text("Preparing import...")
               .font(.subheadline)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
         }
 
@@ -244,6 +330,52 @@ struct PodcastImportSheet: View {
       }
       .interactiveDismissDisabled(importManager.isImporting)
     }
+  }
+}
+
+// MARK: - Player Navigation Destinations
+
+extension View {
+  /// Attaches navigationDestination modifiers for expanded player / notification navigation.
+  /// Must be called on a view that is inside a NavigationStack.
+  func playerNavigationDestinations(
+    showNotificationEpisode: Binding<Bool>,
+    notificationEpisode: PodcastEpisodeInfo?,
+    notificationPodcastTitle: String,
+    notificationImageURL: String?,
+    notificationLanguage: String,
+    showEpisodeDetail: Binding<Bool>,
+    episodeDetail: PodcastEpisodeInfo?,
+    episodePodcastTitle: String,
+    episodeImageURL: String?,
+    showPodcastList: Binding<Bool>,
+    podcastModel: PodcastInfoModel?
+  ) -> some View {
+    self
+      .navigationDestination(isPresented: showNotificationEpisode) {
+        if let episode = notificationEpisode {
+          EpisodeDetailView(
+            episode: episode,
+            podcastTitle: notificationPodcastTitle,
+            fallbackImageURL: notificationImageURL,
+            podcastLanguage: notificationLanguage
+          )
+        }
+      }
+      .navigationDestination(isPresented: showEpisodeDetail) {
+        if let episode = episodeDetail {
+          EpisodeDetailView(
+            episode: episode,
+            podcastTitle: episodePodcastTitle,
+            fallbackImageURL: episodeImageURL
+          )
+        }
+      }
+      .navigationDestination(isPresented: showPodcastList) {
+        if let podcastModel = podcastModel {
+          EpisodeListView(podcastModel: podcastModel)
+        }
+      }
   }
 }
 

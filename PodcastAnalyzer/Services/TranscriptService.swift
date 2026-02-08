@@ -9,7 +9,7 @@ import AVFoundation
 import Foundation
 import NaturalLanguage
 import Speech
-import os.log
+import OSLog
 
 // Change availability to iOS and a more realistic version number (e.g., 17.0)
 @available(iOS 17.0, *)
@@ -19,6 +19,26 @@ public actor TranscriptService {
   private var censor: Bool = false
   private var needsAudioTimeRange: Bool = true
   private var targetLocale: Locale
+
+  /// Whether the target locale is CJK (Chinese, Japanese, Korean).
+  /// CJK characters carry ~1 word of meaning each, so segments need fewer characters.
+  private var isCJKLocale: Bool {
+    let lang = targetLocale.language.languageCode?.identifier ?? ""
+    return ["zh", "ja", "ko"].contains(lang)
+  }
+
+  /// Default max characters per subtitle segment, adjusted for character density.
+  /// CJK: 18 chars (~18 words of content), Latin: 40 chars (~6-8 words)
+  private var defaultMaxLength: Int {
+    isCJKLocale ? 18 : 40
+  }
+
+  /// CJK clause-level punctuation used as secondary split points.
+  /// These are natural pause points in speech that make good subtitle breaks.
+  private static let clauseMarkers: Set<Character> = [
+    "，", "、", "；", "：",  // Fullwidth CJK punctuation
+    ",", ";",              // ASCII equivalents sometimes used
+  ]
 
   /// Converts a podcast language code (e.g., "zh-tw") to a Locale identifier (e.g., "zh_TW")
   /// - Parameter languageCode: The language code from podcast RSS feed (e.g., "zh-tw", "en-us", "ja")
@@ -129,12 +149,11 @@ public actor TranscriptService {
       attributeOptions: needsAudioTimeRange ? [.audioTimeRange] : []
     )
     self.transcriber = newTranscriber
-      let detector = SpeechDetector()
 
     // Release and reserve locales
     await releaseAndReserveLocales()
 
-      let modules: [any SpeechModule] = [newTranscriber, detector]
+      let modules: [any SpeechModule] = [newTranscriber]
     let installed = await Set(SpeechTranscriber.installedLocales)
     logger.info("Installed locales: \(installed.map { $0.identifier }.joined(separator: ", "))")
 
@@ -404,6 +423,16 @@ public actor TranscriptService {
             }
           }
 
+          // Check if we actually got any transcript content
+          guard !transcript.characters.isEmpty else {
+            throw NSError(
+              domain: "TranscriptService", code: 3,
+              userInfo: [
+                NSLocalizedDescriptionKey:
+                  "Transcription produced no content. The audio may be silent or in an unsupported format."
+              ])
+          }
+
           // Convert transcript to SRT format (CPU-intensive, runs on background thread)
           // Call through actor since transcriptToSRT is actor-isolated
           let srtContent = await self.transcriptToSRT(transcript: transcript, maxLength: maxLength)
@@ -451,20 +480,20 @@ public actor TranscriptService {
     return terminators.contains(lastChar)
   }
 
-  /// Splits an AttributedString transcript into segments using NLTokenizer with maxLength constraint
-  /// This creates segments of approximately 5-6 seconds duration, similar to yap CLI tool
-  /// - Parameters:
-  ///   - transcript: The full transcript as AttributedString with audioTimeRange attributes
-  ///   - maxLength: Maximum character length per segment (default: 40)
-  /// - Returns: Array of AttributedString segments with proper time ranges
-  private func splitTranscriptIntoSegments(
+  // MARK: - Segment Splitting (shared logic)
+
+  /// Computes segment ranges for the transcript.
+  /// Shared by both SRT generation and word-timing extraction.
+  ///
+  /// For CJK locales, applies clause-level splitting (，、；：) before word-level fallback,
+  /// producing shorter, more readable subtitle segments.
+  private func computeSegmentRanges(
     transcript: AttributedString, maxLength: Int
-  ) -> [AttributedString] {
-    let tokenizer = NLTokenizer(unit: .sentence)
+  ) -> [Range<AttributedString.Index>] {
     let string = String(transcript.characters)
+    let tokenizer = NLTokenizer(unit: .sentence)
     tokenizer.string = string
 
-    // Get all sentence ranges
     let sentenceRanges = tokenizer.tokens(for: string.startIndex..<string.endIndex).compactMap {
       stringRange -> (Range<String.Index>, Range<AttributedString.Index>)? in
       guard
@@ -474,73 +503,168 @@ public actor TranscriptService {
       return (stringRange, attrLower..<attrUpper)
     }
 
-    // Process each sentence and split if needed
-    let allRanges: [Range<AttributedString.Index>] = sentenceRanges.flatMap {
+    let useCJKSplitting = isCJKLocale
+
+    return sentenceRanges.flatMap {
       sentenceStringRange, sentenceAttrRange -> [Range<AttributedString.Index>] in
       let sentence = transcript[sentenceAttrRange]
 
-      // If sentence is within maxLength, keep it as-is
       guard sentence.characters.count > maxLength else {
         return [sentenceAttrRange]
       }
 
-      // Sentence exceeds maxLength - split by words
-      let wordTokenizer = NLTokenizer(unit: .word)
-      wordTokenizer.string = string
+      if useCJKSplitting {
+        // CJK: split at clause markers first, then word-split oversized clauses
+        let clauseRanges = splitAtClauseMarkers(
+          stringRange: sentenceStringRange,
+          attrRange: sentenceAttrRange,
+          transcript: transcript,
+          string: string
+        )
 
-      var wordRanges: [Range<AttributedString.Index>] = wordTokenizer.tokens(
-        for: sentenceStringRange
-      ).compactMap { wordStringRange -> Range<AttributedString.Index>? in
-        guard
-          let attrLower = AttributedString.Index(wordStringRange.lowerBound, within: transcript),
-          let attrUpper = AttributedString.Index(wordStringRange.upperBound, within: transcript)
-        else { return nil }
-        return attrLower..<attrUpper
-      }
+        var result: [Range<AttributedString.Index>] = []
+        for (clauseStringRange, clauseAttrRange) in clauseRanges {
+          let clauseLen = transcript[clauseAttrRange].characters.count
 
-      guard !wordRanges.isEmpty else { return [sentenceAttrRange] }
-
-      // Extend first word to include leading whitespace/punctuation
-      wordRanges[0] = sentenceAttrRange.lowerBound..<wordRanges[0].upperBound
-      // Extend last word to include trailing whitespace/punctuation
-      wordRanges[wordRanges.count - 1] =
-        wordRanges[wordRanges.count - 1].lowerBound..<sentenceAttrRange.upperBound
-
-      // Accumulate words into segments respecting maxLength
-      var segmentRanges: [Range<AttributedString.Index>] = []
-      for wordRange in wordRanges {
-        if let lastRange = segmentRanges.last,
-          transcript[lastRange].characters.count + transcript[wordRange].characters.count
-            <= maxLength
-        {
-          // Extend the last segment
-          segmentRanges[segmentRanges.count - 1] = lastRange.lowerBound..<wordRange.upperBound
-        } else {
-          // Start a new segment
-          segmentRanges.append(wordRange)
+          if clauseLen > maxLength {
+            // Clause itself is too long (no punctuation), fall back to word splitting
+            result.append(contentsOf: splitByWords(
+              stringRange: clauseStringRange,
+              attrRange: clauseAttrRange,
+              transcript: transcript,
+              string: string,
+              maxLength: maxLength
+            ))
+          } else if let lastRange = result.last,
+            transcript[lastRange].characters.count + clauseLen <= maxLength
+          {
+            // Merge small adjacent clauses into one segment
+            result[result.count - 1] = lastRange.lowerBound..<clauseAttrRange.upperBound
+          } else {
+            result.append(clauseAttrRange)
+          }
         }
+        return result
+      } else {
+        // Non-CJK: split by words directly
+        return splitByWords(
+          stringRange: sentenceStringRange,
+          attrRange: sentenceAttrRange,
+          transcript: transcript,
+          string: string,
+          maxLength: maxLength
+        )
       }
+    }
+  }
 
-      return segmentRanges
+  /// Splits a text range at CJK clause markers (，、；：).
+  /// Each clause includes its trailing marker character.
+  private func splitAtClauseMarkers(
+    stringRange: Range<String.Index>,
+    attrRange: Range<AttributedString.Index>,
+    transcript: AttributedString,
+    string: String
+  ) -> [(Range<String.Index>, Range<AttributedString.Index>)] {
+    var result: [(Range<String.Index>, Range<AttributedString.Index>)] = []
+    var clauseStart = stringRange.lowerBound
+
+    var idx = stringRange.lowerBound
+    while idx < stringRange.upperBound {
+      let char = string[idx]
+      let nextIdx = string.index(after: idx)
+
+      if Self.clauseMarkers.contains(char) {
+        guard
+          let attrLower = AttributedString.Index(clauseStart, within: transcript),
+          let attrUpper = AttributedString.Index(nextIdx, within: transcript)
+        else {
+          idx = nextIdx
+          continue
+        }
+        result.append((clauseStart..<nextIdx, attrLower..<attrUpper))
+        clauseStart = nextIdx
+      }
+      idx = nextIdx
     }
 
-    // Convert ranges to AttributedStrings with proper time ranges
+    // Add remaining text after last marker
+    if clauseStart < stringRange.upperBound {
+      if let attrLower = AttributedString.Index(clauseStart, within: transcript),
+        let attrUpper = AttributedString.Index(stringRange.upperBound, within: transcript)
+      {
+        result.append((clauseStart..<stringRange.upperBound, attrLower..<attrUpper))
+      }
+    }
+
+    return result
+  }
+
+  /// Splits a text range by word boundaries, accumulating words up to maxLength.
+  private func splitByWords(
+    stringRange: Range<String.Index>,
+    attrRange: Range<AttributedString.Index>,
+    transcript: AttributedString,
+    string: String,
+    maxLength: Int
+  ) -> [Range<AttributedString.Index>] {
+    let wordTokenizer = NLTokenizer(unit: .word)
+    wordTokenizer.string = string
+
+    var wordRanges: [Range<AttributedString.Index>] = wordTokenizer.tokens(
+      for: stringRange
+    ).compactMap { wordStringRange -> Range<AttributedString.Index>? in
+      guard
+        let attrLower = AttributedString.Index(wordStringRange.lowerBound, within: transcript),
+        let attrUpper = AttributedString.Index(wordStringRange.upperBound, within: transcript)
+      else { return nil }
+      return attrLower..<attrUpper
+    }
+
+    guard !wordRanges.isEmpty else { return [attrRange] }
+
+    // Extend first/last words to cover leading/trailing whitespace and punctuation
+    wordRanges[0] = attrRange.lowerBound..<wordRanges[0].upperBound
+    wordRanges[wordRanges.count - 1] =
+      wordRanges[wordRanges.count - 1].lowerBound..<attrRange.upperBound
+
+    // Accumulate words into segments respecting maxLength
+    var segmentRanges: [Range<AttributedString.Index>] = []
+    for wordRange in wordRanges {
+      if let lastRange = segmentRanges.last,
+        transcript[lastRange].characters.count + transcript[wordRange].characters.count
+          <= maxLength
+      {
+        segmentRanges[segmentRanges.count - 1] = lastRange.lowerBound..<wordRange.upperBound
+      } else {
+        segmentRanges.append(wordRange)
+      }
+    }
+
+    return segmentRanges
+  }
+
+  /// Splits transcript into segments with proper time ranges for SRT generation.
+  private func splitTranscriptIntoSegments(
+    transcript: AttributedString, maxLength: Int
+  ) -> [AttributedString] {
+    let allRanges = computeSegmentRanges(transcript: transcript, maxLength: maxLength)
+
     return allRanges.compactMap { range -> AttributedString? in
       let segment = transcript[range]
 
-      // Collect time ranges from non-empty runs
       let audioTimeRanges = segment.runs.filter {
         !String(transcript[$0.range].characters)
           .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       }.compactMap(\.audioTimeRange)
 
-      guard !audioTimeRanges.isEmpty else { return nil }
+      guard let firstTimeRange = audioTimeRanges.first,
+        let lastTimeRange = audioTimeRanges.last
+      else { return nil }
 
-      // Calculate combined time range (start of first, end of last)
-      let start = audioTimeRanges.first!.start
-      let end = audioTimeRanges.last!.end
+      let start = firstTimeRange.start
+      let end = lastTimeRange.end
 
-      // Create new AttributedString with the combined time range
       var attributes = AttributeContainer()
       attributes[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] = CMTimeRange(
         start: start,
@@ -550,6 +674,118 @@ public actor TranscriptService {
     }
   }
 
+  /// Word-level timing data for a single word
+  public struct WordTimingData: Codable, Sendable {
+    public let word: String
+    public let startTime: Double
+    public let endTime: Double
+  }
+
+  /// Segment data with word-level timing information
+  public struct SegmentData: Codable, Sendable {
+    public let id: Int
+    public let startTime: Double
+    public let endTime: Double
+    public let text: String
+    public let wordTimings: [WordTimingData]
+  }
+
+  /// Transcript data containing segments with word timings
+  public struct TranscriptData: Codable, Sendable {
+    public let segments: [SegmentData]
+  }
+
+  /// Extracts segments with word-level timing from the transcript
+  /// - Parameters:
+  ///   - transcript: The full transcript as AttributedString with audioTimeRange attributes
+  ///   - maxLength: Maximum character length per segment
+  /// - Returns: Array of SegmentData with word-level timings
+  private func extractSegmentsWithWordTimings(
+    transcript: AttributedString, maxLength: Int
+  ) -> [SegmentData] {
+    let allRanges = computeSegmentRanges(transcript: transcript, maxLength: maxLength)
+
+    return allRanges.enumerated().compactMap { index, range -> SegmentData? in
+      let segment = transcript[range]
+      let segmentText = String(segment.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !segmentText.isEmpty else { return nil }
+
+      // Extract word timings from runs
+      var wordTimings: [WordTimingData] = []
+      for run in segment.runs {
+        let wordText = String(transcript[run.range].characters)
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !wordText.isEmpty, let timeRange = run.audioTimeRange else { continue }
+
+        wordTimings.append(WordTimingData(
+          word: wordText,
+          startTime: timeRange.start.seconds,
+          endTime: timeRange.end.seconds
+        ))
+      }
+
+      guard let firstTiming = wordTimings.first,
+            let lastTiming = wordTimings.last else { return nil }
+
+      return SegmentData(
+        id: index + 1,
+        startTime: firstTiming.startTime,
+        endTime: lastTiming.endTime,
+        text: segmentText,
+        wordTimings: wordTimings
+      )
+    }
+  }
+
+  /// Converts audio to SRT format with additional JSON file containing word timings
+  /// - Parameter inputFile: The URL of the audio file to transcribe
+  /// - Parameter maxLength: Maximum length for each subtitle entry (optional, defaults to nil)
+  /// - Returns: Tuple of (SRT content, JSON word timings content)
+  public func audioToSRTWithWordTimings(inputFile: URL, maxLength: Int? = nil) async throws -> (srt: String, wordTimingsJSON: String) {
+    guard let transcriber = transcriber, let analyzer = analyzer else {
+      throw NSError(
+        domain: "TranscriptService", code: 1,
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "Transcriber or analyzer not initialized. Call setupAndInstallAssets() first."
+        ])
+    }
+
+    guard needsAudioTimeRange else {
+      throw NSError(
+        domain: "TranscriptService", code: 2,
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "audioTimeRange must be enabled to generate word timings."
+        ])
+    }
+
+    let audioURL = try await resolveAudioURL(inputFile)
+    let audioFile = try AVAudioFile(forReading: audioURL)
+
+    try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+
+    var transcript: AttributedString = ""
+    for try await result in transcriber.results {
+      transcript += result.text
+    }
+
+    let effectiveMaxLength = maxLength ?? defaultMaxLength
+    let segments = extractSegmentsWithWordTimings(transcript: transcript, maxLength: effectiveMaxLength)
+    let transcriptData = TranscriptData(segments: segments)
+
+    // Generate SRT
+    let srtContent = transcriptToSRT(transcript: transcript, maxLength: maxLength)
+
+    // Generate JSON word timings
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let jsonData = try encoder.encode(transcriptData)
+    let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+    return (srtContent, jsonString)
+  }
+
   /// Converts an AttributedString transcript to SRT subtitle format
   /// Uses NLTokenizer for smart sentence detection and splits long sentences by word
   /// - Parameters:
@@ -557,8 +793,7 @@ public actor TranscriptService {
   ///   - maxLength: Maximum character length per segment (default: 40 for ~5 second segments)
   /// - Returns: SRT formatted string
   private func transcriptToSRT(transcript: AttributedString, maxLength: Int?) -> String {
-    // Default to 40 characters if not specified (creates ~5 second segments)
-    let effectiveMaxLength = maxLength ?? 40
+    let effectiveMaxLength = maxLength ?? defaultMaxLength
 
     let segments = splitTranscriptIntoSegments(
       transcript: transcript, maxLength: effectiveMaxLength)

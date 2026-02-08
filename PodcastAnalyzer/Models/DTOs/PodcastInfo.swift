@@ -5,7 +5,6 @@
 //  Created by Bob on 2025/12/17.
 //
 
-import FeedKit
 import Foundation
 
 public struct PodcastInfo: Sendable, Identifiable {
@@ -17,7 +16,7 @@ public struct PodcastInfo: Sendable, Identifiable {
   public let imageURL: String
   public let language: String
 
-  init(
+  nonisolated init(
     title: String, description: String?, episodes: [PodcastEpisodeInfo], rssUrl: String,
     imageURL: String, language: String
   ) {

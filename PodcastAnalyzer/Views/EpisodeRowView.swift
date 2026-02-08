@@ -224,12 +224,22 @@ struct EpisodeRowView: View {
             ? "waveform" : "pause.fill"
         )
         .font(.system(size: 12, weight: .bold))
-        .foregroundColor(.white)
+        .foregroundStyle(.white)
         .padding(4)
-        .background(Color.blue)
-        .cornerRadius(4)
+        .glassEffect(.regular.tint(.blue), in: .rect(cornerRadius: 4))
         .padding(4)
       }
+    }
+  }
+
+  /// Format episode date - relative for today, otherwise abbreviated
+  private func formatEpisodeDate(_ date: Date) -> String {
+    if Calendar.current.isDateInToday(date) {
+      let formatter = RelativeDateTimeFormatter()
+      formatter.unitsStyle = .abbreviated
+      return formatter.localizedString(for: date, relativeTo: Date())
+    } else {
+      return date.formatted(date: .abbreviated, time: .omitted)
     }
   }
 
@@ -238,9 +248,9 @@ struct EpisodeRowView: View {
     VStack(alignment: .leading, spacing: 6) {
       // Date row
       if let date = episode.pubDate {
-        Text(date.formatted(date: .abbreviated, time: .omitted))
+        Text(formatEpisodeDate(date))
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
 
       // Title
@@ -248,13 +258,13 @@ struct EpisodeRowView: View {
         .font(.subheadline)
         .fontWeight(.semibold)
         .lineLimit(3)
-        .foregroundColor(.primary)
+        .foregroundStyle(.primary)
 
       // Description
       if let description = plainDescription {
         Text(description)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .lineLimit(3)
       }
 
@@ -268,18 +278,18 @@ struct EpisodeRowView: View {
   @ViewBuilder
   private var bottomStatusBar: some View {
     HStack(spacing: 6) {
-      // Play button with progress (using reusable component)
-      EpisodePlayButton(
-        isPlaying: audioManager.isPlaying,
-        isPlayingThisEpisode: isPlayingThisEpisode,
-        isCompleted: isCompleted,
-        playbackProgress: playbackProgress,
+      // Play button with progress - uses live audio manager state
+      LivePlaybackButton(
+        episodeTitle: episode.title,
+        podcastTitle: podcastTitle,
         duration: episodeModel?.duration,
-        lastPlaybackPosition: episodeModel?.lastPlaybackPosition ?? 0,
         formattedDuration: episode.formattedDuration,
-        isDisabled: episode.audioURL == nil,
+        lastPlaybackPosition: episodeModel?.lastPlaybackPosition ?? 0,
+        playbackProgress: playbackProgress,
+        isCompleted: isCompleted,
+        onPlay: playAction,
         style: .compact,
-        action: playAction
+        isDisabled: episode.audioURL == nil
       )
 
       // Download progress
@@ -288,21 +298,19 @@ struct EpisodeRowView: View {
           ProgressView().scaleEffect(0.4)
           Text("\(Int(progress * 100))%").font(.system(size: 9))
         }
-        .foregroundColor(.orange)
+        .foregroundStyle(.orange)
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(Color.orange.opacity(0.15))
-        .clipShape(Capsule())
+        .glassEffect(.regular.tint(.orange), in: .capsule)
       } else if case .finishing = downloadState {
         HStack(spacing: 2) {
           ProgressView().scaleEffect(0.4)
           Text("Saving").font(.system(size: 9))
         }
-        .foregroundColor(.blue)
+        .foregroundStyle(.blue)
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(Color.blue.opacity(0.15))
-        .clipShape(Capsule())
+        .glassEffect(.regular.tint(.blue), in: .capsule)
       }
 
       // Status indicators
@@ -310,31 +318,31 @@ struct EpisodeRowView: View {
         if isStarred {
           Image(systemName: "star.fill")
             .font(.system(size: 10))
-            .foregroundColor(.yellow)
+            .foregroundStyle(.yellow)
         }
 
         if isDownloaded {
           Image(systemName: "arrow.down.circle.fill")
             .font(.system(size: 10))
-            .foregroundColor(.green)
+            .foregroundStyle(.green)
         }
 
         if hasCaptions {
           Image(systemName: "captions.bubble.fill")
             .font(.system(size: 10))
-            .foregroundColor(.purple)
+            .foregroundStyle(.purple)
         } else if isTranscribing {
           HStack(spacing: 2) {
             ProgressView().scaleEffect(0.35)
             if isDownloadingModel {
               Text("Model")
                 .font(.system(size: 8))
-                .foregroundColor(.purple)
+                .foregroundStyle(.purple)
             }
             if let progress = transcriptProgress {
               Text("\(Int(progress * 100))%")
                 .font(.system(size: 8))
-                .foregroundColor(.purple)
+                .foregroundStyle(.purple)
             }
           }
         }
@@ -342,13 +350,13 @@ struct EpisodeRowView: View {
         if hasAIAnalysis {
           Image(systemName: "sparkles")
             .font(.system(size: 10))
-            .foregroundColor(.orange)
+            .foregroundStyle(.orange)
         }
 
         if isCompleted {
           Image(systemName: "checkmark.circle.fill")
             .font(.system(size: 10))
-            .foregroundColor(.green)
+            .foregroundStyle(.green)
         }
       }
 
@@ -360,7 +368,7 @@ struct EpisodeRowView: View {
       } label: {
         Image(systemName: "ellipsis")
           .font(.system(size: 14, weight: .medium))
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .frame(width: 28, height: 28)
           .contentShape(Rectangle())
       }

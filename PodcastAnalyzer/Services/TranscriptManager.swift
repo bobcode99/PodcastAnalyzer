@@ -7,7 +7,7 @@
 
 import Foundation
 import SwiftData
-import os.log
+import OSLog
 
 /// Tracks the status of a transcript generation job
 enum TranscriptJobStatus: Equatable {
@@ -58,13 +58,6 @@ class TranscriptManager {
     return min(max(processorCount / 2, 2), 4)
   }()
   
-  // Dedicated background queue for CPU-intensive transcription work
-  private let transcriptionQueue = DispatchQueue(
-    label: "com.podcast.analyzer.transcription",
-    qos: .userInitiated,
-    attributes: .concurrent
-  )
-
   // Queue for pending jobs
   private var pendingJobs: [TranscriptJob] = []
   private var runningJobIds: Set<String> = []
@@ -187,7 +180,16 @@ class TranscriptManager {
       guard let self = self else { return }
       
       do {
+        // Verify audio file exists before starting
         let audioURL = URL(fileURLWithPath: job.audioPath)
+        guard FileManager.default.fileExists(atPath: job.audioPath) else {
+          throw NSError(
+            domain: "TranscriptManager", code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "Audio file not found: \(job.audioPath)"]
+          )
+        }
+        
+        // Create a fresh TranscriptService for each job to avoid state issues
         let transcriptService = TranscriptService(language: job.language)
 
         // Check if model is ready
