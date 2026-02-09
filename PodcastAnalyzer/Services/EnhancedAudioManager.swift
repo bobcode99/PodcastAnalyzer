@@ -985,7 +985,10 @@ private func handleAudioInterruption(_ notification: Notification) {
     UserDefaults.standard.set(episode.title, forKey: Keys.lastEpisodeTitle)
     UserDefaults.standard.set(episode.podcastTitle, forKey: Keys.lastPodcastTitle)
     UserDefaults.standard.set(currentTime, forKey: Keys.lastPlaybackTime)
-    UserDefaults.standard.set(duration, forKey: Keys.lastDuration)
+    // Don't overwrite a valid saved duration with 0 (AVPlayer may not have loaded yet)
+    if duration > 0 {
+      UserDefaults.standard.set(duration, forKey: Keys.lastDuration)
+    }
     UserDefaults.standard.set(episode.audioURL, forKey: Keys.lastAudioURL)
     if let imageURL = imageURL {
       UserDefaults.standard.set(imageURL, forKey: Keys.lastImageURL)
@@ -1012,7 +1015,8 @@ private func handleAudioInterruption(_ notification: Notification) {
       title: title,
       podcastTitle: podcastTitle,
       audioURL: audioURL,
-      imageURL: imageURL
+      imageURL: imageURL,
+      duration: savedDuration > 0 ? Int(savedDuration) : nil
     )
 
     return (episode, time, savedDuration, imageURL)
