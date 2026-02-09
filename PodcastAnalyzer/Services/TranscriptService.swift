@@ -813,4 +813,464 @@ public actor TranscriptService {
 
     return srtEntries.joined(separator: "\n\n")
   }
+
+  // MARK: - Parallel Chunk Processing
+
+  /// Represents an audio chunk for parallel transcription
+  private struct AudioChunk: Sendable {
+    let index: Int
+    let fileURL: URL
+    let startTime: Double
+    let endTime: Double
+  }
+
+  /// A single transcribed segment from a chunk, with timestamps offset to the original timeline
+  private struct ChunkSegment: Sendable {
+    let startTime: Double
+    let endTime: Double
+    let text: String
+  }
+
+  /// Splits an audio file into time-ranged chunks for parallel processing.
+  /// Uses `AVAssetExportSession` to export each chunk as M4A.
+  private static func exportAudioChunks(
+    from sourceURL: URL,
+    totalDuration: TimeInterval,
+    chunkDuration: TimeInterval = 300,
+    overlap: TimeInterval = 2.0
+  ) async throws -> [AudioChunk] {
+    let asset = AVURLAsset(url: sourceURL)
+    let tempDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("TranscriptChunks-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+    // Calculate chunk time ranges
+    var chunkRanges: [(index: Int, start: Double, end: Double)] = []
+    var chunkStart: Double = 0
+    var index = 0
+    while chunkStart < totalDuration {
+      let chunkEnd = min(chunkStart + chunkDuration, totalDuration)
+      chunkRanges.append((index: index, start: chunkStart, end: chunkEnd))
+      chunkStart = chunkEnd - overlap
+      if chunkEnd >= totalDuration { break }
+      index += 1
+    }
+
+    // Export chunks concurrently (export is I/O-bound, not CPU-bound)
+    return try await withThrowingTaskGroup(of: AudioChunk.self) { group in
+      for range in chunkRanges {
+        group.addTask {
+          let outputURL = tempDir.appendingPathComponent("chunk_\(range.index).m4a")
+
+          guard let exportSession = AVAssetExportSession(
+            asset: asset,
+            presetName: AVAssetExportPresetAppleM4A
+          ) else {
+            throw NSError(
+              domain: "TranscriptService", code: 10,
+              userInfo: [NSLocalizedDescriptionKey: "Failed to create export session for chunk \(range.index)"]
+            )
+          }
+
+          exportSession.timeRange = CMTimeRange(
+            start: CMTime(seconds: range.start, preferredTimescale: 44100),
+            end: CMTime(seconds: range.end, preferredTimescale: 44100)
+          )
+
+          try await exportSession.export(to: outputURL, as: .m4a)
+
+          return AudioChunk(
+            index: range.index,
+            fileURL: outputURL,
+            startTime: range.start,
+            endTime: range.end
+          )
+        }
+      }
+
+      var chunks: [AudioChunk] = []
+      for try await chunk in group {
+        chunks.append(chunk)
+      }
+      return chunks.sorted { $0.index < $1.index }
+    }
+  }
+
+  /// Transcribes a single audio chunk. This is a **static** method so it runs outside
+  /// the actor's serial executor, enabling true parallel execution across chunks.
+  /// Each invocation creates its own SpeechTranscriber/SpeechAnalyzer.
+  private static func transcribeChunkParallel(
+    chunk: AudioChunk,
+    locale: Locale,
+    censor: Bool,
+    maxSegmentLength: Int,
+    onProgress: @Sendable (Double) -> Void
+  ) async throws -> [ChunkSegment] {
+    let transcriber = SpeechTranscriber(
+      locale: locale,
+      transcriptionOptions: censor ? [.etiquetteReplacements] : [],
+      reportingOptions: [],
+      attributeOptions: [.audioTimeRange]
+    )
+    let analyzer = SpeechAnalyzer(modules: [transcriber])
+
+    let audioFile = try AVAudioFile(forReading: chunk.fileURL)
+    try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+
+    let chunkDuration = chunk.endTime - chunk.startTime
+    var transcript: AttributedString = ""
+    var lastProgressReport = Date.distantPast
+
+    for try await result in transcriber.results {
+      transcript += result.text
+
+      // Report incremental progress, throttled to ~2 updates/sec
+      let now = Date()
+      if now.timeIntervalSince(lastProgressReport) >= 0.5 {
+        for run in result.text.runs {
+          if let timeRange = run.audioTimeRange {
+            let seconds = timeRange.end.seconds
+            if seconds.isFinite && chunkDuration > 0 {
+              onProgress(min(seconds / chunkDuration, 1.0))
+              lastProgressReport = now
+              break
+            }
+          }
+        }
+      }
+    }
+
+    // Mark chunk fully transcribed
+    onProgress(1.0)
+
+    guard !transcript.characters.isEmpty else { return [] }
+
+    // Extract segments by grouping runs into appropriately-sized chunks.
+    // Uses simple length + sentence-boundary splitting (no actor state needed).
+    var segments: [ChunkSegment] = []
+    var currentText = ""
+    var segmentStartTime: Double?
+    var segmentEndTime: Double = 0
+
+    for run in transcript.runs {
+      let word = String(transcript[run.range].characters)
+      let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty, let timeRange = run.audioTimeRange else { continue }
+
+      let wordStart = timeRange.start.seconds
+      let wordEnd = timeRange.end.seconds
+
+      // Guard against NaN/infinity timestamps from the Speech framework
+      guard wordStart.isFinite && wordEnd.isFinite else { continue }
+
+      if segmentStartTime == nil {
+        segmentStartTime = wordStart
+      }
+      segmentEndTime = wordEnd
+      currentText += word
+
+      // Split at maxSegmentLength or sentence boundaries
+      let shouldSplit = currentText.count >= maxSegmentLength
+        || isSentenceEndChar(trimmed.last)
+
+      if shouldSplit, let start = segmentStartTime {
+        let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+          segments.append(ChunkSegment(
+            startTime: start + chunk.startTime,
+            endTime: segmentEndTime + chunk.startTime,
+            text: text
+          ))
+        }
+        currentText = ""
+        segmentStartTime = nil
+      }
+    }
+
+    // Flush remaining text
+    if let start = segmentStartTime {
+      let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !text.isEmpty {
+        segments.append(ChunkSegment(
+          startTime: start + chunk.startTime,
+          endTime: segmentEndTime + chunk.startTime,
+          text: text
+        ))
+      }
+    }
+
+    return segments
+  }
+
+  /// Checks for sentence-ending characters (pure function, no actor state needed)
+  private static func isSentenceEndChar(_ char: Character?) -> Bool {
+    guard let char else { return false }
+    let terminators: Set<Character> = [".", "!", "?", "。", "！", "？"]
+    return terminators.contains(char)
+  }
+
+  /// Merges segment results from multiple chunks, de-duplicating overlap regions.
+  /// Segments from the earlier chunk are preferred in overlap regions since they have better context.
+  private static func mergeChunkSegments(
+    _ chunkResults: [[ChunkSegment]],
+    overlap: TimeInterval = 2.0
+  ) -> [ChunkSegment] {
+    guard !chunkResults.isEmpty else { return [] }
+    guard chunkResults.count > 1 else { return chunkResults[0] }
+
+    var merged: [ChunkSegment] = []
+
+    for (chunkIndex, segments) in chunkResults.enumerated() {
+      if chunkIndex == 0 {
+        merged.append(contentsOf: segments)
+      } else {
+        // Skip segments that fall within the overlap region of the previous chunk
+        let previousChunkNominalEnd = chunkResults[chunkIndex - 1].last?.endTime ?? 0
+        let overlapThreshold = previousChunkNominalEnd - 1.0
+
+        for segment in segments {
+          if segment.startTime < overlapThreshold {
+            continue
+          }
+          merged.append(segment)
+        }
+      }
+    }
+
+    merged.sort { $0.startTime < $1.startTime }
+    return merged
+  }
+
+  /// Converts merged ChunkSegments into SRT format.
+  /// Uses `formatSRTTimeSafe` to guard against NaN/infinity values.
+  private static func chunkSegmentsToSRT(_ segments: [ChunkSegment]) -> String {
+    let srtEntries = segments.enumerated().map { index, segment -> String in
+      let entryNumber = index + 1
+      let startTime = formatSRTTimeSafe(segment.startTime)
+      let endTime = formatSRTTimeSafe(segment.endTime)
+      return "\(entryNumber)\n\(startTime) --> \(endTime)\n\(segment.text)"
+    }
+    return srtEntries.joined(separator: "\n\n")
+  }
+
+  /// NaN-safe SRT time formatter for use in static (nonisolated) contexts.
+  /// Clamps non-finite values to 0 to prevent `Int(Double.nan)` crashes.
+  private static func formatSRTTimeSafe(_ timeInterval: TimeInterval) -> String {
+    let safeTime = timeInterval.isFinite ? max(timeInterval, 0) : 0
+    let ms = Int(safeTime.truncatingRemainder(dividingBy: 1) * 1000)
+    let s = Int(safeTime) % 60
+    let m = (Int(safeTime) / 60) % 60
+    let h = Int(safeTime) / 60 / 60
+    return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
+  }
+
+  /// Removes temporary chunk files
+  private static func cleanupTempFiles(_ chunks: [AudioChunk]) {
+    for chunk in chunks {
+      try? FileManager.default.removeItem(at: chunk.fileURL)
+    }
+    if let firstChunk = chunks.first {
+      try? FileManager.default.removeItem(at: firstChunk.fileURL.deletingLastPathComponent())
+    }
+  }
+
+  /// Converts audio file to SRT subtitle format with parallel chunk processing for long audio.
+  /// For audio shorter than 10 minutes, falls back to sequential processing.
+  /// For longer audio, splits into 5-minute chunks processed in parallel for ~3-4x speedup.
+  public func audioToSRTChunkedWithProgress(
+    inputFile: URL,
+    maxLength: Int? = nil,
+    chunkDuration: TimeInterval = 300
+  ) -> AsyncThrowingStream<TranscriptionProgress, Error> {
+    return AsyncThrowingStream { continuation in
+      Task.detached(priority: .userInitiated) { [self] in
+        do {
+          // Capture actor-isolated state upfront so chunk tasks don't need the actor
+          let locale = await self.targetLocale
+          let censor = await self.censor
+          let defaultMaxLen = await self.defaultMaxLength
+          let effectiveMaxLength = maxLength ?? defaultMaxLen
+
+          let audioURL = try await self.resolveAudioURL(inputFile)
+          let audioFile = try AVAudioFile(forReading: audioURL)
+          let sampleRate = audioFile.processingFormat.sampleRate
+          let audioFileDuration: TimeInterval =
+            sampleRate > 0 ? Double(audioFile.length) / sampleRate : 0
+
+          guard audioFileDuration.isFinite && audioFileDuration > 0 else {
+            throw NSError(
+              domain: "TranscriptService", code: 12,
+              userInfo: [NSLocalizedDescriptionKey: "Invalid audio file duration"]
+            )
+          }
+
+          self.logger.info(
+            "Audio duration: \(audioFileDuration)s — evaluating chunked vs sequential")
+
+          // Threshold: audio shorter than 10 minutes uses sequential processing
+          if audioFileDuration < 600 {
+            self.logger.info("Audio < 10 min, using sequential processing")
+            for try await progress in await self.audioToSRTWithProgress(
+              inputFile: inputFile, maxLength: maxLength
+            ) {
+              continuation.yield(progress)
+            }
+            continuation.finish()
+            return
+          }
+
+          // Send initial progress
+          continuation.yield(TranscriptionProgress(
+            progress: 0.0,
+            currentTimeSeconds: 0,
+            totalDurationSeconds: audioFileDuration,
+            isComplete: false,
+            srtContent: nil
+          ))
+
+          // Export audio chunks
+          self.logger.info("Exporting audio chunks (chunkDuration: \(chunkDuration)s)")
+          let overlap: TimeInterval = 2.0
+          let chunks = try await Self.exportAudioChunks(
+            from: audioURL,
+            totalDuration: audioFileDuration,
+            chunkDuration: chunkDuration,
+            overlap: overlap
+          )
+          self.logger.info("Exported \(chunks.count) chunks")
+
+          defer { Self.cleanupTempFiles(chunks) }
+
+          // Determine concurrency limit (at least 1)
+          let maxConcurrent = max(min(
+            chunks.count,
+            ProcessInfo.processInfo.processorCount / 2,
+            4
+          ), 1)
+          self.logger.info("Processing with concurrency limit: \(maxConcurrent)")
+
+          let progressTracker = ChunkProgressTracker(totalChunks: chunks.count)
+
+          // Process chunks in parallel using static method (no actor serialization)
+          let allChunkResults: [[ChunkSegment]] = try await withThrowingTaskGroup(
+            of: (Int, [ChunkSegment]).self
+          ) { group in
+            var results = [[ChunkSegment]](repeating: [], count: chunks.count)
+            var launched = 0
+
+            // Launch initial batch up to concurrency limit
+            for i in 0..<min(maxConcurrent, chunks.count) {
+              let chunk = chunks[i]
+              group.addTask {
+                let segments = try await Self.transcribeChunkParallel(
+                  chunk: chunk,
+                  locale: locale,
+                  censor: censor,
+                  maxSegmentLength: effectiveMaxLength,
+                  onProgress: { chunkProgress in
+                    Task {
+                      let overall = await progressTracker.updateProgress(
+                        chunkIndex: chunk.index, progress: chunkProgress
+                      )
+                      continuation.yield(TranscriptionProgress(
+                        progress: min(overall, 0.99),
+                        currentTimeSeconds: overall * audioFileDuration,
+                        totalDurationSeconds: audioFileDuration,
+                        isComplete: false,
+                        srtContent: nil
+                      ))
+                    }
+                  }
+                )
+                return (chunk.index, segments)
+              }
+              launched += 1
+            }
+
+            // As each task completes, launch the next pending chunk
+            for try await (chunkIndex, segments) in group {
+              results[chunkIndex] = segments
+
+              // Launch next chunk if available
+              if launched < chunks.count {
+                let chunk = chunks[launched]
+                group.addTask {
+                  let segments = try await Self.transcribeChunkParallel(
+                    chunk: chunk,
+                    locale: locale,
+                    censor: censor,
+                    maxSegmentLength: effectiveMaxLength,
+                    onProgress: { chunkProgress in
+                      Task {
+                        let overall = await progressTracker.updateProgress(
+                          chunkIndex: chunk.index, progress: chunkProgress
+                        )
+                        continuation.yield(TranscriptionProgress(
+                          progress: min(overall, 0.99),
+                          currentTimeSeconds: overall * audioFileDuration,
+                          totalDurationSeconds: audioFileDuration,
+                          isComplete: false,
+                          srtContent: nil
+                        ))
+                      }
+                    }
+                  )
+                  return (chunk.index, segments)
+                }
+                launched += 1
+              }
+            }
+
+            return results
+          }
+
+          // Merge results with overlap de-duplication
+          let mergedSegments = Self.mergeChunkSegments(allChunkResults, overlap: overlap)
+
+          guard !mergedSegments.isEmpty else {
+            throw NSError(
+              domain: "TranscriptService", code: 3,
+              userInfo: [
+                NSLocalizedDescriptionKey:
+                  "Transcription produced no content. The audio may be silent or in an unsupported format."
+              ])
+          }
+
+          // Convert to SRT
+          let srtContent = Self.chunkSegmentsToSRT(mergedSegments)
+
+          // Send final progress
+          continuation.yield(TranscriptionProgress(
+            progress: 1.0,
+            currentTimeSeconds: audioFileDuration,
+            totalDurationSeconds: audioFileDuration,
+            isComplete: true,
+            srtContent: srtContent
+          ))
+
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
+        }
+      }
+    }
+  }
+}
+
+/// Thread-safe progress tracker for parallel chunk processing.
+/// Tracks incremental per-chunk progress for smooth overall progress reporting.
+@available(iOS 17.0, *)
+private actor ChunkProgressTracker {
+  private let totalChunks: Int
+  private var chunkProgresses: [Int: Double] = [:]
+
+  init(totalChunks: Int) {
+    self.totalChunks = totalChunks
+  }
+
+  /// Updates progress for a specific chunk and returns the overall progress (0.0–1.0)
+  func updateProgress(chunkIndex: Int, progress: Double) -> Double {
+    chunkProgresses[chunkIndex] = progress
+    return chunkProgresses.values.reduce(0, +) / Double(totalChunks)
+  }
 }

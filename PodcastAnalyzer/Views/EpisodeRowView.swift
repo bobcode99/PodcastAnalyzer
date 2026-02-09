@@ -85,11 +85,39 @@ struct EpisodeRowView: View {
   @State private var shareTask: Task<Void, Never>?
   @State private var hasAIAnalysis: Bool = false
 
-  // Transcript state - only updated on appear and when actively transcribing this episode
-  @State private var hasCaptions: Bool = false
-  @State private var isTranscribing: Bool = false
-  @State private var transcriptProgress: Double? = nil
-  @State private var isDownloadingModel: Bool = false
+  // Transcript state - computed from TranscriptManager (reactive) + filesystem check
+  @State private var hasCaptionsOnDisk: Bool = false
+
+  private var activeTranscriptJob: TranscriptJob? {
+    TranscriptManager.shared.activeJobs[jobId]
+  }
+
+  private var hasCaptions: Bool {
+    if case .completed = activeTranscriptJob?.status { return true }
+    return hasCaptionsOnDisk
+  }
+
+  private var isTranscribing: Bool {
+    guard let job = activeTranscriptJob else { return false }
+    switch job.status {
+    case .queued, .downloadingModel, .transcribing: return true
+    case .completed, .failed: return false
+    }
+  }
+
+  private var transcriptProgress: Double? {
+    guard let job = activeTranscriptJob else { return nil }
+    switch job.status {
+    case .queued: return 0.0
+    case .downloadingModel(let p), .transcribing(let p): return p
+    default: return nil
+    }
+  }
+
+  private var isDownloadingModel: Bool {
+    if case .downloadingModel = activeTranscriptJob?.status { return true }
+    return false
+  }
 
   // Status checker using centralized utility
   private var statusChecker: EpisodeStatusChecker {
@@ -139,48 +167,6 @@ struct EpisodeRowView: View {
     hasAIAnalysis = statusChecker.hasAIAnalysis(in: modelContext)
   }
 
-  private func updateTranscriptStatus() {
-    // Check if transcript file exists
-    let fileExists = statusChecker.hasTranscript
-
-    // Check for active job only for this specific episode
-    let transcriptManager = TranscriptManager.shared
-    if let job = transcriptManager.activeJobs[jobId] {
-      switch job.status {
-      case .completed:
-        hasCaptions = true
-        isTranscribing = false
-        transcriptProgress = nil
-        isDownloadingModel = false
-      case .queued:
-        hasCaptions = fileExists
-        isTranscribing = true
-        transcriptProgress = 0.0
-        isDownloadingModel = false
-      case .downloadingModel(let progress):
-        hasCaptions = fileExists
-        isTranscribing = true
-        transcriptProgress = progress
-        isDownloadingModel = true
-      case .transcribing(let progress):
-        hasCaptions = fileExists
-        isTranscribing = true
-        transcriptProgress = progress
-        isDownloadingModel = false
-      case .failed:
-        hasCaptions = fileExists
-        isTranscribing = false
-        transcriptProgress = nil
-        isDownloadingModel = false
-      }
-    } else {
-      hasCaptions = fileExists
-      isTranscribing = false
-      transcriptProgress = nil
-      isDownloadingModel = false
-    }
-  }
-
   var body: some View {
     NavigationLink(
       destination: EpisodeDetailView(
@@ -207,7 +193,13 @@ struct EpisodeRowView: View {
     }
     .onAppear {
       checkAIAnalysis()
-      updateTranscriptStatus()
+      hasCaptionsOnDisk = statusChecker.hasTranscript
+    }
+    .onChange(of: activeTranscriptJob?.status) { _, newStatus in
+      // Refresh filesystem check when job completes (file was just written)
+      if case .completed = newStatus {
+        hasCaptionsOnDisk = true
+      }
     }
   }
 

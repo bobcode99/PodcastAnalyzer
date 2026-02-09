@@ -228,7 +228,7 @@ class TranscriptManager {
 
         // CPU-intensive transcription work happens here
         // Task.detached ensures this runs on a background thread
-        for try await progressUpdate in await transcriptService.audioToSRTWithProgress(
+        for try await progressUpdate in await transcriptService.audioToSRTChunkedWithProgress(
           inputFile: audioURL)
         {
           await MainActor.run {
