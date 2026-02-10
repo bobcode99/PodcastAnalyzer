@@ -45,6 +45,7 @@ enum PodcastSource {
 
 struct EpisodeListView: View {
   private let source: PodcastSource
+  private let initialFilter: EpisodeFilter
 
   @Environment(\.modelContext) private var modelContext
   @Environment(\.dismiss) private var dismiss
@@ -66,8 +67,9 @@ struct EpisodeListView: View {
   // MARK: - Initializers
 
   /// Initialize with a podcast model (subscribed or browsed)
-  init(podcastModel: PodcastInfoModel) {
+  init(podcastModel: PodcastInfoModel, initialFilter: EpisodeFilter = .all) {
     self.source = .model(podcastModel)
+    self.initialFilter = initialFilter
   }
 
   /// Initialize for browsing an unsubscribed podcast (will be persisted with isSubscribed=false)
@@ -85,6 +87,7 @@ struct EpisodeListView: View {
       artworkURL: podcastArtwork,
       applePodcastURL: applePodcastUrl
     )
+    self.initialFilter = .all
   }
 
   private var navigationTitle: String {
@@ -150,7 +153,7 @@ struct EpisodeListView: View {
     .onAppear {
       self.podcastModel = podcastModel
       if viewModel == nil {
-        let vm = EpisodeListViewModel(podcastModel: podcastModel)
+        let vm = EpisodeListViewModel(podcastModel: podcastModel, initialFilter: initialFilter)
         vm.setModelContext(modelContext)
         viewModel = vm
       }

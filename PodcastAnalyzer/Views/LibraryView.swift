@@ -139,7 +139,7 @@ struct LibraryView: View {
         .buttonStyle(.plain)
 
         // Downloaded card - include actively downloading episodes in the count
-        NavigationLink(destination: DownloadedEpisodesView(viewModel: viewModel, showEpisodeArtwork: settingsViewModel.showEpisodeArtwork)) {
+        NavigationLink(destination: DownloadedPodcastsGridView(viewModel: viewModel)) {
           QuickAccessCard(
             icon: "arrow.down.circle.fill",
             iconColor: .green,
@@ -561,6 +561,93 @@ struct SavedEpisodesView: View {
     
     // Refresh list
     Task { await viewModel.refreshSavedEpisodes() }
+  }
+}
+
+// MARK: - Downloaded Podcasts Grid View (Sub-page)
+
+struct DownloadedPodcastsGridView: View {
+  @Bindable var viewModel: LibraryViewModel
+  @Environment(\.modelContext) private var modelContext
+
+  private let columns = [
+    GridItem(.flexible(), spacing: 12),
+    GridItem(.flexible(), spacing: 12)
+  ]
+
+  var body: some View {
+    Group {
+      if viewModel.podcastsWithDownloads.isEmpty {
+        VStack(spacing: 16) {
+          Image(systemName: "arrow.down.circle")
+            .font(.system(size: 50))
+            .foregroundStyle(.secondary)
+          Text("No Downloads")
+            .font(.headline)
+          Text("Downloaded episodes will appear here")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        ScrollView {
+          LazyVGrid(columns: columns, spacing: 16) {
+            ForEach(viewModel.podcastsWithDownloads, id: \.podcast.id) { item in
+              NavigationLink(destination: EpisodeListView(
+                podcastModel: item.podcast,
+                initialFilter: .downloaded
+              )) {
+                DownloadedPodcastCell(
+                  podcast: item.podcast,
+                  downloadCount: item.downloadCount
+                )
+              }
+              .buttonStyle(.plain)
+            }
+          }
+          .padding(.horizontal)
+        }
+      }
+    }
+    .navigationTitle("Downloaded")
+    #if os(iOS)
+    .navigationBarTitleDisplayMode(.inline)
+    #endif
+    .onAppear {
+      viewModel.setModelContext(modelContext)
+      Task { await viewModel.refreshDownloadedEpisodes() }
+    }
+  }
+}
+
+// MARK: - Downloaded Podcast Cell
+
+struct DownloadedPodcastCell: View {
+  let podcast: PodcastInfoModel
+  let downloadCount: Int
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      CachedAsyncImage(url: URL(string: podcast.podcastInfo.imageURL)) { image in
+        image.resizable().aspectRatio(contentMode: .fill)
+      } placeholder: {
+        Color.gray.opacity(0.2)
+          .overlay(ProgressView().scaleEffect(0.5))
+      }
+      .aspectRatio(1, contentMode: .fit)
+      .clipShape(.rect(cornerRadius: 10))
+      .clipped()
+
+      Text(podcast.podcastInfo.title)
+        .font(.caption)
+        .fontWeight(.medium)
+        .lineLimit(2)
+        .foregroundStyle(.primary)
+
+      Text("\(downloadCount) downloaded")
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    }
   }
 }
 

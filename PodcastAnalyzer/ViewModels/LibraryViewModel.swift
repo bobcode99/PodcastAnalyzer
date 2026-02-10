@@ -148,6 +148,20 @@ final class LibraryViewModel {
     }
   }
 
+  /// Podcasts that have downloaded episodes, with download counts
+  var podcastsWithDownloads: [(podcast: PodcastInfoModel, downloadCount: Int)] {
+    var countByTitle: [String: Int] = [:]
+    for episode in downloadedEpisodes {
+      countByTitle[episode.podcastTitle, default: 0] += 1
+    }
+
+    return countByTitle.compactMap { (title, count) in
+      guard let podcast = podcastTitleMap[title] else { return nil }
+      return (podcast: podcast, downloadCount: count)
+    }
+    .sorted { $0.downloadCount > $1.downloadCount }
+  }
+
   /// Podcasts sorted by most recent update (combines lastUpdated and latest episode date)
   var podcastsSortedByRecentUpdate: [PodcastInfoModel] {
     podcastInfoModelList.sorted { p1, p2 in

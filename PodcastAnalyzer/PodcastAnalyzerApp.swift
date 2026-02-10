@@ -59,9 +59,6 @@ struct PodcastAnalyzerApp: App {
     // Register background task for episode sync
     BackgroundSyncManager.registerBackgroundTask()
 
-    // Register MetricKit crash reporting subscriber
-    CrashReportingService.shared.start()
-
     // Export previous session's os.log entries to Documents/Logs
     PersistentLogService.shared.exportLogsInBackground()
   }

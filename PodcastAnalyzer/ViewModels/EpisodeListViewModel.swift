@@ -121,8 +121,9 @@ final class EpisodeListViewModel {
 
   // MARK: - Initialization
 
-  init(podcastModel: PodcastInfoModel) {
+  init(podcastModel: PodcastInfoModel, initialFilter: EpisodeFilter = .all) {
     self.podcastModel = podcastModel
+    self.selectedFilter = initialFilter
     parseDescription()
     #if DEBUG
     viewModelLogger.info("📦 EpisodeListViewModel INIT: \(self.instanceId) for \(podcastModel.podcastInfo.title)")
