@@ -430,7 +430,7 @@ struct AISettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     onDeviceFeatureRow(icon: "tag", title: "Quick Tags", description: "Auto-generate tags from episode metadata")
                     onDeviceFeatureRow(icon: "clock.arrow.circlepath", title: "Listening History Summary", description: "Summarize your listening habits and patterns")
-                    onDeviceFeatureRow(icon: "star.leadinghalfhalf", title: "Episode Recommendations", description: "Get personalized episode suggestions")
+                    onDeviceFeatureRow(icon: "star.leadinghalf.filled", title: "Episode Recommendations", description: "Get personalized episode suggestions")
                 }
             } header: {
                 Text("On-Device AI")

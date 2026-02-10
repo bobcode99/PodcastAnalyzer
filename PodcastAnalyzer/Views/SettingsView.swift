@@ -91,7 +91,7 @@ struct SettingsView: View {
             set: { viewModel.setShowForYouRecommendations($0) }
           )) {
             HStack {
-              Image(systemName: "star.leadinghalfhalf")
+              Image(systemName: "star.leadinghalf.filled")
                 .foregroundStyle(.purple)
                 .frame(width: 24)
               VStack(alignment: .leading, spacing: 2) {

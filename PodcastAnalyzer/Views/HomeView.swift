@@ -151,7 +151,7 @@ struct HomeView: View {
     if showForYou && (!viewModel.recommendedEpisodes.isEmpty || viewModel.isLoadingRecommendations) {
       VStack(alignment: .leading, spacing: 12) {
         HStack {
-          Image(systemName: "star.leadinghalfhalf")
+          Image(systemName: "star.leadinghalf.filled")
             .foregroundStyle(.purple)
           Text("For You")
             .font(.title2)
