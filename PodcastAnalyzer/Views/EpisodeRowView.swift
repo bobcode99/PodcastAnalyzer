@@ -364,6 +364,7 @@ struct EpisodeRowView: View {
           .frame(width: 28, height: 28)
           .contentShape(Rectangle())
       }
+      .compositingGroup()
       .buttonStyle(.plain)
     }
   }

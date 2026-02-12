@@ -1191,7 +1191,7 @@ final class EpisodeDetailViewModel {
   }
 
   /// Cached word timings data from JSON file (for accurate word-level highlighting)
-  private var wordTimingsData: TranscriptService.TranscriptData?
+  private var wordTimingsData: TranscriptData?
 
   private func loadExistingTranscript() async {
     do {
@@ -1207,13 +1207,13 @@ final class EpisodeDetailViewModel {
       )
 
       // Try to load word timings JSON (optional - may not exist for RSS transcripts)
-      var timingsData: TranscriptService.TranscriptData?
+      var timingsData: TranscriptData?
       if let wordTimingsJSON = try await fileStorage.loadWordTimingFile(
         for: episode.title,
         podcastTitle: podcastTitle
       ) {
         if let jsonData = wordTimingsJSON.data(using: .utf8) {
-          timingsData = try? JSONDecoder().decode(TranscriptService.TranscriptData.self, from: jsonData)
+          timingsData = try? JSONDecoder().decode(TranscriptData.self, from: jsonData)
         }
       }
 

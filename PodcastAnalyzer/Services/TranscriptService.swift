@@ -7,7 +7,6 @@
 
 import AVFoundation
 import Foundation
-import NaturalLanguage
 import Speech
 import OSLog
 
@@ -22,23 +21,16 @@ public actor TranscriptService {
 
   /// Whether the target locale is CJK (Chinese, Japanese, Korean).
   /// CJK characters carry ~1 word of meaning each, so segments need fewer characters.
-  private var isCJKLocale: Bool {
+  var isCJKLocale: Bool {
     let lang = targetLocale.language.languageCode?.identifier ?? ""
     return ["zh", "ja", "ko"].contains(lang)
   }
 
   /// Default max characters per subtitle segment, adjusted for character density.
   /// CJK: 18 chars (~18 words of content), Latin: 40 chars (~6-8 words)
-  private var defaultMaxLength: Int {
+  var defaultMaxLength: Int {
     isCJKLocale ? 18 : 40
   }
-
-  /// CJK clause-level punctuation used as secondary split points.
-  /// These are natural pause points in speech that make good subtitle breaks.
-  private static let clauseMarkers: Set<Character> = [
-    "，", "、", "；", "：",  // Fullwidth CJK punctuation
-    ",", ";",              // ASCII equivalents sometimes used
-  ]
 
   /// Converts a podcast language code (e.g., "zh-tw") to a Locale identifier (e.g., "zh_TW")
   /// - Parameter languageCode: The language code from podcast RSS feed (e.g., "zh-tw", "en-us", "ja")
@@ -321,8 +313,18 @@ public actor TranscriptService {
       transcript += result.text
     }
 
+    // Apply Chinese punctuation restoration for CJK locales
+    var processedTranscript = transcript
+    if isCJKLocale {
+      let restorer = ChinesePunctuationRestorer()
+      processedTranscript = restorer.restore(transcript: transcript)
+    }
+
     // Convert transcript to SRT format
-    return transcriptToSRT(transcript: transcript, maxLength: maxLength)
+    let effectiveMaxLength = maxLength ?? defaultMaxLength
+    let segmenter = TranscriptSegmenter(isCJK: isCJKLocale, maxLength: effectiveMaxLength)
+    let segments = segmenter.splitTranscriptIntoSegments(transcript: processedTranscript)
+    return SRTFormatter.format(segments: segments)
   }
 
   /// Transcription progress update
@@ -352,7 +354,9 @@ public actor TranscriptService {
             self.analyzer,
             self.needsAudioTimeRange
           )
-          
+          let isCJK = await self.isCJKLocale
+          let defaultMaxLen = await self.defaultMaxLength
+
           // Ensure transcriber and analyzer are initialized
           guard let transcriber = transcriber, let analyzer = analyzer else {
             throw NSError(
@@ -433,9 +437,18 @@ public actor TranscriptService {
               ])
           }
 
-          // Convert transcript to SRT format (CPU-intensive, runs on background thread)
-          // Call through actor since transcriptToSRT is actor-isolated
-          let srtContent = await self.transcriptToSRT(transcript: transcript, maxLength: maxLength)
+          // Apply Chinese punctuation restoration for CJK locales
+          var processedTranscript = transcript
+          if isCJK {
+            let restorer = ChinesePunctuationRestorer()
+            processedTranscript = restorer.restore(transcript: transcript)
+          }
+
+          // Convert transcript to SRT format
+          let effectiveMaxLength = maxLength ?? defaultMaxLen
+          let segmenter = TranscriptSegmenter(isCJK: isCJK, maxLength: effectiveMaxLength)
+          let segments = segmenter.splitTranscriptIntoSegments(transcript: processedTranscript)
+          let srtContent = SRTFormatter.format(segments: segments)
 
           // Send final progress with completed content
           continuation.yield(
@@ -452,288 +465,6 @@ public actor TranscriptService {
           continuation.finish(throwing: error)
         }
       }
-    }
-  }
-
-  /// Formats a TimeInterval into SRT time format (HH:MM:SS,mmm)
-  /// - Parameter timeInterval: The time interval in seconds
-  /// - Returns: Formatted time string in SRT format
-  private func formatSRTTime(_ timeInterval: TimeInterval) -> String {
-    let ms = Int(timeInterval.truncatingRemainder(dividingBy: 1) * 1000)
-    let s = Int(timeInterval) % 60
-    let m = (Int(timeInterval) / 60) % 60
-    let h = Int(timeInterval) / 60 / 60
-    return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
-  }
-
-  /// Helper to check for sentence endings in various languages
-  private func isSentenceEnd(_ text: String) -> Bool {
-    // Includes:
-    // English/European: . ! ?
-    // Chinese/CJK: 。 (IDEOGRAPHIC FULL STOP), ！ (FULLWIDTH EXCLAMATION MARK), ？ (FULLWIDTH QUESTION MARK)
-    let terminators: Set<Character> = [".", "!", "?", "。", "！", "？"]
-
-    // Check the last character (trimming whitespace/newlines first just in case)
-    guard let lastChar = text.trimmingCharacters(in: .whitespacesAndNewlines).last else {
-      return false
-    }
-    return terminators.contains(lastChar)
-  }
-
-  // MARK: - Segment Splitting (shared logic)
-
-  /// Computes segment ranges for the transcript.
-  /// Shared by both SRT generation and word-timing extraction.
-  ///
-  /// For CJK locales, applies clause-level splitting (，、；：) before word-level fallback,
-  /// producing shorter, more readable subtitle segments.
-  private func computeSegmentRanges(
-    transcript: AttributedString, maxLength: Int
-  ) -> [Range<AttributedString.Index>] {
-    let string = String(transcript.characters)
-    let tokenizer = NLTokenizer(unit: .sentence)
-    tokenizer.string = string
-
-    let sentenceRanges = tokenizer.tokens(for: string.startIndex..<string.endIndex).compactMap {
-      stringRange -> (Range<String.Index>, Range<AttributedString.Index>)? in
-      guard
-        let attrLower = AttributedString.Index(stringRange.lowerBound, within: transcript),
-        let attrUpper = AttributedString.Index(stringRange.upperBound, within: transcript)
-      else { return nil }
-      return (stringRange, attrLower..<attrUpper)
-    }
-
-    let useCJKSplitting = isCJKLocale
-
-    return sentenceRanges.flatMap {
-      sentenceStringRange, sentenceAttrRange -> [Range<AttributedString.Index>] in
-      let sentence = transcript[sentenceAttrRange]
-
-      guard sentence.characters.count > maxLength else {
-        return [sentenceAttrRange]
-      }
-
-      if useCJKSplitting {
-        // CJK: split at clause markers first, then word-split oversized clauses
-        let clauseRanges = splitAtClauseMarkers(
-          stringRange: sentenceStringRange,
-          attrRange: sentenceAttrRange,
-          transcript: transcript,
-          string: string
-        )
-
-        var result: [Range<AttributedString.Index>] = []
-        for (clauseStringRange, clauseAttrRange) in clauseRanges {
-          let clauseLen = transcript[clauseAttrRange].characters.count
-
-          if clauseLen > maxLength {
-            // Clause itself is too long (no punctuation), fall back to word splitting
-            result.append(contentsOf: splitByWords(
-              stringRange: clauseStringRange,
-              attrRange: clauseAttrRange,
-              transcript: transcript,
-              string: string,
-              maxLength: maxLength
-            ))
-          } else if let lastRange = result.last,
-            transcript[lastRange].characters.count + clauseLen <= maxLength
-          {
-            // Merge small adjacent clauses into one segment
-            result[result.count - 1] = lastRange.lowerBound..<clauseAttrRange.upperBound
-          } else {
-            result.append(clauseAttrRange)
-          }
-        }
-        return result
-      } else {
-        // Non-CJK: split by words directly
-        return splitByWords(
-          stringRange: sentenceStringRange,
-          attrRange: sentenceAttrRange,
-          transcript: transcript,
-          string: string,
-          maxLength: maxLength
-        )
-      }
-    }
-  }
-
-  /// Splits a text range at CJK clause markers (，、；：).
-  /// Each clause includes its trailing marker character.
-  private func splitAtClauseMarkers(
-    stringRange: Range<String.Index>,
-    attrRange: Range<AttributedString.Index>,
-    transcript: AttributedString,
-    string: String
-  ) -> [(Range<String.Index>, Range<AttributedString.Index>)] {
-    var result: [(Range<String.Index>, Range<AttributedString.Index>)] = []
-    var clauseStart = stringRange.lowerBound
-
-    var idx = stringRange.lowerBound
-    while idx < stringRange.upperBound {
-      let char = string[idx]
-      let nextIdx = string.index(after: idx)
-
-      if Self.clauseMarkers.contains(char) {
-        guard
-          let attrLower = AttributedString.Index(clauseStart, within: transcript),
-          let attrUpper = AttributedString.Index(nextIdx, within: transcript)
-        else {
-          idx = nextIdx
-          continue
-        }
-        result.append((clauseStart..<nextIdx, attrLower..<attrUpper))
-        clauseStart = nextIdx
-      }
-      idx = nextIdx
-    }
-
-    // Add remaining text after last marker
-    if clauseStart < stringRange.upperBound {
-      if let attrLower = AttributedString.Index(clauseStart, within: transcript),
-        let attrUpper = AttributedString.Index(stringRange.upperBound, within: transcript)
-      {
-        result.append((clauseStart..<stringRange.upperBound, attrLower..<attrUpper))
-      }
-    }
-
-    return result
-  }
-
-  /// Splits a text range by word boundaries, accumulating words up to maxLength.
-  private func splitByWords(
-    stringRange: Range<String.Index>,
-    attrRange: Range<AttributedString.Index>,
-    transcript: AttributedString,
-    string: String,
-    maxLength: Int
-  ) -> [Range<AttributedString.Index>] {
-    let wordTokenizer = NLTokenizer(unit: .word)
-    wordTokenizer.string = string
-
-    var wordRanges: [Range<AttributedString.Index>] = wordTokenizer.tokens(
-      for: stringRange
-    ).compactMap { wordStringRange -> Range<AttributedString.Index>? in
-      guard
-        let attrLower = AttributedString.Index(wordStringRange.lowerBound, within: transcript),
-        let attrUpper = AttributedString.Index(wordStringRange.upperBound, within: transcript)
-      else { return nil }
-      return attrLower..<attrUpper
-    }
-
-    guard !wordRanges.isEmpty else { return [attrRange] }
-
-    // Extend first/last words to cover leading/trailing whitespace and punctuation
-    wordRanges[0] = attrRange.lowerBound..<wordRanges[0].upperBound
-    wordRanges[wordRanges.count - 1] =
-      wordRanges[wordRanges.count - 1].lowerBound..<attrRange.upperBound
-
-    // Accumulate words into segments respecting maxLength
-    var segmentRanges: [Range<AttributedString.Index>] = []
-    for wordRange in wordRanges {
-      if let lastRange = segmentRanges.last,
-        transcript[lastRange].characters.count + transcript[wordRange].characters.count
-          <= maxLength
-      {
-        segmentRanges[segmentRanges.count - 1] = lastRange.lowerBound..<wordRange.upperBound
-      } else {
-        segmentRanges.append(wordRange)
-      }
-    }
-
-    return segmentRanges
-  }
-
-  /// Splits transcript into segments with proper time ranges for SRT generation.
-  private func splitTranscriptIntoSegments(
-    transcript: AttributedString, maxLength: Int
-  ) -> [AttributedString] {
-    let allRanges = computeSegmentRanges(transcript: transcript, maxLength: maxLength)
-
-    return allRanges.compactMap { range -> AttributedString? in
-      let segment = transcript[range]
-
-      let audioTimeRanges = segment.runs.filter {
-        !String(transcript[$0.range].characters)
-          .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      }.compactMap(\.audioTimeRange)
-
-      guard let firstTimeRange = audioTimeRanges.first,
-        let lastTimeRange = audioTimeRanges.last
-      else { return nil }
-
-      let start = firstTimeRange.start
-      let end = lastTimeRange.end
-
-      var attributes = AttributeContainer()
-      attributes[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] = CMTimeRange(
-        start: start,
-        end: end
-      )
-      return AttributedString(segment.characters, attributes: attributes)
-    }
-  }
-
-  /// Word-level timing data for a single word
-  public struct WordTimingData: Codable, Sendable {
-    public let word: String
-    public let startTime: Double
-    public let endTime: Double
-  }
-
-  /// Segment data with word-level timing information
-  public struct SegmentData: Codable, Sendable {
-    public let id: Int
-    public let startTime: Double
-    public let endTime: Double
-    public let text: String
-    public let wordTimings: [WordTimingData]
-  }
-
-  /// Transcript data containing segments with word timings
-  public struct TranscriptData: Codable, Sendable {
-    public let segments: [SegmentData]
-  }
-
-  /// Extracts segments with word-level timing from the transcript
-  /// - Parameters:
-  ///   - transcript: The full transcript as AttributedString with audioTimeRange attributes
-  ///   - maxLength: Maximum character length per segment
-  /// - Returns: Array of SegmentData with word-level timings
-  private func extractSegmentsWithWordTimings(
-    transcript: AttributedString, maxLength: Int
-  ) -> [SegmentData] {
-    let allRanges = computeSegmentRanges(transcript: transcript, maxLength: maxLength)
-
-    return allRanges.enumerated().compactMap { index, range -> SegmentData? in
-      let segment = transcript[range]
-      let segmentText = String(segment.characters).trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !segmentText.isEmpty else { return nil }
-
-      // Extract word timings from runs
-      var wordTimings: [WordTimingData] = []
-      for run in segment.runs {
-        let wordText = String(transcript[run.range].characters)
-          .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !wordText.isEmpty, let timeRange = run.audioTimeRange else { continue }
-
-        wordTimings.append(WordTimingData(
-          word: wordText,
-          startTime: timeRange.start.seconds,
-          endTime: timeRange.end.seconds
-        ))
-      }
-
-      guard let firstTiming = wordTimings.first,
-            let lastTiming = wordTimings.last else { return nil }
-
-      return SegmentData(
-        id: index + 1,
-        startTime: firstTiming.startTime,
-        endTime: lastTiming.endTime,
-        text: segmentText,
-        wordTimings: wordTimings
-      )
     }
   }
 
@@ -770,12 +501,21 @@ public actor TranscriptService {
       transcript += result.text
     }
 
+    // Apply Chinese punctuation restoration for CJK locales
+    var processedTranscript = transcript
+    if isCJKLocale {
+      let restorer = ChinesePunctuationRestorer()
+      processedTranscript = restorer.restore(transcript: transcript)
+    }
+
     let effectiveMaxLength = maxLength ?? defaultMaxLength
-    let segments = extractSegmentsWithWordTimings(transcript: transcript, maxLength: effectiveMaxLength)
+    let segmenter = TranscriptSegmenter(isCJK: isCJKLocale, maxLength: effectiveMaxLength)
+    let segments = segmenter.extractSegmentsWithWordTimings(transcript: processedTranscript)
     let transcriptData = TranscriptData(segments: segments)
 
     // Generate SRT
-    let srtContent = transcriptToSRT(transcript: transcript, maxLength: maxLength)
+    let srtSegments = segmenter.splitTranscriptIntoSegments(transcript: processedTranscript)
+    let srtContent = SRTFormatter.format(segments: srtSegments)
 
     // Generate JSON word timings
     let encoder = JSONEncoder()
@@ -784,294 +524,6 @@ public actor TranscriptService {
     let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
 
     return (srtContent, jsonString)
-  }
-
-  /// Converts an AttributedString transcript to SRT subtitle format
-  /// Uses NLTokenizer for smart sentence detection and splits long sentences by word
-  /// - Parameters:
-  ///   - transcript: The full transcript as AttributedString
-  ///   - maxLength: Maximum character length per segment (default: 40 for ~5 second segments)
-  /// - Returns: SRT formatted string
-  private func transcriptToSRT(transcript: AttributedString, maxLength: Int?) -> String {
-    let effectiveMaxLength = maxLength ?? defaultMaxLength
-
-    let segments = splitTranscriptIntoSegments(
-      transcript: transcript, maxLength: effectiveMaxLength)
-
-    let srtEntries = segments.enumerated().compactMap { index, segment -> String? in
-      guard let timeRange = segment.audioTimeRange else { return nil }
-
-      let text = String(segment.characters).trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !text.isEmpty else { return nil }
-
-      let entryNumber = index + 1
-      let startTime = formatSRTTime(timeRange.start.seconds)
-      let endTime = formatSRTTime(timeRange.end.seconds)
-
-      return "\(entryNumber)\n\(startTime) --> \(endTime)\n\(text)"
-    }
-
-    return srtEntries.joined(separator: "\n\n")
-  }
-
-  // MARK: - Parallel Chunk Processing
-
-  /// Represents an audio chunk for parallel transcription
-  private struct AudioChunk: Sendable {
-    let index: Int
-    let fileURL: URL
-    let startTime: Double
-    let endTime: Double
-  }
-
-  /// A single transcribed segment from a chunk, with timestamps offset to the original timeline
-  private struct ChunkSegment: Sendable {
-    let startTime: Double
-    let endTime: Double
-    let text: String
-  }
-
-  /// Splits an audio file into time-ranged chunks for parallel processing.
-  /// Uses `AVAssetExportSession` to export each chunk as M4A.
-  private static func exportAudioChunks(
-    from sourceURL: URL,
-    totalDuration: TimeInterval,
-    chunkDuration: TimeInterval = 300,
-    overlap: TimeInterval = 2.0
-  ) async throws -> [AudioChunk] {
-    let asset = AVURLAsset(url: sourceURL)
-    let tempDir = FileManager.default.temporaryDirectory
-      .appendingPathComponent("TranscriptChunks-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-
-    // Calculate chunk time ranges
-    var chunkRanges: [(index: Int, start: Double, end: Double)] = []
-    var chunkStart: Double = 0
-    var index = 0
-    while chunkStart < totalDuration {
-      let chunkEnd = min(chunkStart + chunkDuration, totalDuration)
-      chunkRanges.append((index: index, start: chunkStart, end: chunkEnd))
-      chunkStart = chunkEnd - overlap
-      if chunkEnd >= totalDuration { break }
-      index += 1
-    }
-
-    // Export chunks concurrently (export is I/O-bound, not CPU-bound)
-    return try await withThrowingTaskGroup(of: AudioChunk.self) { group in
-      for range in chunkRanges {
-        group.addTask {
-          let outputURL = tempDir.appendingPathComponent("chunk_\(range.index).m4a")
-
-          guard let exportSession = AVAssetExportSession(
-            asset: asset,
-            presetName: AVAssetExportPresetAppleM4A
-          ) else {
-            throw NSError(
-              domain: "TranscriptService", code: 10,
-              userInfo: [NSLocalizedDescriptionKey: "Failed to create export session for chunk \(range.index)"]
-            )
-          }
-
-          exportSession.timeRange = CMTimeRange(
-            start: CMTime(seconds: range.start, preferredTimescale: 44100),
-            end: CMTime(seconds: range.end, preferredTimescale: 44100)
-          )
-
-          try await exportSession.export(to: outputURL, as: .m4a)
-
-          return AudioChunk(
-            index: range.index,
-            fileURL: outputURL,
-            startTime: range.start,
-            endTime: range.end
-          )
-        }
-      }
-
-      var chunks: [AudioChunk] = []
-      for try await chunk in group {
-        chunks.append(chunk)
-      }
-      return chunks.sorted { $0.index < $1.index }
-    }
-  }
-
-  /// Transcribes a single audio chunk. This is a **static** method so it runs outside
-  /// the actor's serial executor, enabling true parallel execution across chunks.
-  /// Each invocation creates its own SpeechTranscriber/SpeechAnalyzer.
-  private static func transcribeChunkParallel(
-    chunk: AudioChunk,
-    locale: Locale,
-    censor: Bool,
-    maxSegmentLength: Int,
-    onProgress: @Sendable (Double) -> Void
-  ) async throws -> [ChunkSegment] {
-    let transcriber = SpeechTranscriber(
-      locale: locale,
-      transcriptionOptions: censor ? [.etiquetteReplacements] : [],
-      reportingOptions: [],
-      attributeOptions: [.audioTimeRange]
-    )
-    let analyzer = SpeechAnalyzer(modules: [transcriber])
-
-    let audioFile = try AVAudioFile(forReading: chunk.fileURL)
-    try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
-
-    let chunkDuration = chunk.endTime - chunk.startTime
-    var transcript: AttributedString = ""
-    var lastProgressReport = Date.distantPast
-
-    for try await result in transcriber.results {
-      transcript += result.text
-
-      // Report incremental progress, throttled to ~2 updates/sec
-      let now = Date()
-      if now.timeIntervalSince(lastProgressReport) >= 0.5 {
-        for run in result.text.runs {
-          if let timeRange = run.audioTimeRange {
-            let seconds = timeRange.end.seconds
-            if seconds.isFinite && chunkDuration > 0 {
-              onProgress(min(seconds / chunkDuration, 1.0))
-              lastProgressReport = now
-              break
-            }
-          }
-        }
-      }
-    }
-
-    // Mark chunk fully transcribed
-    onProgress(1.0)
-
-    guard !transcript.characters.isEmpty else { return [] }
-
-    // Extract segments by grouping runs into appropriately-sized chunks.
-    // Uses simple length + sentence-boundary splitting (no actor state needed).
-    var segments: [ChunkSegment] = []
-    var currentText = ""
-    var segmentStartTime: Double?
-    var segmentEndTime: Double = 0
-
-    for run in transcript.runs {
-      let word = String(transcript[run.range].characters)
-      let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !trimmed.isEmpty, let timeRange = run.audioTimeRange else { continue }
-
-      let wordStart = timeRange.start.seconds
-      let wordEnd = timeRange.end.seconds
-
-      // Guard against NaN/infinity timestamps from the Speech framework
-      guard wordStart.isFinite && wordEnd.isFinite else { continue }
-
-      if segmentStartTime == nil {
-        segmentStartTime = wordStart
-      }
-      segmentEndTime = wordEnd
-      currentText += word
-
-      // Split at maxSegmentLength or sentence boundaries
-      let shouldSplit = currentText.count >= maxSegmentLength
-        || isSentenceEndChar(trimmed.last)
-
-      if shouldSplit, let start = segmentStartTime {
-        let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty {
-          segments.append(ChunkSegment(
-            startTime: start + chunk.startTime,
-            endTime: segmentEndTime + chunk.startTime,
-            text: text
-          ))
-        }
-        currentText = ""
-        segmentStartTime = nil
-      }
-    }
-
-    // Flush remaining text
-    if let start = segmentStartTime {
-      let text = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
-      if !text.isEmpty {
-        segments.append(ChunkSegment(
-          startTime: start + chunk.startTime,
-          endTime: segmentEndTime + chunk.startTime,
-          text: text
-        ))
-      }
-    }
-
-    return segments
-  }
-
-  /// Checks for sentence-ending characters (pure function, no actor state needed)
-  private static func isSentenceEndChar(_ char: Character?) -> Bool {
-    guard let char else { return false }
-    let terminators: Set<Character> = [".", "!", "?", "。", "！", "？"]
-    return terminators.contains(char)
-  }
-
-  /// Merges segment results from multiple chunks, de-duplicating overlap regions.
-  /// Segments from the earlier chunk are preferred in overlap regions since they have better context.
-  private static func mergeChunkSegments(
-    _ chunkResults: [[ChunkSegment]],
-    overlap: TimeInterval = 2.0
-  ) -> [ChunkSegment] {
-    guard !chunkResults.isEmpty else { return [] }
-    guard chunkResults.count > 1 else { return chunkResults[0] }
-
-    var merged: [ChunkSegment] = []
-
-    for (chunkIndex, segments) in chunkResults.enumerated() {
-      if chunkIndex == 0 {
-        merged.append(contentsOf: segments)
-      } else {
-        // Skip segments that fall within the overlap region of the previous chunk
-        let previousChunkNominalEnd = chunkResults[chunkIndex - 1].last?.endTime ?? 0
-        let overlapThreshold = previousChunkNominalEnd - 1.0
-
-        for segment in segments {
-          if segment.startTime < overlapThreshold {
-            continue
-          }
-          merged.append(segment)
-        }
-      }
-    }
-
-    merged.sort { $0.startTime < $1.startTime }
-    return merged
-  }
-
-  /// Converts merged ChunkSegments into SRT format.
-  /// Uses `formatSRTTimeSafe` to guard against NaN/infinity values.
-  private static func chunkSegmentsToSRT(_ segments: [ChunkSegment]) -> String {
-    let srtEntries = segments.enumerated().map { index, segment -> String in
-      let entryNumber = index + 1
-      let startTime = formatSRTTimeSafe(segment.startTime)
-      let endTime = formatSRTTimeSafe(segment.endTime)
-      return "\(entryNumber)\n\(startTime) --> \(endTime)\n\(segment.text)"
-    }
-    return srtEntries.joined(separator: "\n\n")
-  }
-
-  /// NaN-safe SRT time formatter for use in static (nonisolated) contexts.
-  /// Clamps non-finite values to 0 to prevent `Int(Double.nan)` crashes.
-  private static func formatSRTTimeSafe(_ timeInterval: TimeInterval) -> String {
-    let safeTime = timeInterval.isFinite ? max(timeInterval, 0) : 0
-    let ms = Int(safeTime.truncatingRemainder(dividingBy: 1) * 1000)
-    let s = Int(safeTime) % 60
-    let m = (Int(safeTime) / 60) % 60
-    let h = Int(safeTime) / 60 / 60
-    return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
-  }
-
-  /// Removes temporary chunk files
-  private static func cleanupTempFiles(_ chunks: [AudioChunk]) {
-    for chunk in chunks {
-      try? FileManager.default.removeItem(at: chunk.fileURL)
-    }
-    if let firstChunk = chunks.first {
-      try? FileManager.default.removeItem(at: firstChunk.fileURL.deletingLastPathComponent())
-    }
   }
 
   /// Converts audio file to SRT subtitle format with parallel chunk processing for long audio.
@@ -1088,6 +540,7 @@ public actor TranscriptService {
           // Capture actor-isolated state upfront so chunk tasks don't need the actor
           let locale = await self.targetLocale
           let censor = await self.censor
+          let isCJK = await self.isCJKLocale
           let defaultMaxLen = await self.defaultMaxLength
           let effectiveMaxLength = maxLength ?? defaultMaxLen
 
@@ -1131,7 +584,7 @@ public actor TranscriptService {
           // Export audio chunks
           self.logger.info("Exporting audio chunks (chunkDuration: \(chunkDuration)s)")
           let overlap: TimeInterval = 2.0
-          let chunks = try await Self.exportAudioChunks(
+          let chunks = try await ChunkedTranscriptionService.exportAudioChunks(
             from: audioURL,
             totalDuration: audioFileDuration,
             chunkDuration: chunkDuration,
@@ -1139,7 +592,7 @@ public actor TranscriptService {
           )
           self.logger.info("Exported \(chunks.count) chunks")
 
-          defer { Self.cleanupTempFiles(chunks) }
+          defer { ChunkedTranscriptionService.cleanupTempFiles(chunks) }
 
           // Determine concurrency limit (at least 1)
           let maxConcurrent = max(min(
@@ -1151,21 +604,22 @@ public actor TranscriptService {
 
           let progressTracker = ChunkProgressTracker(totalChunks: chunks.count)
 
-          // Process chunks in parallel using static method (no actor serialization)
-          let allChunkResults: [[ChunkSegment]] = try await withThrowingTaskGroup(
-            of: (Int, [ChunkSegment]).self
+          // Process chunks in parallel
+          let allChunkResults: [[ChunkedTranscriptionService.ChunkSegment]] = try await withThrowingTaskGroup(
+            of: (Int, [ChunkedTranscriptionService.ChunkSegment]).self
           ) { group in
-            var results = [[ChunkSegment]](repeating: [], count: chunks.count)
+            var results = [[ChunkedTranscriptionService.ChunkSegment]](repeating: [], count: chunks.count)
             var launched = 0
 
             // Launch initial batch up to concurrency limit
             for i in 0..<min(maxConcurrent, chunks.count) {
               let chunk = chunks[i]
               group.addTask {
-                let segments = try await Self.transcribeChunkParallel(
+                let segments = try await ChunkedTranscriptionService.transcribeChunkParallel(
                   chunk: chunk,
                   locale: locale,
                   censor: censor,
+                  isCJK: isCJK,
                   maxSegmentLength: effectiveMaxLength,
                   onProgress: { chunkProgress in
                     Task {
@@ -1195,10 +649,11 @@ public actor TranscriptService {
               if launched < chunks.count {
                 let chunk = chunks[launched]
                 group.addTask {
-                  let segments = try await Self.transcribeChunkParallel(
+                  let segments = try await ChunkedTranscriptionService.transcribeChunkParallel(
                     chunk: chunk,
                     locale: locale,
                     censor: censor,
+                    isCJK: isCJK,
                     maxSegmentLength: effectiveMaxLength,
                     onProgress: { chunkProgress in
                       Task {
@@ -1225,7 +680,7 @@ public actor TranscriptService {
           }
 
           // Merge results with overlap de-duplication
-          let mergedSegments = Self.mergeChunkSegments(allChunkResults, overlap: overlap)
+          let mergedSegments = ChunkedTranscriptionService.mergeChunkSegments(allChunkResults, overlap: overlap)
 
           guard !mergedSegments.isEmpty else {
             throw NSError(
@@ -1237,7 +692,7 @@ public actor TranscriptService {
           }
 
           // Convert to SRT
-          let srtContent = Self.chunkSegmentsToSRT(mergedSegments)
+          let srtContent = SRTFormatter.format(chunkSegments: mergedSegments)
 
           // Send final progress
           continuation.yield(TranscriptionProgress(
@@ -1254,23 +709,5 @@ public actor TranscriptService {
         }
       }
     }
-  }
-}
-
-/// Thread-safe progress tracker for parallel chunk processing.
-/// Tracks incremental per-chunk progress for smooth overall progress reporting.
-@available(iOS 17.0, *)
-private actor ChunkProgressTracker {
-  private let totalChunks: Int
-  private var chunkProgresses: [Int: Double] = [:]
-
-  init(totalChunks: Int) {
-    self.totalChunks = totalChunks
-  }
-
-  /// Updates progress for a specific chunk and returns the overall progress (0.0–1.0)
-  func updateProgress(chunkIndex: Int, progress: Double) -> Double {
-    chunkProgresses[chunkIndex] = progress
-    return chunkProgresses.values.reduce(0, +) / Double(totalChunks)
   }
 }
