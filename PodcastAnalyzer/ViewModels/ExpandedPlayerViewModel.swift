@@ -141,7 +141,7 @@ final class ExpandedPlayerViewModel {
     }
   }
 
-  private func loadPodcastModel() {
+  func loadPodcastModel() {
     guard let context = modelContext else { return }
 
     let podcastName = podcastTitle

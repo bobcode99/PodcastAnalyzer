@@ -184,7 +184,6 @@ struct EpisodeRowView: View {
       }
       .padding(.vertical, 8)
     }
-    .contextMenu { contextMenuContent }
     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
       trailingSwipeActions
     }

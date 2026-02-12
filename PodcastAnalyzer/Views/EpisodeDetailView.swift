@@ -519,10 +519,7 @@ struct EpisodeDetailView: View {
             : viewModel.filteredGroupedSentences
         let searchMatchIdSet = Set(viewModel.searchMatchIds)
 
-        return VStack(spacing: 0) {
-            // Compact header with search and menu
-            transcriptHeader
-
+        return Section {
             // Search navigation bar
             if !viewModel.transcriptSearchQuery.isEmpty && !viewModel.searchMatchIds.isEmpty {
                 TranscriptSearchNavigationBar(
@@ -552,6 +549,9 @@ struct EpisodeDetailView: View {
             )
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
+        } header: {
+            transcriptHeader
+                .background(.ultraThinMaterial)
         }
         .onChange(of: viewModel.transcriptSearchQuery) { _, newQuery in
             viewModel.updateSearchMatches(query: newQuery)

@@ -62,6 +62,51 @@ class PlaybackStateCoordinator {
     return model.lastPlaybackPosition
   }
 
+  // MARK: - Queue Persistence
+
+  func saveQueue(_ queue: [PlaybackEpisode]) {
+    guard let context = modelContext else { return }
+
+    // Delete all existing queue items
+    do {
+      try context.delete(model: QueueItemModel.self)
+    } catch {
+      logger.error("Failed to delete old queue items: \(error.localizedDescription)")
+    }
+
+    // Insert new items with position indices
+    for (index, episode) in queue.enumerated() {
+      let item = QueueItemModel(from: episode, position: index)
+      context.insert(item)
+    }
+
+    do {
+      try context.save()
+      logger.debug("Saved \(queue.count) queue items")
+    } catch {
+      logger.error("Failed to save queue: \(error.localizedDescription)")
+    }
+  }
+
+  func restoreQueue() -> [PlaybackEpisode] {
+    guard let context = modelContext else { return [] }
+
+    var descriptor = FetchDescriptor<QueueItemModel>(
+      sortBy: [SortDescriptor(\.position)]
+    )
+    descriptor.fetchLimit = 50
+
+    do {
+      let items = try context.fetch(descriptor)
+      let episodes = items.map { $0.toPlaybackEpisode() }
+      logger.info("Restored \(episodes.count) queue items")
+      return episodes
+    } catch {
+      logger.error("Failed to restore queue: \(error.localizedDescription)")
+      return []
+    }
+  }
+
   private func savePlaybackPosition(update: PlaybackPositionUpdate) {
     guard let context = modelContext else { return }
 

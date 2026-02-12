@@ -21,6 +21,7 @@ struct PodcastAnalyzerApp: App {
       EpisodeDownloadModel.self,
       EpisodeAIAnalysis.self,
       EpisodeQuickTagsModel.self,
+      QueueItemModel.self,
     ])
     let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -71,6 +72,8 @@ struct PodcastAnalyzerApp: App {
           if PlaybackStateCoordinator.shared == nil {
             _ = PlaybackStateCoordinator(modelContext: sharedModelContainer.mainContext)
           }
+          // Restore queue if it was deferred (ContentView.onAppear ran before coordinator init)
+          EnhancedAudioManager.shared.restoreQueueIfNeeded()
           BackgroundSyncManager.shared.setModelContainer(sharedModelContainer)
 
           // Start foreground sync if enabled

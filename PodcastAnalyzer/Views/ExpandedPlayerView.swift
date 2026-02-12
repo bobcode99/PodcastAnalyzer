@@ -5,8 +5,11 @@
 //  Redesigned to look like Apple Podcasts player
 //
 
+import OSLog
 import SwiftData
 import SwiftUI
+
+private let logger = Logger(subsystem: "com.podcast.analyzer", category: "ExpandedPlayerView")
 
 #if os(iOS)
 import UIKit
@@ -530,14 +533,27 @@ struct ExpandedPlayerView: View {
   /// Navigate to episode detail - dismisses sheet first, then triggers callback
   private func navigateToEpisodeDetail() {
     guard let episode = viewModel.currentEpisode else { return }
+    // Fallback: if episodeDescription is nil, look up the full episode from the podcast model
+    var description = episode.episodeDescription
+    var pubDate = episode.pubDate
+    var guid = episode.guid
+    var duration = episode.duration
+    if description == nil, let podcastModel = viewModel.podcastModel {
+      if let fullEpisode = podcastModel.podcastInfo.episodes.first(where: { $0.title == episode.title }) {
+        description = fullEpisode.podcastEpisodeDescription
+        pubDate = pubDate ?? fullEpisode.pubDate
+        guid = guid ?? fullEpisode.guid
+        duration = duration ?? fullEpisode.duration
+      }
+    }
     let episodeInfo = PodcastEpisodeInfo(
       title: episode.title,
-      podcastEpisodeDescription: episode.episodeDescription,
-      pubDate: episode.pubDate,
+      podcastEpisodeDescription: description,
+      pubDate: pubDate,
       audioURL: episode.audioURL,
       imageURL: episode.imageURL,
-      duration: episode.duration,
-      guid: episode.guid
+      duration: duration,
+      guid: guid
     )
     dismiss()
     onNavigateToEpisodeDetail?(episodeInfo, episode.podcastTitle, episode.imageURL)
@@ -545,7 +561,14 @@ struct ExpandedPlayerView: View {
 
   /// Navigate to podcast episode list - dismisses sheet first, then triggers callback
   private func navigateToPodcast() {
-    guard let podcastModel = viewModel.podcastModel else { return }
+    // Retry loading if podcastModel is nil (may not have been loaded yet)
+    if viewModel.podcastModel == nil {
+      viewModel.loadPodcastModel()
+    }
+    guard let podcastModel = viewModel.podcastModel else {
+      logger.warning("Podcast not found in library for navigation")
+      return
+    }
     dismiss()
     onNavigateToPodcast?(podcastModel)
   }

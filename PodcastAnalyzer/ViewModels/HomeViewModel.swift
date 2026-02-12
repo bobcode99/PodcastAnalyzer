@@ -168,6 +168,7 @@ final class HomeViewModel {
 
     // Get up to 20 most recent unplayed episodes from subscribed podcasts
     var allEpisodes: [LibraryEpisode] = []
+    var lastPlayedDates: [String: Date] = [:]
 
     for podcastModel in podcastInfoModelList {
       let podcastTitle = podcastModel.podcastInfo.title
@@ -196,14 +197,44 @@ final class HomeViewModel {
             isCompleted: model?.isCompleted ?? false,
             lastPlaybackPosition: model?.lastPlaybackPosition ?? 0
           ))
+          if let playedDate = model?.lastPlayedDate {
+            lastPlayedDates[key] = playedDate
+          }
         }
       }
     }
 
-    // Sort by date (newest first) and limit
-    allEpisodes.sort { ($0.episodeInfo.pubDate ?? .distantPast) > ($1.episodeInfo.pubDate ?? .distantPast) }
+    // Sort by last-played date (most recent first), then by pub date for unplayed
+    allEpisodes.sort { ep1, ep2 in
+      let date1 = lastPlayedDates[ep1.id]
+      let date2 = lastPlayedDates[ep2.id]
+      switch (date1, date2) {
+      case let (d1?, d2?): return d1 > d2
+      case (_?, nil): return true
+      case (nil, _?): return false
+      case (nil, nil):
+        return (ep1.episodeInfo.pubDate ?? .distantPast) > (ep2.episodeInfo.pubDate ?? .distantPast)
+      }
+    }
     upNextEpisodes = Array(allEpisodes.prefix(20))
     logger.info("Loaded \(self.upNextEpisodes.count) up next episodes")
+
+    // Populate auto-play candidates from up next episodes
+    let autoPlayEpisodes = upNextEpisodes.compactMap { episode -> PlaybackEpisode? in
+      guard let audioURL = episode.episodeInfo.audioURL else { return nil }
+      return PlaybackEpisode(
+        id: episode.id,
+        title: episode.episodeInfo.title,
+        podcastTitle: episode.podcastTitle,
+        audioURL: audioURL,
+        imageURL: episode.imageURL,
+        episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+        pubDate: episode.episodeInfo.pubDate,
+        duration: episode.episodeInfo.duration,
+        guid: episode.episodeInfo.guid
+      )
+    }
+    EnhancedAudioManager.shared.addToAutoPlayCandidates(autoPlayEpisodes)
   }
 
   private static func makeEpisodeKey(podcastTitle: String, episodeTitle: String) -> String {
@@ -221,6 +252,8 @@ final class HomeViewModel {
       podcastTitle: episode.podcastTitle,
       audioURL: audioURL,
       imageURL: episode.imageURL,
+      episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+      pubDate: episode.episodeInfo.pubDate,
       duration: episode.episodeInfo.duration,
       guid: episode.episodeInfo.guid
     )

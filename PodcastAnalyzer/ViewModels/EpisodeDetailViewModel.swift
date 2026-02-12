@@ -1104,6 +1104,8 @@ final class EpisodeDetailViewModel {
       } else {
         // Check for RSS transcript availability
         checkRSSTranscriptAvailability()
+        // Check for active background transcript jobs and resume observation
+        checkAndObserveTranscriptJob()
       }
     }
   }

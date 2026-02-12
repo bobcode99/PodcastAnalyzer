@@ -142,6 +142,9 @@ class EnhancedAudioManager: NSObject {
     static let lastImageURL = "lastImageURL"
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
     static let autoPlayNextEpisode = "autoPlayNextEpisode"
+    static let lastEpisodeDescription = "lastEpisodeDescription"
+    static let lastEpisodePubDate = "lastEpisodePubDate"
+    static let lastEpisodeGuid = "lastEpisodeGuid"
   }
 
   override private init() {
@@ -470,6 +473,10 @@ private func handleAudioInterruption(_ notification: Notification) {
   // MARK: - Queue Management
 
   /// Add an episode to the end of the queue
+  private func onQueueChanged() {
+    PlaybackStateCoordinator.shared?.saveQueue(queue)
+  }
+
   func addToQueue(_ episode: PlaybackEpisode) {
     // Don't add if already in queue or is current episode
     guard !queue.contains(where: { $0.id == episode.id }),
@@ -484,6 +491,7 @@ private func handleAudioInterruption(_ notification: Notification) {
       return
     }
     queue.append(episode)
+    onQueueChanged()
     logger.info("Added to queue: \(episode.title) (\(self.queue.count)/\(self.maxQueueSize))")
   }
 
@@ -504,12 +512,14 @@ private func handleAudioInterruption(_ notification: Notification) {
       return
     }
     queue.insert(episode, at: 0)
+    onQueueChanged()
     logger.info("Play next: \(episode.title) (\(self.queue.count)/\(self.maxQueueSize))")
   }
 
   /// Remove an episode from the queue
   func removeFromQueue(_ episode: PlaybackEpisode) {
     queue.removeAll { $0.id == episode.id }
+    onQueueChanged()
     logger.info("Removed from queue: \(episode.title)")
   }
 
@@ -517,6 +527,7 @@ private func handleAudioInterruption(_ notification: Notification) {
   func removeFromQueue(at index: Int) {
     guard index >= 0 && index < queue.count else { return }
     let episode = queue.remove(at: index)
+    onQueueChanged()
     logger.info("Removed from queue at index \(index): \(episode.title)")
   }
 
@@ -541,11 +552,13 @@ private func handleAudioInterruption(_ notification: Notification) {
     }
 
     queue = items
+    onQueueChanged()
   }
 
   /// Clear the entire queue
   func clearQueue() {
     queue.removeAll()
+    onQueueChanged()
     logger.info("Queue cleared")
   }
 
@@ -581,6 +594,7 @@ private func handleAudioInterruption(_ notification: Notification) {
     }
 
     let nextEpisode = queue.removeFirst()
+    onQueueChanged()
     let savedPosition = PlaybackStateCoordinator.savedPlaybackPosition(
       podcastTitle: nextEpisode.podcastTitle,
       episodeTitle: nextEpisode.title
@@ -602,6 +616,7 @@ private func handleAudioInterruption(_ notification: Notification) {
     // Remove all items before the selected one
     let episodesToRemove = Array(queue.prefix(index))
     queue.removeFirst(index)
+    onQueueChanged()
 
     // Play the selected episode
     playNextInQueue()
@@ -696,9 +711,19 @@ private func handleAudioInterruption(_ notification: Notification) {
   }
 
   /// Restore the last played episode on app launch (without playing)
+  /// Flag indicating queue still needs restoration (coordinator wasn't ready at restore time)
+  private var needsQueueRestore = false
+
   func restoreLastEpisode() {
     guard !hasRestoredLastEpisode else { return }
     hasRestoredLastEpisode = true
+
+    // Restore persisted queue
+    if let coordinator = PlaybackStateCoordinator.shared {
+      queue = coordinator.restoreQueue()
+    } else {
+      needsQueueRestore = true
+    }
 
     guard let state = loadLastPlaybackState() else {
       logger.info("No previous playback state to restore")
@@ -711,6 +736,13 @@ private func handleAudioInterruption(_ notification: Notification) {
     duration = state.duration  // Restore saved duration for correct progress display
 
     logger.info("Restored last episode: \(state.episode.title) at \(state.time)s / \(state.duration)s")
+  }
+
+  /// Called after PlaybackStateCoordinator is initialized to restore queue if it was deferred
+  func restoreQueueIfNeeded() {
+    guard needsQueueRestore, let coordinator = PlaybackStateCoordinator.shared else { return }
+    needsQueueRestore = false
+    queue = coordinator.restoreQueue()
   }
 
   // MARK: - Caption Management
@@ -993,6 +1025,15 @@ private func handleAudioInterruption(_ notification: Notification) {
     if let imageURL = imageURL {
       UserDefaults.standard.set(imageURL, forKey: Keys.lastImageURL)
     }
+    if let desc = episode.episodeDescription {
+      UserDefaults.standard.set(desc, forKey: Keys.lastEpisodeDescription)
+    }
+    if let pubDate = episode.pubDate {
+      UserDefaults.standard.set(pubDate, forKey: Keys.lastEpisodePubDate)
+    }
+    if let guid = episode.guid {
+      UserDefaults.standard.set(guid, forKey: Keys.lastEpisodeGuid)
+    }
 
     logger.debug("Saved playback state: \(episode.title) at \(self.currentTime)s / \(self.duration)s")
   }
@@ -1010,13 +1051,20 @@ private func handleAudioInterruption(_ notification: Notification) {
     let savedDuration = UserDefaults.standard.double(forKey: Keys.lastDuration)
     let imageURL = UserDefaults.standard.string(forKey: Keys.lastImageURL)
 
+    let episodeDescription = UserDefaults.standard.string(forKey: Keys.lastEpisodeDescription)
+    let pubDate = UserDefaults.standard.object(forKey: Keys.lastEpisodePubDate) as? Date
+    let guid = UserDefaults.standard.string(forKey: Keys.lastEpisodeGuid)
+
     let episode = PlaybackEpisode(
       id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(title)",
       title: title,
       podcastTitle: podcastTitle,
       audioURL: audioURL,
       imageURL: imageURL,
-      duration: savedDuration > 0 ? Int(savedDuration) : nil
+      episodeDescription: episodeDescription,
+      pubDate: pubDate,
+      duration: savedDuration > 0 ? Int(savedDuration) : nil,
+      guid: guid
     )
 
     return (episode, time, savedDuration, imageURL)
@@ -1034,6 +1082,9 @@ private func handleAudioInterruption(_ notification: Notification) {
     UserDefaults.standard.removeObject(forKey: Keys.lastDuration)
     UserDefaults.standard.removeObject(forKey: Keys.lastAudioURL)
     UserDefaults.standard.removeObject(forKey: Keys.lastImageURL)
+    UserDefaults.standard.removeObject(forKey: Keys.lastEpisodeDescription)
+    UserDefaults.standard.removeObject(forKey: Keys.lastEpisodePubDate)
+    UserDefaults.standard.removeObject(forKey: Keys.lastEpisodeGuid)
   }
 
   // MARK: - Time Observer

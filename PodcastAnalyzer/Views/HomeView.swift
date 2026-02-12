@@ -200,8 +200,7 @@ struct HomeView: View {
                   )
                 ) {
                   ForYouCard(
-                    episode: episode,
-                    reason: viewModel.recommendations?.reasons[safe: index]
+                    episode: episode
                   )
                 }
                 .buttonStyle(.plain)
@@ -330,6 +329,8 @@ struct UpNextCard: View {
         .lineLimit(2)
         .multilineTextAlignment(.leading)
 
+      Spacer(minLength: 0)
+
       // Play button with progress - uses live audio manager state
       LivePlaybackButton(
         episode: episode,
@@ -337,7 +338,7 @@ struct UpNextCard: View {
         action: playEpisode
       )
     }
-    .frame(width: 140)
+    .frame(width: 140, height: 258, alignment: .top)
     .onAppear {
       if statusObserver == nil {
         statusObserver = EpisodeStatusObserver(episode: episode)
@@ -354,7 +355,6 @@ struct UpNextCard: View {
 
 struct ForYouCard: View {
   let episode: LibraryEpisode
-  let reason: String?
   @Environment(\.modelContext) private var modelContext
   @State private var statusObserver: EpisodeStatusObserver?
 
@@ -419,13 +419,7 @@ struct ForYouCard: View {
         .lineLimit(2)
         .multilineTextAlignment(.leading)
 
-      // Recommendation reason
-      if let reason {
-        Text(reason)
-          .font(.caption2)
-          .foregroundStyle(.purple)
-          .lineLimit(2)
-      }
+      Spacer(minLength: 0)
 
       // Play button
       LivePlaybackButton(
@@ -434,7 +428,7 @@ struct ForYouCard: View {
         action: playEpisode
       )
     }
-    .frame(width: 140)
+    .frame(width: 140, height: 258, alignment: .top)
     .onAppear {
       if statusObserver == nil {
         statusObserver = EpisodeStatusObserver(episode: episode)
@@ -444,14 +438,6 @@ struct ForYouCard: View {
     .onDisappear {
       statusObserver?.cleanup()
     }
-  }
-}
-
-// MARK: - Safe Array Subscript
-
-private extension Array {
-  subscript(safe index: Int) -> Element? {
-    indices.contains(index) ? self[index] : nil
   }
 }
 
