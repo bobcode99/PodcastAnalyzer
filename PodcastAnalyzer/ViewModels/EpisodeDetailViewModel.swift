@@ -1826,10 +1826,9 @@ final class EpisodeDetailViewModel {
         }
 
         let service = CloudAIService.shared
-        let plainText = SRTParser.extractPlainText(from: transcriptText)
 
         let result = try await service.analyzeTranscriptStreaming(
-          plainText,
+          transcriptText,
           episodeTitle: episode.title,
           podcastTitle: podcastTitle,
           analysisType: type,
@@ -1904,11 +1903,10 @@ final class EpisodeDetailViewModel {
         }
 
         let service = CloudAIService.shared
-        let plainText = SRTParser.extractPlainText(from: transcriptText)
 
         let result = try await service.askQuestion(
           question,
-          transcript: plainText,
+          transcript: transcriptText,
           episodeTitle: episode.title,
           podcastLanguage: podcastLanguage,
           progressCallback: { [weak self] message, progress in

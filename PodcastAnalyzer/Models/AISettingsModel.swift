@@ -25,18 +25,22 @@ enum TranscriptFormatForAI: String, CaseIterable, Codable {
 
     var description: String {
         switch self {
-        case .segmentBased: return "Keep original segments with timestamps (more context for time references)"
+        case .segmentBased: return "Include timestamps with each segment, e.g. [00:01:23] text (useful for time references)"
         case .sentenceBased: return "Merge segments into natural sentences (better for AI comprehension, lower token cost)"
         }
     }
 
     /// Format transcript content based on the selected format
-    /// - Parameter transcript: Raw transcript (may be SRT format or plain text)
+    /// - Parameter transcript: Raw SRT transcript content
     /// - Returns: Formatted transcript suitable for AI analysis
     func formatTranscript(_ transcript: String) -> String {
         switch self {
         case .segmentBased:
-            // Keep original format with timestamps intact
+            // Convert SRT to clean "[HH:MM:SS] text" format for AI
+            if transcript.contains("-->") {
+                return formatSegmentBased(transcript)
+            }
+            // Already plain text — return as-is (no timestamps available)
             return transcript
         case .sentenceBased:
             // Check if content looks like SRT/VTT format (has timestamps)
@@ -49,6 +53,21 @@ enum TranscriptFormatForAI: String, CaseIterable, Codable {
                 return mergeSentences(transcript)
             }
         }
+    }
+
+    /// Convert SRT content to clean "[HH:MM:SS] text" lines for AI
+    private func formatSegmentBased(_ srtContent: String) -> String {
+        let segments = SRTParser.parseSegments(from: srtContent)
+        return segments.map { segment in
+            let totalSeconds = Int(segment.startTime)
+            let h = totalSeconds / 3600
+            let m = (totalSeconds % 3600) / 60
+            let s = totalSeconds % 60
+            let timestamp = h > 0
+                ? String(format: "[%d:%02d:%02d]", h, m, s)
+                : String(format: "[%02d:%02d]", m, s)
+            return "\(timestamp) \(segment.text)"
+        }.joined(separator: "\n")
     }
 
     /// Merge text segments into proper sentences for better AI comprehension

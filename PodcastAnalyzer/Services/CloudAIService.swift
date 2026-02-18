@@ -994,10 +994,14 @@ final class CloudAIService {
         }\(languageLine)
         """
 
+        let timestampNote = settings.transcriptFormat == .segmentBased
+            ? "\nNote: The transcript includes timestamps in [MM:SS] or [H:MM:SS] format. Include relevant timestamps in your sources."
+            : ""
+
         let userPrompt = """
         Episode: \(episodeTitle)
 
-        Question: \(question)
+        Question: \(question)\(timestampNote)
 
         Transcript:
         \(formattedTranscript)
@@ -1136,11 +1140,16 @@ final class CloudAIService {
             instruction = "Please provide a complete analysis of this podcast episode."
         }
 
+        // When using segment-based format, tell the AI timestamps are present so it uses them
+        let timestampNote = settings.transcriptFormat == .segmentBased
+            ? "\nNote: The transcript includes timestamps in [MM:SS] or [H:MM:SS] format. Reference these timestamps when relevant (e.g. for highlights, quotes, and key moments)."
+            : ""
+
         return """
         Podcast: \(podcastTitle)
         Episode: \(episodeTitle)
 
-        \(instruction)
+        \(instruction)\(timestampNote)
 
         Transcript:
         \(transcript)

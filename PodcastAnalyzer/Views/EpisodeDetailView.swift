@@ -49,6 +49,9 @@ struct EpisodeDetailView: View {
     // Auto-scroll state
     @State private var autoScrollEnabled = true
 
+    // Transcript search focus
+    @FocusState private var transcriptSearchFocused: Bool
+
     // Translation configuration for .translationTask
     @State private var transcriptTranslationConfig: TranslationSession.Configuration?
     @State private var descriptionTranslationConfig: TranslationSession.Configuration?
@@ -572,18 +575,32 @@ struct EpisodeDetailView: View {
                 )
                 .textFieldStyle(.plain)
                 .font(.subheadline)
+                .focused($transcriptSearchFocused)
+                .submitLabel(.search)
                 if !viewModel.transcriptSearchQuery.isEmpty {
-                    Button(action: { viewModel.transcriptSearchQuery = "" }) {
+                    Button {
+                        viewModel.transcriptSearchQuery = ""
+                    } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
                             .font(.system(size: 14))
                     }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .glassEffect(.regular, in: .rect(cornerRadius: 10))
 
+            if transcriptSearchFocused || !viewModel.transcriptSearchQuery.isEmpty {
+                // Cancel search — clears query and dismisses keyboard
+                Button("Cancel") {
+                    viewModel.transcriptSearchQuery = ""
+                    transcriptSearchFocused = false
+                }
+                .font(.subheadline)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else {
             // Translate button with circular progress - shows language picker
             Button {
                 showTranslationLanguagePicker = true
@@ -710,7 +727,10 @@ struct EpisodeDetailView: View {
                     .font(.system(size: 22))
                     .foregroundStyle(.secondary)
             }
+            } // end else (not searching)
         }
+        .animation(.easeInOut(duration: 0.2), value: transcriptSearchFocused)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.transcriptSearchQuery.isEmpty)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
     }
