@@ -85,11 +85,39 @@ struct EpisodeRowView: View {
   @State private var shareTask: Task<Void, Never>?
   @State private var hasAIAnalysis: Bool = false
 
-  // Transcript state - only updated on appear and when actively transcribing this episode
-  @State private var hasCaptions: Bool = false
-  @State private var isTranscribing: Bool = false
-  @State private var transcriptProgress: Double? = nil
-  @State private var isDownloadingModel: Bool = false
+  // Transcript state - computed from TranscriptManager (reactive) + filesystem check
+  @State private var hasCaptionsOnDisk: Bool = false
+
+  private var activeTranscriptJob: TranscriptJob? {
+    TranscriptManager.shared.activeJobs[jobId]
+  }
+
+  private var hasCaptions: Bool {
+    if case .completed = activeTranscriptJob?.status { return true }
+    return hasCaptionsOnDisk
+  }
+
+  private var isTranscribing: Bool {
+    guard let job = activeTranscriptJob else { return false }
+    switch job.status {
+    case .queued, .downloadingModel, .transcribing: return true
+    case .completed, .failed: return false
+    }
+  }
+
+  private var transcriptProgress: Double? {
+    guard let job = activeTranscriptJob else { return nil }
+    switch job.status {
+    case .queued: return 0.0
+    case .downloadingModel(let p), .transcribing(let p): return p
+    default: return nil
+    }
+  }
+
+  private var isDownloadingModel: Bool {
+    if case .downloadingModel = activeTranscriptJob?.status { return true }
+    return false
+  }
 
   // Status checker using centralized utility
   private var statusChecker: EpisodeStatusChecker {
@@ -139,48 +167,6 @@ struct EpisodeRowView: View {
     hasAIAnalysis = statusChecker.hasAIAnalysis(in: modelContext)
   }
 
-  private func updateTranscriptStatus() {
-    // Check if transcript file exists
-    let fileExists = statusChecker.hasTranscript
-
-    // Check for active job only for this specific episode
-    let transcriptManager = TranscriptManager.shared
-    if let job = transcriptManager.activeJobs[jobId] {
-      switch job.status {
-      case .completed:
-        hasCaptions = true
-        isTranscribing = false
-        transcriptProgress = nil
-        isDownloadingModel = false
-      case .queued:
-        hasCaptions = fileExists
-        isTranscribing = true
-        transcriptProgress = 0.0
-        isDownloadingModel = false
-      case .downloadingModel(let progress):
-        hasCaptions = fileExists
-        isTranscribing = true
-        transcriptProgress = progress
-        isDownloadingModel = true
-      case .transcribing(let progress):
-        hasCaptions = fileExists
-        isTranscribing = true
-        transcriptProgress = progress
-        isDownloadingModel = false
-      case .failed:
-        hasCaptions = fileExists
-        isTranscribing = false
-        transcriptProgress = nil
-        isDownloadingModel = false
-      }
-    } else {
-      hasCaptions = fileExists
-      isTranscribing = false
-      transcriptProgress = nil
-      isDownloadingModel = false
-    }
-  }
-
   var body: some View {
     NavigationLink(
       destination: EpisodeDetailView(
@@ -198,16 +184,24 @@ struct EpisodeRowView: View {
       }
       .padding(.vertical, 8)
     }
-    .contextMenu { contextMenuContent }
     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
       trailingSwipeActions
     }
     .swipeActions(edge: .leading, allowsFullSwipe: true) {
       leadingSwipeActions
     }
+    .contextMenu {
+      contextMenuContent
+    }
     .onAppear {
       checkAIAnalysis()
-      updateTranscriptStatus()
+      hasCaptionsOnDisk = statusChecker.hasTranscript
+    }
+    .onChange(of: activeTranscriptJob?.status) { _, newStatus in
+      // Refresh filesystem check when job completes (file was just written)
+      if case .completed = newStatus {
+        hasCaptionsOnDisk = true
+      }
     }
   }
 
@@ -224,12 +218,22 @@ struct EpisodeRowView: View {
             ? "waveform" : "pause.fill"
         )
         .font(.system(size: 12, weight: .bold))
-        .foregroundColor(.white)
+        .foregroundStyle(.white)
         .padding(4)
-        .background(Color.blue)
-        .cornerRadius(4)
+        .glassEffect(.regular.tint(.blue), in: .rect(cornerRadius: 4))
         .padding(4)
       }
+    }
+  }
+
+  /// Format episode date - relative for today, otherwise abbreviated
+  private func formatEpisodeDate(_ date: Date) -> String {
+    if Calendar.current.isDateInToday(date) {
+      let formatter = RelativeDateTimeFormatter()
+      formatter.unitsStyle = .abbreviated
+      return formatter.localizedString(for: date, relativeTo: Date())
+    } else {
+      return date.formatted(date: .abbreviated, time: .omitted)
     }
   }
 
@@ -238,9 +242,9 @@ struct EpisodeRowView: View {
     VStack(alignment: .leading, spacing: 6) {
       // Date row
       if let date = episode.pubDate {
-        Text(date.formatted(date: .abbreviated, time: .omitted))
+        Text(formatEpisodeDate(date))
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
 
       // Title
@@ -248,13 +252,13 @@ struct EpisodeRowView: View {
         .font(.subheadline)
         .fontWeight(.semibold)
         .lineLimit(3)
-        .foregroundColor(.primary)
+        .foregroundStyle(.primary)
 
       // Description
       if let description = plainDescription {
         Text(description)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .lineLimit(3)
       }
 
@@ -268,18 +272,18 @@ struct EpisodeRowView: View {
   @ViewBuilder
   private var bottomStatusBar: some View {
     HStack(spacing: 6) {
-      // Play button with progress (using reusable component)
-      EpisodePlayButton(
-        isPlaying: audioManager.isPlaying,
-        isPlayingThisEpisode: isPlayingThisEpisode,
-        isCompleted: isCompleted,
-        playbackProgress: playbackProgress,
+      // Play button with progress - uses live audio manager state
+      LivePlaybackButton(
+        episodeTitle: episode.title,
+        podcastTitle: podcastTitle,
         duration: episodeModel?.duration,
-        lastPlaybackPosition: episodeModel?.lastPlaybackPosition ?? 0,
         formattedDuration: episode.formattedDuration,
-        isDisabled: episode.audioURL == nil,
+        lastPlaybackPosition: episodeModel?.lastPlaybackPosition ?? 0,
+        playbackProgress: playbackProgress,
+        isCompleted: isCompleted,
+        onPlay: playAction,
         style: .compact,
-        action: playAction
+        isDisabled: episode.audioURL == nil
       )
 
       // Download progress
@@ -288,21 +292,19 @@ struct EpisodeRowView: View {
           ProgressView().scaleEffect(0.4)
           Text("\(Int(progress * 100))%").font(.system(size: 9))
         }
-        .foregroundColor(.orange)
+        .foregroundStyle(.orange)
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(Color.orange.opacity(0.15))
-        .clipShape(Capsule())
+        .glassEffect(.regular.tint(.orange), in: .capsule)
       } else if case .finishing = downloadState {
         HStack(spacing: 2) {
           ProgressView().scaleEffect(0.4)
           Text("Saving").font(.system(size: 9))
         }
-        .foregroundColor(.blue)
+        .foregroundStyle(.blue)
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(Color.blue.opacity(0.15))
-        .clipShape(Capsule())
+        .glassEffect(.regular.tint(.blue), in: .capsule)
       }
 
       // Status indicators
@@ -310,31 +312,31 @@ struct EpisodeRowView: View {
         if isStarred {
           Image(systemName: "star.fill")
             .font(.system(size: 10))
-            .foregroundColor(.yellow)
+            .foregroundStyle(.yellow)
         }
 
         if isDownloaded {
           Image(systemName: "arrow.down.circle.fill")
             .font(.system(size: 10))
-            .foregroundColor(.green)
+            .foregroundStyle(.green)
         }
 
         if hasCaptions {
           Image(systemName: "captions.bubble.fill")
             .font(.system(size: 10))
-            .foregroundColor(.purple)
+            .foregroundStyle(.purple)
         } else if isTranscribing {
           HStack(spacing: 2) {
             ProgressView().scaleEffect(0.35)
             if isDownloadingModel {
               Text("Model")
                 .font(.system(size: 8))
-                .foregroundColor(.purple)
+                .foregroundStyle(.purple)
             }
             if let progress = transcriptProgress {
               Text("\(Int(progress * 100))%")
                 .font(.system(size: 8))
-                .foregroundColor(.purple)
+                .foregroundStyle(.purple)
             }
           }
         }
@@ -342,13 +344,13 @@ struct EpisodeRowView: View {
         if hasAIAnalysis {
           Image(systemName: "sparkles")
             .font(.system(size: 10))
-            .foregroundColor(.orange)
+            .foregroundStyle(.orange)
         }
 
         if isCompleted {
           Image(systemName: "checkmark.circle.fill")
             .font(.system(size: 10))
-            .foregroundColor(.green)
+            .foregroundStyle(.green)
         }
       }
 
@@ -360,10 +362,11 @@ struct EpisodeRowView: View {
       } label: {
         Image(systemName: "ellipsis")
           .font(.system(size: 14, weight: .medium))
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .frame(width: 28, height: 28)
           .contentShape(Rectangle())
       }
+      .compositingGroup()
       .buttonStyle(.plain)
     }
   }

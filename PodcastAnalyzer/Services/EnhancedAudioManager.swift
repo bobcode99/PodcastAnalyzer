@@ -15,7 +15,8 @@
 import AVFoundation
 import Foundation
 import MediaPlayer
-import os.log
+import OSLog
+import WidgetKit
 
 #if os(iOS)
 import UIKit
@@ -36,7 +37,54 @@ struct PlaybackPositionUpdate: Sendable {
   let audioURL: String  // Added: needed to create new models
 }
 
-@Observable
+// MARK: - Sleep Timer Options
+
+enum SleepTimerOption: Equatable, CaseIterable {
+  case off
+  case endOfEpisode
+  case minutes5
+  case minutes10
+  case minutes15
+  case minutes30
+  case minutes45
+  case hour1
+
+  var displayName: String {
+    switch self {
+    case .off: return "Off"
+    case .endOfEpisode: return "End of Episode"
+    case .minutes5: return "5 Minutes"
+    case .minutes10: return "10 Minutes"
+    case .minutes15: return "15 Minutes"
+    case .minutes30: return "30 Minutes"
+    case .minutes45: return "45 Minutes"
+    case .hour1: return "1 Hour"
+    }
+  }
+
+  var duration: TimeInterval? {
+    switch self {
+    case .off: return nil
+    case .endOfEpisode: return nil  // Special case - handled separately
+    case .minutes5: return 5 * 60
+    case .minutes10: return 10 * 60
+    case .minutes15: return 15 * 60
+    case .minutes30: return 30 * 60
+    case .minutes45: return 45 * 60
+    case .hour1: return 60 * 60
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .off: return "moon.zzz"
+    case .endOfEpisode: return "stop.circle"
+    default: return "timer"
+    }
+  }
+}
+
+@MainActor @Observable
 class EnhancedAudioManager: NSObject {
   static let shared = EnhancedAudioManager()
 
@@ -58,18 +106,32 @@ class EnhancedAudioManager: NSObject {
   // Auto-play candidates (unplayed episodes that can be randomly selected)
   var autoPlayCandidates: [PlaybackEpisode] = []
 
+  // Sleep timer
+  var sleepTimerOption: SleepTimerOption = .off
+  var sleepTimerRemaining: TimeInterval = 0
+  private var sleepTimerTask: Task<Void, Never>?
+
   // Audio interruption handling - track if we should resume after interruption ends
   private var wasPlayingBeforeInterruption: Bool = false
 
   private var timeObserver: Any?
   // Task-based observers for Swift 6 concurrency
   private var interruptionTask: Task<Void, Never>?
+  private var interruptionResumeTask: Task<Void, Never>?
   private var playerEndedTask: Task<Void, Never>?
   private var playerStalledTask: Task<Void, Never>?
+  private var artworkFetchTask: Task<Void, Never>?
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "AudioManager")
 
   // Use Unit Separator (U+001F) as delimiter - same as EpisodeDownloadModel
   private static let episodeKeyDelimiter = "\u{1F}"
+
+  // Pre-compiled SRT regex (compiled once, reused for every caption parse)
+  private static let srtRegex: NSRegularExpression? = {
+    let entryPattern =
+      #"(?:^|\n)(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n"#
+    return try? NSRegularExpression(pattern: entryPattern, options: [])
+  }()
 
   private enum Keys {
     static let lastEpisodeTitle = "lastEpisodeTitle"
@@ -81,6 +143,9 @@ class EnhancedAudioManager: NSObject {
     static let lastImageURL = "lastImageURL"
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
     static let autoPlayNextEpisode = "autoPlayNextEpisode"
+    static let lastEpisodeDescription = "lastEpisodeDescription"
+    static let lastEpisodePubDate = "lastEpisodePubDate"
+    static let lastEpisodeGuid = "lastEpisodeGuid"
   }
 
   override private init() {
@@ -100,14 +165,36 @@ class EnhancedAudioManager: NSObject {
     do {
       let session = AVAudioSession.sharedInstance()
       try session.setCategory(.playback, mode: .spokenAudio, options: [])
-      try session.setActive(true, options: .notifyOthersOnDeactivation)
-      logger.info("Audio session configured for background playback")
+      // Don't activate session here - only activate when actually playing
+      logger.info("Audio session configured (will activate when playing)")
     } catch {
-      logger.error("Audio session failed: \(error.localizedDescription)")
+      logger.error("Audio session setup failed: \(error.localizedDescription)")
     }
     #else
     // macOS doesn't require AVAudioSession configuration
     logger.info("Audio manager initialized for macOS")
+    #endif
+  }
+
+  private func activateAudioSession() {
+    #if os(iOS)
+    do {
+      try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+      logger.info("Audio session activated")
+    } catch {
+      logger.error("Failed to activate audio session: \(error.localizedDescription)")
+    }
+    #endif
+  }
+
+  private func deactivateAudioSession() {
+    #if os(iOS)
+    do {
+      try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+      logger.info("Audio session deactivated - other apps can now play")
+    } catch {
+      logger.error("Failed to deactivate audio session: \(error.localizedDescription)")
+    }
     #endif
   }
 
@@ -165,14 +252,23 @@ private func handleAudioInterruption(_ notification: Notification) {
             // 3. Mandatory Session Reactivation
             do {
                 try AVAudioSession.sharedInstance().setActive(true)
-                
-                // 4. Delayed Resume
+
+                // 4. Delayed Resume with retry
                 // Audio hardware needs a moment to switch back from the other app
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                    guard let self = self else { return }
+                interruptionResumeTask?.cancel()
+                interruptionResumeTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(0.8))
+                    guard let self, !Task.isCancelled else { return }
                     self.resume()
                     self.wasPlayingBeforeInterruption = false
-                    self.logger.info("Interruption ended: Audio resumed")
+                    // Verify playback actually started; retry once if not
+                    try? await Task.sleep(for: .seconds(0.5))
+                    if !self.isPlaying, self.player?.rate == 0 {
+                        self.logger.warning("Interruption resume failed, retrying once")
+                        self.resume()
+                    } else {
+                        self.logger.info("Interruption ended: Audio resumed successfully")
+                    }
                 }
             } catch {
                 logger.error("Failed to reactivate session after interruption: \(error.localizedDescription)")
@@ -190,15 +286,23 @@ private func handleAudioInterruption(_ notification: Notification) {
   private func setupRemoteControls() {
     let commandCenter = MPRemoteCommandCenter.shared()
 
+    // Remove any existing targets before adding to prevent handler accumulation
+    commandCenter.playCommand.removeTarget(nil)
+    commandCenter.pauseCommand.removeTarget(nil)
+    commandCenter.skipForwardCommand.removeTarget(nil)
+    commandCenter.skipBackwardCommand.removeTarget(nil)
+    commandCenter.changePlaybackPositionCommand.removeTarget(nil)
+
+    // Remote command handlers run on arbitrary queues, so dispatch to MainActor
     commandCenter.playCommand.isEnabled = true
     commandCenter.playCommand.addTarget { [weak self] _ in
-      self?.resume()
+      Task { @MainActor in self?.resume() }
       return .success
     }
 
     commandCenter.pauseCommand.isEnabled = true
     commandCenter.pauseCommand.addTarget { [weak self] _ in
-      self?.pause()
+      Task { @MainActor in self?.pause() }
       return .success
     }
 
@@ -206,14 +310,14 @@ private func handleAudioInterruption(_ notification: Notification) {
     commandCenter.skipForwardCommand.isEnabled = true
     commandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: 15)]
     commandCenter.skipForwardCommand.addTarget { [weak self] _ in
-      self?.skipForward(seconds: 15)
+      Task { @MainActor in self?.skipForward(seconds: 15) }
       return .success
     }
 
     commandCenter.skipBackwardCommand.isEnabled = true
     commandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: 15)]
     commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
-      self?.skipBackward(seconds: 15)
+      Task { @MainActor in self?.skipBackward(seconds: 15) }
       return .success
     }
 
@@ -222,7 +326,8 @@ private func handleAudioInterruption(_ notification: Notification) {
       guard let event = event as? MPChangePlaybackPositionCommandEvent else {
         return .commandFailed
       }
-      self?.seek(to: event.positionTime)
+      let position = event.positionTime
+      Task { @MainActor in self?.seek(to: position) }
       return .success
     }
   }
@@ -240,6 +345,9 @@ private func handleAudioInterruption(_ notification: Notification) {
     }
 
     cleanup()
+
+    // Activate audio session now that we're about to play
+    activateAudioSession()
 
     // Use cached duration from episode metadata if available
     // This provides immediate feedback instead of showing 0:00
@@ -279,6 +387,7 @@ private func handleAudioInterruption(_ notification: Notification) {
 
     savePlaybackState(imageURL: imageURL ?? episode.imageURL)
     loadCaptions(episode: episode)
+    updateWidgetPlaybackData()
   }
 
   // MARK: - Controls – always update Now Playing
@@ -288,6 +397,7 @@ private func handleAudioInterruption(_ notification: Notification) {
     updateNowPlayingPlaybackRate()
     savePlaybackState()
     postPlaybackPositionUpdate()
+    updateWidgetPlaybackData()
   }
 
   func resume() {
@@ -302,6 +412,9 @@ private func handleAudioInterruption(_ notification: Notification) {
       )
       return
     }
+
+    // Ensure audio session is active when resuming
+    activateAudioSession()
 
     player?.play()
     player?.rate = playbackRate
@@ -319,7 +432,14 @@ private func handleAudioInterruption(_ notification: Notification) {
     currentCaption = ""
     captionSegments = []
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-    logger.info("Playback stopped")
+
+    // Deactivate audio session so other apps can play
+    deactivateAudioSession()
+
+    // Clear widget data
+    clearWidgetData()
+
+    logger.info("Playback stopped and audio session deactivated")
   }
 
   func seek(to time: TimeInterval) {
@@ -355,6 +475,10 @@ private func handleAudioInterruption(_ notification: Notification) {
   // MARK: - Queue Management
 
   /// Add an episode to the end of the queue
+  private func onQueueChanged() {
+    PlaybackStateCoordinator.shared?.saveQueue(queue)
+  }
+
   func addToQueue(_ episode: PlaybackEpisode) {
     // Don't add if already in queue or is current episode
     guard !queue.contains(where: { $0.id == episode.id }),
@@ -369,6 +493,7 @@ private func handleAudioInterruption(_ notification: Notification) {
       return
     }
     queue.append(episode)
+    onQueueChanged()
     logger.info("Added to queue: \(episode.title) (\(self.queue.count)/\(self.maxQueueSize))")
   }
 
@@ -389,12 +514,14 @@ private func handleAudioInterruption(_ notification: Notification) {
       return
     }
     queue.insert(episode, at: 0)
+    onQueueChanged()
     logger.info("Play next: \(episode.title) (\(self.queue.count)/\(self.maxQueueSize))")
   }
 
   /// Remove an episode from the queue
   func removeFromQueue(_ episode: PlaybackEpisode) {
     queue.removeAll { $0.id == episode.id }
+    onQueueChanged()
     logger.info("Removed from queue: \(episode.title)")
   }
 
@@ -402,6 +529,7 @@ private func handleAudioInterruption(_ notification: Notification) {
   func removeFromQueue(at index: Int) {
     guard index >= 0 && index < queue.count else { return }
     let episode = queue.remove(at: index)
+    onQueueChanged()
     logger.info("Removed from queue at index \(index): \(episode.title)")
   }
 
@@ -426,11 +554,13 @@ private func handleAudioInterruption(_ notification: Notification) {
     }
 
     queue = items
+    onQueueChanged()
   }
 
   /// Clear the entire queue
   func clearQueue() {
     queue.removeAll()
+    onQueueChanged()
     logger.info("Queue cleared")
   }
 
@@ -441,10 +571,15 @@ private func handleAudioInterruption(_ notification: Notification) {
   }
 
   /// Add episodes to auto-play candidates (avoids duplicates)
+  /// Caps the list at maxQueueSize to prevent unbounded memory growth
   func addToAutoPlayCandidates(_ episodes: [PlaybackEpisode]) {
     let existingIds = Set(autoPlayCandidates.map { $0.id })
     let newEpisodes = episodes.filter { !existingIds.contains($0.id) }
     autoPlayCandidates.append(contentsOf: newEpisodes)
+    // Trim to max size to prevent unbounded memory growth
+    if autoPlayCandidates.count > maxQueueSize {
+      autoPlayCandidates = Array(autoPlayCandidates.suffix(maxQueueSize))
+    }
     logger.info("Added \(newEpisodes.count) to auto-play candidates (total: \(self.autoPlayCandidates.count))")
   }
 
@@ -461,14 +596,19 @@ private func handleAudioInterruption(_ notification: Notification) {
     }
 
     let nextEpisode = queue.removeFirst()
+    onQueueChanged()
+    let savedPosition = PlaybackStateCoordinator.savedPlaybackPosition(
+      podcastTitle: nextEpisode.podcastTitle,
+      episodeTitle: nextEpisode.title
+    )
     play(
       episode: nextEpisode,
       audioURL: nextEpisode.audioURL,
-      startTime: 0,
+      startTime: savedPosition,
       imageURL: nextEpisode.imageURL,
-      useDefaultSpeed: false
+      useDefaultSpeed: savedPosition == 0
     )
-    logger.info("Playing next in queue: \(nextEpisode.title)")
+    logger.info("Playing next in queue: \(nextEpisode.title) at \(Int(savedPosition))s")
   }
 
   /// Skip to a specific episode in the queue
@@ -478,6 +618,7 @@ private func handleAudioInterruption(_ notification: Notification) {
     // Remove all items before the selected one
     let episodesToRemove = Array(queue.prefix(index))
     queue.removeFirst(index)
+    onQueueChanged()
 
     // Play the selected episode
     playNextInQueue()
@@ -485,10 +626,106 @@ private func handleAudioInterruption(_ notification: Notification) {
     logger.info("Skipped \(episodesToRemove.count) episodes in queue")
   }
 
+  // MARK: - Sleep Timer
+
+  /// Set the sleep timer option
+  func setSleepTimer(_ option: SleepTimerOption) {
+    // Cancel existing timer
+    sleepTimerTask?.cancel()
+    sleepTimerTask = nil
+    sleepTimerOption = option
+
+    switch option {
+    case .off:
+      sleepTimerRemaining = 0
+      logger.info("Sleep timer disabled")
+
+    case .endOfEpisode:
+      sleepTimerRemaining = 0  // Will be calculated dynamically
+      logger.info("Sleep timer set to end of episode")
+
+    default:
+      if let timerDuration = option.duration {
+        sleepTimerRemaining = timerDuration
+        startSleepTimerCountdown()
+        logger.info("Sleep timer set for \(timerDuration / 60) minutes")
+      }
+    }
+  }
+
+  /// Start the countdown timer
+  private func startSleepTimerCountdown() {
+    sleepTimerTask?.cancel()
+    sleepTimerTask = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(1))
+        guard let self else { return }
+        // Exit loop if timer was turned off (e.g. triggerSleepTimer sets .off)
+        guard self.sleepTimerOption != .off else { break }
+        self.updateSleepTimer()
+      }
+    }
+  }
+
+  /// Update sleep timer countdown
+  private func updateSleepTimer() {
+    guard sleepTimerOption != .off else { return }
+
+    if sleepTimerOption == .endOfEpisode {
+      // No countdown for end of episode - handled in handlePlaybackEnded
+      return
+    }
+
+    if sleepTimerRemaining > 0 {
+      sleepTimerRemaining -= 1
+    }
+
+    if sleepTimerRemaining <= 0 {
+      triggerSleepTimer()
+    }
+  }
+
+  /// Trigger the sleep timer (pause playback)
+  private func triggerSleepTimer() {
+    logger.info("Sleep timer triggered - pausing playback")
+    pause()
+    sleepTimerTask?.cancel()
+    sleepTimerTask = nil
+    sleepTimerOption = .off
+    sleepTimerRemaining = 0
+  }
+
+  /// Format remaining time for display
+  var sleepTimerRemainingFormatted: String {
+    guard sleepTimerRemaining > 0 else { return "" }
+    let minutes = Int(sleepTimerRemaining) / 60
+    let seconds = Int(sleepTimerRemaining) % 60
+    if minutes > 0 {
+      return String(format: "%d:%02d", minutes, seconds)
+    } else {
+      return String(format: "0:%02d", seconds)
+    }
+  }
+
+  /// Check if sleep timer is active
+  var isSleepTimerActive: Bool {
+    sleepTimerOption != .off
+  }
+
   /// Restore the last played episode on app launch (without playing)
+  /// Flag indicating queue still needs restoration (coordinator wasn't ready at restore time)
+  private var needsQueueRestore = false
+
   func restoreLastEpisode() {
     guard !hasRestoredLastEpisode else { return }
     hasRestoredLastEpisode = true
+
+    // Restore persisted queue
+    if let coordinator = PlaybackStateCoordinator.shared {
+      queue = coordinator.restoreQueue()
+    } else {
+      needsQueueRestore = true
+    }
 
     guard let state = loadLastPlaybackState() else {
       logger.info("No previous playback state to restore")
@@ -501,6 +738,13 @@ private func handleAudioInterruption(_ notification: Notification) {
     duration = state.duration  // Restore saved duration for correct progress display
 
     logger.info("Restored last episode: \(state.episode.title) at \(state.time)s / \(state.duration)s")
+  }
+
+  /// Called after PlaybackStateCoordinator is initialized to restore queue if it was deferred
+  func restoreQueueIfNeeded() {
+    guard needsQueueRestore, let coordinator = PlaybackStateCoordinator.shared else { return }
+    needsQueueRestore = false
+    queue = coordinator.restoreQueue()
   }
 
   // MARK: - Caption Management
@@ -537,13 +781,9 @@ private func handleAudioInterruption(_ notification: Notification) {
       .replacingOccurrences(of: "\r", with: "\n")
       .trimmingCharacters(in: .whitespacesAndNewlines)
 
-    // Use regex to split SRT into entries (handles single or double newline separators)
-    // Pattern matches: index number at start of line, followed by timestamp line
-    let entryPattern =
-      #"(?:^|\n)(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n"#
-
-    guard let regex = try? NSRegularExpression(pattern: entryPattern, options: []) else {
-      logger.error("Failed to create SRT regex pattern")
+    // Use pre-compiled static regex for SRT parsing
+    guard let regex = Self.srtRegex else {
+      logger.error("SRT regex not available")
       return segments
     }
 
@@ -615,17 +855,35 @@ private func handleAudioInterruption(_ notification: Notification) {
 
   private func updateCurrentCaption() {
     guard !captionSegments.isEmpty else {
-      currentCaption = ""
+      if !currentCaption.isEmpty { currentCaption = "" }
       return
     }
 
-    // Find the caption segment for current time
-    if let segment = captionSegments.first(where: { segment in
-      currentTime >= segment.startTime && currentTime <= segment.endTime
-    }) {
-      currentCaption = segment.text
-    } else {
-      currentCaption = ""
+    // Binary search for the caption segment at currentTime
+    // captionSegments are sorted by startTime
+    let time = currentTime
+    var low = 0
+    var high = captionSegments.count - 1
+    var foundText = ""
+
+    while low <= high {
+      let mid = (low + high) / 2
+      let segment = captionSegments[mid]
+
+      if time < segment.startTime {
+        high = mid - 1
+      } else if time > segment.endTime {
+        low = mid + 1
+      } else {
+        // time is within [startTime, endTime]
+        foundText = segment.text
+        break
+      }
+    }
+
+    // Only write when value actually changed
+    if currentCaption != foundText {
+      currentCaption = foundText
     }
   }
 
@@ -647,7 +905,8 @@ private func handleAudioInterruption(_ notification: Notification) {
     if let imageURLString = imageURL ?? episode.imageURL,
       let url = URL(string: imageURLString)
     {
-      Task.detached { [weak self] in
+      artworkFetchTask?.cancel()
+      artworkFetchTask = Task.detached { [weak self] in
         do {
           let (data, _) = try await URLSession.shared.data(from: url)
           #if os(iOS)
@@ -702,6 +961,37 @@ private func handleAudioInterruption(_ notification: Notification) {
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
   }
 
+  // MARK: - Widget Data Updates
+
+  /// Update widget with current playback state
+  private func updateWidgetPlaybackData() {
+    guard let episode = currentEpisode else {
+      WidgetDataManager.clearPlaybackData()
+      WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+      return
+    }
+
+    let data = WidgetPlaybackData(
+      episodeTitle: episode.title,
+      podcastTitle: episode.podcastTitle,
+      imageURL: episode.imageURL,
+      audioURL: episode.audioURL,
+      currentTime: currentTime,
+      duration: duration,
+      isPlaying: isPlaying,
+      lastUpdated: Date()
+    )
+
+    WidgetDataManager.writePlaybackData(data)
+    WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+  }
+
+  /// Clear widget data when playback stops
+  private func clearWidgetData() {
+    WidgetDataManager.clearPlaybackData()
+    WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+  }
+
   // MARK: - State Persistence
 
   /// Posts a notification with current playback position for SwiftData persistence
@@ -729,10 +1019,22 @@ private func handleAudioInterruption(_ notification: Notification) {
     UserDefaults.standard.set(episode.title, forKey: Keys.lastEpisodeTitle)
     UserDefaults.standard.set(episode.podcastTitle, forKey: Keys.lastPodcastTitle)
     UserDefaults.standard.set(currentTime, forKey: Keys.lastPlaybackTime)
-    UserDefaults.standard.set(duration, forKey: Keys.lastDuration)
+    // Don't overwrite a valid saved duration with 0 (AVPlayer may not have loaded yet)
+    if duration > 0 {
+      UserDefaults.standard.set(duration, forKey: Keys.lastDuration)
+    }
     UserDefaults.standard.set(episode.audioURL, forKey: Keys.lastAudioURL)
     if let imageURL = imageURL {
       UserDefaults.standard.set(imageURL, forKey: Keys.lastImageURL)
+    }
+    if let desc = episode.episodeDescription {
+      UserDefaults.standard.set(desc, forKey: Keys.lastEpisodeDescription)
+    }
+    if let pubDate = episode.pubDate {
+      UserDefaults.standard.set(pubDate, forKey: Keys.lastEpisodePubDate)
+    }
+    if let guid = episode.guid {
+      UserDefaults.standard.set(guid, forKey: Keys.lastEpisodeGuid)
     }
 
     logger.debug("Saved playback state: \(episode.title) at \(self.currentTime)s / \(self.duration)s")
@@ -751,12 +1053,20 @@ private func handleAudioInterruption(_ notification: Notification) {
     let savedDuration = UserDefaults.standard.double(forKey: Keys.lastDuration)
     let imageURL = UserDefaults.standard.string(forKey: Keys.lastImageURL)
 
+    let episodeDescription = UserDefaults.standard.string(forKey: Keys.lastEpisodeDescription)
+    let pubDate = UserDefaults.standard.object(forKey: Keys.lastEpisodePubDate) as? Date
+    let guid = UserDefaults.standard.string(forKey: Keys.lastEpisodeGuid)
+
     let episode = PlaybackEpisode(
       id: "\(podcastTitle)\(Self.episodeKeyDelimiter)\(title)",
       title: title,
       podcastTitle: podcastTitle,
       audioURL: audioURL,
-      imageURL: imageURL
+      imageURL: imageURL,
+      episodeDescription: episodeDescription,
+      pubDate: pubDate,
+      duration: savedDuration > 0 ? Int(savedDuration) : nil,
+      guid: guid
     )
 
     return (episode, time, savedDuration, imageURL)
@@ -774,19 +1084,26 @@ private func handleAudioInterruption(_ notification: Notification) {
     UserDefaults.standard.removeObject(forKey: Keys.lastDuration)
     UserDefaults.standard.removeObject(forKey: Keys.lastAudioURL)
     UserDefaults.standard.removeObject(forKey: Keys.lastImageURL)
+    UserDefaults.standard.removeObject(forKey: Keys.lastEpisodeDescription)
+    UserDefaults.standard.removeObject(forKey: Keys.lastEpisodePubDate)
+    UserDefaults.standard.removeObject(forKey: Keys.lastEpisodeGuid)
   }
 
   // MARK: - Time Observer
 
   private func setupTimeObserver() {
-    let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+    let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
     timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) {
       [weak self] time in
       // Since we're on .main queue, we can safely assume MainActor isolation
       MainActor.assumeIsolated {
         guard let self = self else { return }
 
-        self.currentTime = time.seconds
+        // Throttle currentTime writes — only update when changed by >0.2s
+        let newTime = time.seconds
+        if abs(newTime - self.currentTime) > 0.2 {
+          self.currentTime = newTime
+        }
 
         // Track if duration was previously unknown
         let previousDuration = self.duration
@@ -794,7 +1111,9 @@ private func handleAudioInterruption(_ notification: Notification) {
         if let newDuration = self.player?.currentItem?.duration.seconds,
           newDuration.isFinite
         {
-          self.duration = newDuration
+          if self.duration != newDuration {
+            self.duration = newDuration
+          }
 
           // Update Now Playing duration when it first becomes available
           // (transition from 0 or invalid to valid duration)
@@ -806,15 +1125,18 @@ private func handleAudioInterruption(_ notification: Notification) {
         // Update current caption
         self.updateCurrentCaption()
 
-        // Update Now Playing time every second
-        if Int(self.currentTime * 10) % 10 == 0 {
+        // Update Now Playing time every second (at 0.25s interval, ~every 4th tick)
+        if Int(newTime) != Int(newTime - 0.25) {
           self.updateNowPlayingCurrentTime()
         }
 
         // Auto-save every 5 seconds and post notification for SwiftData persistence
-        if Int(self.currentTime) % 5 == 0 {
+        let currentSecond = Int(newTime)
+        let previousSecond = Int(newTime - 0.25)
+        if currentSecond % 5 == 0 && currentSecond != previousSecond {
           self.savePlaybackState()
           self.postPlaybackPositionUpdate()
+          self.updateWidgetPlaybackData()
         }
       }
     }
@@ -828,14 +1150,16 @@ private func handleAudioInterruption(_ notification: Notification) {
     playerStalledTask?.cancel()
 
     // Observe playback end using Task-based async sequence
-    playerEndedTask = Task { @MainActor [weak self] in
+    playerEndedTask = Task { @MainActor [weak self, weak playerItem] in
+      guard let playerItem else { return }
       for await _ in NotificationCenter.default.notifications(named: .AVPlayerItemDidPlayToEndTime, object: playerItem) {
         self?.handlePlaybackEnded()
       }
     }
 
     // Observe playback stall using Task-based async sequence
-    playerStalledTask = Task { [weak self] in
+    playerStalledTask = Task { [weak self, weak playerItem] in
+      guard let playerItem else { return }
       for await _ in NotificationCenter.default.notifications(named: .AVPlayerItemPlaybackStalled, object: playerItem) {
         self?.logger.warning("Playback stalled")
       }
@@ -852,6 +1176,15 @@ private func handleAudioInterruption(_ notification: Notification) {
       removeFromAutoPlayCandidates(currentId)
     }
 
+    // Check if sleep timer is set to "end of episode"
+    if sleepTimerOption == .endOfEpisode {
+      logger.info("Sleep timer: end of episode reached - stopping playback")
+      sleepTimerOption = .off
+      sleepTimerRemaining = 0
+      clearPlaybackState()
+      return
+    }
+
     // Check if there's a next episode in queue
     if !queue.isEmpty {
       logger.info("Playing next episode from queue")
@@ -863,13 +1196,17 @@ private func handleAudioInterruption(_ notification: Notification) {
         // Pick a random episode from candidates
         let randomIndex = Int.random(in: 0..<autoPlayCandidates.count)
         let nextEpisode = autoPlayCandidates[randomIndex]
-        logger.info("Auto-playing random episode: \(nextEpisode.title)")
+        let savedPosition = PlaybackStateCoordinator.savedPlaybackPosition(
+          podcastTitle: nextEpisode.podcastTitle,
+          episodeTitle: nextEpisode.title
+        )
+        logger.info("Auto-playing random episode: \(nextEpisode.title) at \(Int(savedPosition))s")
         play(
           episode: nextEpisode,
           audioURL: nextEpisode.audioURL,
-          startTime: 0,
+          startTime: savedPosition,
           imageURL: nextEpisode.imageURL,
-          useDefaultSpeed: false
+          useDefaultSpeed: savedPosition == 0
         )
       } else {
         clearPlaybackState()
@@ -886,10 +1223,14 @@ private func handleAudioInterruption(_ notification: Notification) {
     }
 
     // Cancel Task-based observers
+    interruptionResumeTask?.cancel()
+    interruptionResumeTask = nil
     playerEndedTask?.cancel()
     playerEndedTask = nil
     playerStalledTask?.cancel()
     playerStalledTask = nil
+    artworkFetchTask?.cancel()
+    artworkFetchTask = nil
 
     player?.pause()
     player = nil
@@ -901,7 +1242,7 @@ private func handleAudioInterruption(_ notification: Notification) {
 
 // MARK: - Supporting Models
 
-struct PlaybackEpisode: Identifiable, Codable, Sendable {
+struct PlaybackEpisode: Identifiable, Codable, Sendable, Equatable {
   let id: String
   let title: String
   let podcastTitle: String

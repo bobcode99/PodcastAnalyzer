@@ -9,7 +9,7 @@
 
 import Foundation
 import FoundationModels
-import os.log
+import OSLog
 
 private nonisolated let logger = Logger(subsystem: "com.podcastanalyzer", category: "AppleFoundationModelsService")
 
@@ -120,6 +120,97 @@ actor AppleFoundationModelsService {
 
         progressCallback?("Done", 1.0)
         logger.info("Quick tags generated successfully")
+
+        return response.content
+    }
+
+    // MARK: - Listening History Summary (On-Device)
+
+    /// Generate a summary of the user's listening history
+    /// Takes up to ~20 most recent listened episodes (title, podcast, duration, playCount, completion status)
+    /// Fits within 4096 tokens since each episode is ~30 tokens of metadata
+    func generateListeningHistorySummary(
+        episodes: [(title: String, podcastTitle: String, duration: TimeInterval, playCount: Int, isCompleted: Bool, lastPlayedDate: Date?)],
+        progressCallback: (@Sendable (String, Double) -> Void)? = nil
+    ) async throws -> ListeningHistorySummary {
+        logger.info("Generating listening history summary for \(episodes.count) episodes")
+
+        progressCallback?("Preparing listening data...", 0.2)
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .medium
+
+        // Build episode list string (limit to 20 episodes)
+        let limitedEpisodes = Array(episodes.prefix(20))
+        let episodeList = limitedEpisodes.enumerated().map { index, ep in
+            let minutes = Int(ep.duration) / 60
+            let status = ep.isCompleted ? "completed" : "in progress"
+            let lastPlayed = ep.lastPlayedDate.map { dateFormatter.string(from: $0) } ?? "unknown"
+            return "\(index + 1). \"\(ep.title)\" from \(ep.podcastTitle) (\(minutes) min, \(status), played \(ep.playCount)x, last: \(lastPlayed))"
+        }.joined(separator: "\n")
+
+        progressCallback?("Analyzing listening patterns...", 0.5)
+
+        let prompt = """
+        Analyze this podcast listening history and summarize the user's listening habits:
+
+        \(episodeList)
+
+        Identify patterns, favorite topics, total approximate listening time, and any interesting insights.
+        """
+
+        let response = try await session.respond(to: prompt, generating: ListeningHistorySummary.self)
+
+        progressCallback?("Done", 1.0)
+        logger.info("Listening history summary generated successfully")
+
+        return response.content
+    }
+
+    // MARK: - Episode Recommendations (On-Device)
+
+    /// Generate personalized episode recommendations based on listening history
+    /// Takes ~10 recently listened episodes + ~15 available (unplayed) episodes
+    /// Each episode uses ~40 tokens → total ~1000 tokens, well within 4096 limit
+    func generateEpisodeRecommendations(
+        listeningHistory: [(title: String, podcastTitle: String, completed: Bool)],
+        availableEpisodes: [(title: String, podcastTitle: String, description: String)],
+        progressCallback: (@Sendable (String, Double) -> Void)? = nil
+    ) async throws -> EpisodeRecommendations {
+        logger.info("Generating recommendations from \(listeningHistory.count) history + \(availableEpisodes.count) available episodes")
+
+        progressCallback?("Preparing episode data...", 0.2)
+
+        // Build listening history string (limit to 10)
+        let historyList = Array(listeningHistory.prefix(10)).enumerated().map { index, ep in
+            let status = ep.completed ? "finished" : "started"
+            return "\(index + 1). \"\(ep.title)\" from \(ep.podcastTitle) (\(status))"
+        }.joined(separator: "\n")
+
+        // Build available episodes string (limit to 15, truncate descriptions)
+        let availableList = Array(availableEpisodes.prefix(15)).enumerated().map { index, ep in
+            let desc = ep.description.count > 100 ? String(ep.description.prefix(100)) + "..." : ep.description
+            return "\(index + 1). \"\(ep.title)\" from \(ep.podcastTitle) - \(desc)"
+        }.joined(separator: "\n")
+
+        progressCallback?("Finding best matches...", 0.5)
+
+        let prompt = """
+        Based on what I've listened to, rank which available episodes I'd enjoy most.
+
+        My listening history:
+        \(historyList)
+
+        Available episodes:
+        \(availableList)
+
+        Recommend 3-5 episodes from the available list that best match my interests.
+        """
+
+        let response = try await session.respond(to: prompt, generating: EpisodeRecommendations.self)
+
+        progressCallback?("Done", 1.0)
+        logger.info("Episode recommendations generated successfully")
 
         return response.content
     }

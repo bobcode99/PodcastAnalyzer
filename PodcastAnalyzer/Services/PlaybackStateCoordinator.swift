@@ -7,7 +7,7 @@
 
 import Foundation
 import SwiftData
-import os.log
+import OSLog
 
 @MainActor
 @Observable
@@ -46,7 +46,70 @@ class PlaybackStateCoordinator {
     logger.info("Playback state coordinator initialized")
   }
 
-  // Note: No deinit needed - task uses [weak self] and will stop when coordinator is deallocated
+  deinit {
+    MainActor.assumeIsolated {
+      notificationTask?.cancel()
+    }
+  }
+
+  /// Look up the saved playback position for an episode from SwiftData.
+  /// Returns 0 if no saved position or if the episode is already completed.
+  static func savedPlaybackPosition(podcastTitle: String, episodeTitle: String) -> TimeInterval {
+    guard let coordinator = shared, let context = coordinator.modelContext else { return 0 }
+    let id = coordinator.makeEpisodeId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.id == id }
+    )
+    guard let model = try? context.fetch(descriptor).first else { return 0 }
+    // Don't resume completed episodes - start from beginning
+    if model.isCompleted { return 0 }
+    return model.lastPlaybackPosition
+  }
+
+  // MARK: - Queue Persistence
+
+  func saveQueue(_ queue: [PlaybackEpisode]) {
+    guard let context = modelContext else { return }
+
+    // Delete all existing queue items
+    do {
+      try context.delete(model: QueueItemModel.self)
+    } catch {
+      logger.error("Failed to delete old queue items: \(error.localizedDescription)")
+    }
+
+    // Insert new items with position indices
+    for (index, episode) in queue.enumerated() {
+      let item = QueueItemModel(from: episode, position: index)
+      context.insert(item)
+    }
+
+    do {
+      try context.save()
+      logger.debug("Saved \(queue.count) queue items")
+    } catch {
+      logger.error("Failed to save queue: \(error.localizedDescription)")
+    }
+  }
+
+  func restoreQueue() -> [PlaybackEpisode] {
+    guard let context = modelContext else { return [] }
+
+    var descriptor = FetchDescriptor<QueueItemModel>(
+      sortBy: [SortDescriptor(\.position)]
+    )
+    descriptor.fetchLimit = 50
+
+    do {
+      let items = try context.fetch(descriptor)
+      let episodes = items.map { $0.toPlaybackEpisode() }
+      logger.info("Restored \(episodes.count) queue items")
+      return episodes
+    } catch {
+      logger.error("Failed to restore queue: \(error.localizedDescription)")
+      return []
+    }
+  }
 
   private func savePlaybackPosition(update: PlaybackPositionUpdate) {
     guard let context = modelContext else { return }

@@ -45,6 +45,7 @@ enum PodcastSource {
 
 struct EpisodeListView: View {
   private let source: PodcastSource
+  private let initialFilter: EpisodeFilter
 
   @Environment(\.modelContext) private var modelContext
   @Environment(\.dismiss) private var dismiss
@@ -66,8 +67,9 @@ struct EpisodeListView: View {
   // MARK: - Initializers
 
   /// Initialize with a podcast model (subscribed or browsed)
-  init(podcastModel: PodcastInfoModel) {
+  init(podcastModel: PodcastInfoModel, initialFilter: EpisodeFilter = .all) {
     self.source = .model(podcastModel)
+    self.initialFilter = initialFilter
   }
 
   /// Initialize for browsing an unsubscribed podcast (will be persisted with isSubscribed=false)
@@ -85,6 +87,7 @@ struct EpisodeListView: View {
       artworkURL: podcastArtwork,
       applePodcastURL: applePodcastUrl
     )
+    self.initialFilter = .all
   }
 
   private var navigationTitle: String {
@@ -150,13 +153,15 @@ struct EpisodeListView: View {
     .onAppear {
       self.podcastModel = podcastModel
       if viewModel == nil {
-        let vm = EpisodeListViewModel(podcastModel: podcastModel)
+        let vm = EpisodeListViewModel(podcastModel: podcastModel, initialFilter: initialFilter)
         vm.setModelContext(modelContext)
         viewModel = vm
       }
       viewModel?.startRefreshTimer()
     }
     .task {
+      // Auto-refresh episodes in background when navigating to the podcast
+      await viewModel?.refreshPodcast()
       await lookupApplePodcastURL(title: podcastModel.podcastInfo.title)
     }
   }
@@ -184,16 +189,14 @@ struct EpisodeListView: View {
   private var loadingView: some View {
     VStack(spacing: 20) {
       if case .browse(_, let name, _, let artwork, _) = source {
-        AsyncImage(url: URL(string: artwork.replacingOccurrences(of: "100x100", with: "300x300"))) {
-          phase in
-          if let image = phase.image {
-            image.resizable().scaledToFit()
-          } else {
+        // Use CachedAsyncImage for browse mode artwork
+        CachedAsyncImage(url: URL(string: artwork.replacingOccurrences(of: "100x100", with: "300x300"))) { image in
+             image.resizable().scaledToFit()
+        } placeholder: {
             Color.gray
-          }
         }
         .frame(width: 150, height: 150)
-        .cornerRadius(12)
+        .clipShape(.rect(cornerRadius: 12))
 
         Text(name)
           .font(.headline)
@@ -208,14 +211,14 @@ struct EpisodeListView: View {
     VStack(spacing: 16) {
       Image(systemName: "exclamationmark.triangle")
         .font(.system(size: 50))
-        .foregroundColor(.orange)
+        .foregroundStyle(.orange)
 
       Text("Unable to load podcast")
         .font(.headline)
 
       Text(error)
         .font(.subheadline)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
         .padding(.horizontal)
 
@@ -377,7 +380,7 @@ struct EpisodeListView: View {
         Text("Episodes (\(viewModel.filteredEpisodeCount))")
           .font(.subheadline)
           .fontWeight(.semibold)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
     }
     .listStyle(.plain)
@@ -402,15 +405,6 @@ struct EpisodeListView: View {
             Button(action: subscribe) {
               Label("Subscribe", systemImage: "plus.circle")
             }
-          }
-
-          Divider()
-
-          Toggle(isOn: $downloadManager.autoTranscriptEnabled) {
-            Label(
-              "Auto-Generate Transcripts",
-              systemImage: "text.bubble"
-            )
           }
 
           Divider()
@@ -491,6 +485,21 @@ struct EpisodeListView: View {
     }
   }
 
+  @ViewBuilder
+  private func descriptionView(for viewModel: EpisodeListViewModel) -> some View {
+    switch viewModel.descriptionContent {
+    case .loading:
+      EmptyView()
+    case .empty:
+      Text("No description available.")
+        .foregroundStyle(.secondary)
+        .font(.caption)
+    case .parsed(let attributedString):
+      HTMLTextView(attributedString: attributedString)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
   // MARK: - Header Section
 
   @ViewBuilder
@@ -498,19 +507,16 @@ struct EpisodeListView: View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(alignment: .top) {
         if let url = URL(string: viewModel.podcastInfo.imageURL) {
-          AsyncImage(url: url) { phase in
-            if let image = phase.image {
-              image.resizable().scaledToFit()
-            } else if phase.error != nil {
-              Color.gray
-            } else {
-              ProgressView()
-            }
+          CachedAsyncImage(url: url) { image in
+               image.resizable().scaledToFit()
+          } placeholder: {
+               Color.gray
+                  .overlay(ProgressView())
           }
           .frame(width: 100, height: 100)
-          .cornerRadius(8)
+          .clipShape(.rect(cornerRadius: 8))
         } else {
-          Color.gray.frame(width: 100, height: 100).cornerRadius(8)
+          Color.gray.frame(width: 100, height: 100).clipShape(.rect(cornerRadius: 8))
         }
 
         VStack(alignment: .leading, spacing: 4) {
@@ -520,7 +526,7 @@ struct EpisodeListView: View {
           if !artistName.isEmpty {
             Text(artistName)
               .font(.subheadline)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
 
           // Language badge
@@ -534,11 +540,11 @@ struct EpisodeListView: View {
             )
             .font(.caption2)
           }
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .padding(.horizontal, 6)
           .padding(.vertical, 2)
           .background(Color.gray.opacity(0.15))
-          .cornerRadius(4)
+          .clipShape(.rect(cornerRadius: 4))
 
           // Subscribe button
           Button(action: subscribe) {
@@ -548,11 +554,11 @@ struct EpisodeListView: View {
             }
             .font(.subheadline)
             .fontWeight(.medium)
-            .foregroundColor(.white)
+            .foregroundStyle(.white)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(isSubscribed ? Color.green : Color.blue)
-            .cornerRadius(16)
+            .clipShape(.rect(cornerRadius: 16))
           }
           .buttonStyle(.plain)
           .disabled(isSubscribed)
@@ -560,7 +566,7 @@ struct EpisodeListView: View {
 
           if viewModel.podcastInfo.podcastInfoDescription != nil {
             VStack(alignment: .leading, spacing: 2) {
-              viewModel.descriptionView
+              descriptionView(for: viewModel)
                 .lineLimit(
                   viewModel.isDescriptionExpanded ? nil : 3
                 )
@@ -576,7 +582,7 @@ struct EpisodeListView: View {
                 )
                 .font(.caption)
                 .fontWeight(.medium)
-                .foregroundColor(.blue)
+                .foregroundStyle(.blue)
               }
               .buttonStyle(.plain)
             }
@@ -635,9 +641,8 @@ struct EpisodeListView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(Color.gray.opacity(0.15))
-            .foregroundColor(.primary)
-            .cornerRadius(16)
+            .foregroundStyle(.primary)
+            .glassEffect(Glass.regular.interactive(), in: .rect(cornerRadius: 16))
           }
           .buttonStyle(.plain)
         }
@@ -660,19 +665,32 @@ struct FilterChip: View {
 
   var body: some View {
     Button(action: action) {
-      HStack(spacing: 4) {
-        Image(systemName: icon)
-          .font(.system(size: 12))
-        Text(title)
-          .font(.caption)
-          .fontWeight(isSelected ? .semibold : .regular)
-      }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 6)
-      .background(isSelected ? Color.blue : Color.gray.opacity(0.15))
-      .foregroundColor(isSelected ? .white : .primary)
-      .cornerRadius(16)
+      chipLabel
     }
     .buttonStyle(.plain)
+  }
+
+  @ViewBuilder
+  private var chipLabel: some View {
+    let content = HStack(spacing: 4) {
+      Image(systemName: icon)
+        .font(.system(size: 12))
+      Text(title)
+        .font(.caption)
+        .fontWeight(isSelected ? .semibold : .regular)
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 6)
+
+    if isSelected {
+      content
+        .background(Color.blue)
+        .foregroundStyle(.white)
+        .clipShape(.rect(cornerRadius: 16))
+    } else {
+      content
+        .foregroundStyle(.primary)
+        .glassEffect(Glass.regular.interactive(), in: .rect(cornerRadius: 16))
+    }
   }
 }

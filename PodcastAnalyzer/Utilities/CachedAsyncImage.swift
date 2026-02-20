@@ -42,6 +42,11 @@ private actor DownloadCoordinator {
 
 // MARK: - Image Cache Manager
 
+// SAFETY: @unchecked Sendable is safe because:
+// - NSCache is internally thread-safe
+// - DownloadCoordinator (actor) handles async download coordination
+// - All mutable state is accessed through synchronized paths
+// TODO: Migrate to Mutex<NSCache> when minimum deployment target is iOS 18+
 final class ImageCacheManager: @unchecked Sendable {
   static let shared = ImageCacheManager()
 
@@ -248,6 +253,8 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
       // Cancel any pending load when view disappears
       loadTask?.cancel()
       loadTask = nil
+      // Clear image from view state to release memory
+      image = nil
     }
   }
 
@@ -324,7 +331,7 @@ struct CachedArtworkImage: View {
         )
     }
     .frame(width: size, height: size)
-    .cornerRadius(cornerRadius)
+    .clipShape(.rect(cornerRadius: cornerRadius))
     .clipped()
   }
 }

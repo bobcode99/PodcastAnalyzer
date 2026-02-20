@@ -60,6 +60,7 @@ struct AISettingsView: View {
         Form {
             formContent
         }
+        .formStyle(.grouped)
         .navigationTitle("AI Settings")
         .alert(testResultSuccess ? "Success" : "Error", isPresented: $showingTestResult) {
             Button("OK", role: .cancel) {}
@@ -100,7 +101,7 @@ struct AISettingsView: View {
 
                 Text(settings.selectedProvider.pricingNote)
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             } header: {
                 Text("Cloud AI Provider")
             } footer: {
@@ -136,23 +137,23 @@ struct AISettingsView: View {
                                 .scaleEffect(0.7)
                             Text("Fetching available models...")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     } else if let error = modelFetchError {
                         HStack {
                             Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.orange)
+                                .foregroundStyle(.orange)
                             Text(error)
                                 .font(.caption)
-                                .foregroundColor(.orange)
+                                .foregroundStyle(.orange)
                         }
                     } else if let models = fetchedModels[settings.selectedProvider], !models.isEmpty {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
+                                .foregroundStyle(.green)
                             Text("\(models.count) models available")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
 
@@ -182,15 +183,15 @@ struct AISettingsView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
+                                .foregroundStyle(.green)
                             Text("No API key needed!")
                                 .font(.subheadline)
                                 .fontWeight(.medium)
                         }
 
-                        Text("Apple Intelligence via Shortcuts uses Apple's Private Cloud Compute for AI analysis. Your data is processed securely on Apple's servers.")
+                        Text("Shortcuts calls your configured shortcut to process AI requests. You can use any AI provider (Apple Intelligence, ChatGPT, Gemini, etc.) inside your shortcut.")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
 
                     // Shortcut name configuration
@@ -214,10 +215,23 @@ struct AISettingsView: View {
                             Text("Open Shortcuts App")
                         }
                     }
+
+                    // Timeout setting
+                    HStack {
+                        Text("Timeout")
+                        Spacer()
+                        Picker("Timeout", selection: $settings.shortcutsTimeout) {
+                            Text("60s").tag(60.0 as TimeInterval)
+                            Text("120s").tag(120.0 as TimeInterval)
+                            Text("180s").tag(180.0 as TimeInterval)
+                            Text("300s").tag(300.0 as TimeInterval)
+                        }
+                        .pickerStyle(.menu)
+                    }
                 } header: {
                     Text("Shortcut Configuration")
                 } footer: {
-                    Text("Enter the exact name of your shortcut. The app will run this shortcut automatically.")
+                    Text("How long to wait for Shortcuts to return a result before timing out.")
                 }
 
                 Section {
@@ -241,35 +255,35 @@ struct AISettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Image(systemName: "lightbulb.fill")
-                                .foregroundColor(.yellow)
+                                .foregroundStyle(.yellow)
                             Text("Pro Tip")
                                 .font(.caption)
                                 .fontWeight(.semibold)
                         }
-                        Text("Use 'Ask Every Time' for the Model parameter to choose between Apple Intelligence (PCC), ChatGPT, or other models each time you run the shortcut.")
+                        Text("Use 'Ask Every Time' for the Model parameter to choose between ChatGPT, Apple Intelligence, Gemini, or other models each time you run the shortcut.")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(10)
                     .background(Color.yellow.opacity(0.1))
-                    .cornerRadius(8)
+                    .clipShape(.rect(cornerRadius: 8))
 
                     // How it works
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Image(systemName: "info.circle.fill")
-                                .foregroundColor(.blue)
+                                .foregroundStyle(.blue)
                             Text("How It Works")
                                 .font(.caption)
                                 .fontWeight(.semibold)
                         }
                         Text("When you analyze a transcript, the app will automatically run your shortcut, wait for it to complete, and display the result. No manual copy/paste needed!")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(10)
                     .background(Color.blue.opacity(0.1))
-                    .cornerRadius(8)
+                    .clipShape(.rect(cornerRadius: 8))
                 } header: {
                     Text("Setup Instructions")
                 }
@@ -298,17 +312,17 @@ struct AISettingsView: View {
                 // Show current language preview with resolved language
                 HStack {
                     Image(systemName: "info.circle")
-                        .foregroundColor(.blue)
+                        .foregroundStyle(.blue)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(settings.analysisLanguage.description)
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
 
                         // Show resolved language
                         Text(resolvedLanguageText)
                             .font(.caption)
                             .fontWeight(.medium)
-                            .foregroundColor(.primary)
+                            .foregroundStyle(.primary)
                     }
                 }
             } header: {
@@ -317,10 +331,44 @@ struct AISettingsView: View {
                 Text("Controls the language of AI-generated summaries, highlights, and other analysis results.")
             }
 
+            // MARK: - Transcript Format
+            Section {
+                Picker("Transcript Format", selection: $settings.transcriptFormat) {
+                    ForEach(TranscriptFormatForAI.allCases, id: \.self) { format in
+                        Label {
+                            VStack(alignment: .leading) {
+                                Text(format.displayName)
+                            }
+                        } icon: {
+                            Image(systemName: format.icon)
+                        }
+                        .tag(format)
+                    }
+                }
+                #if os(iOS)
+                .pickerStyle(.navigationLink)
+                #else
+                .pickerStyle(.menu)
+                #endif
+
+                // Show format description
+                HStack(alignment: .top) {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.blue)
+                    Text(settings.transcriptFormat.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Transcript Format")
+            } footer: {
+                Text("Sentence-based format is recommended for better AI analysis quality and lower token costs.")
+            }
+
             // MARK: - Other Provider Keys (Collapsed)
             Section {
                 DisclosureGroup("Configure Other Providers") {
-                    ForEach(CloudAIProvider.allCases.filter { $0 != settings.selectedProvider }, id: \.self) { provider in
+                    ForEach(CloudAIProvider.allCases.filter { $0 != settings.selectedProvider && $0.requiresAPIKey }, id: \.self) { provider in
                         VStack(alignment: .leading, spacing: 8) {
                             Label(provider.displayName, systemImage: provider.iconName)
                                 .font(.subheadline)
@@ -331,10 +379,10 @@ struct AISettingsView: View {
                             if !settings.apiKey(for: provider).isEmpty {
                                 HStack {
                                     Image(systemName: "checkmark.circle.fill")
-                                        .foregroundColor(.green)
+                                        .foregroundStyle(.green)
                                     Text("Key configured")
                                         .font(.caption)
-                                        .foregroundColor(.secondary)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
 
@@ -351,14 +399,14 @@ struct AISettingsView: View {
             Section {
                 HStack {
                     Image(systemName: "apple.intelligence")
-                        .foregroundColor(.blue)
+                        .foregroundStyle(.blue)
                     VStack(alignment: .leading) {
                         Text("Apple Foundation Models")
                             .font(.subheadline)
                             .fontWeight(.medium)
-                        Text("Used for quick tags & categorization (no API key needed)")
+                        Text("Used for quick tags, listening history summary & episode recommendations (no API key needed)")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -366,21 +414,28 @@ struct AISettingsView: View {
                 HStack {
                     if onDeviceAvailability.isAvailable {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                            .foregroundStyle(.green)
                         Text("Available and ready")
                             .font(.caption)
                     } else {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
+                            .foregroundStyle(.orange)
                         Text(onDeviceAvailability.message ?? "Not available")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
+                }
+
+                // On-device feature list
+                VStack(alignment: .leading, spacing: 6) {
+                    onDeviceFeatureRow(icon: "tag", title: "Quick Tags", description: "Auto-generate tags from episode metadata")
+                    onDeviceFeatureRow(icon: "clock.arrow.circlepath", title: "Listening History Summary", description: "Summarize your listening habits and patterns")
+                    onDeviceFeatureRow(icon: "star.leadinghalf.filled", title: "Episode Recommendations", description: "Get personalized episode suggestions")
                 }
             } header: {
                 Text("On-Device AI")
             } footer: {
-                Text("On-device AI handles simple tasks like generating tags from episode titles. No internet required, completely private.")
+                Text("On-device AI runs completely on your device. No internet required, completely private.")
             }
 
             // MARK: - Context Window Info
@@ -390,14 +445,14 @@ struct AISettingsView: View {
                         Text("On-Device")
                         Spacer()
                         Text("~4,096 tokens")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
 
                     HStack {
                         Text(settings.selectedProvider.displayName)
                         Spacer()
                         Text("\(formatNumber(settings.selectedProvider.contextWindowSize)) tokens")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .font(.subheadline)
@@ -450,7 +505,7 @@ struct AISettingsView: View {
         let binding: Binding<String> = {
             switch provider {
             case .applePCC:
-                return .constant("Apple Intelligence")
+                return .constant("Shortcuts")
             case .openai:
                 return $settings.selectedOpenAIModel
             case .claude:
@@ -495,7 +550,7 @@ struct AISettingsView: View {
                     // If current model is not in the list, select the first available
                     let currentModel: String
                     switch provider {
-                    case .applePCC: currentModel = "Apple Intelligence"
+                    case .applePCC: currentModel = "Shortcuts"
                     case .openai: currentModel = settings.selectedOpenAIModel
                     case .claude: currentModel = settings.selectedClaudeModel
                     case .gemini: currentModel = settings.selectedGeminiModel
@@ -570,16 +625,33 @@ struct AISettingsView: View {
         }
     }
 
+    private func onDeviceFeatureRow(icon: String, title: String, description: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(.blue)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Text(description)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private func instructionRow(number: Int, text: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Text("\(number).")
                 .font(.caption)
                 .fontWeight(.medium)
-                .foregroundColor(.blue)
+                .foregroundStyle(.blue)
                 .frame(width: 20, alignment: .leading)
             Text(text)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
     }
 

@@ -10,7 +10,7 @@ import Observation
 import SwiftData
 import SwiftUI
 import UserNotifications
-import os.log
+import OSLog
 
 // MARK: - Notification Navigation Target
 
@@ -50,16 +50,61 @@ class NotificationNavigationManager {
     // Improved lookup logic
     func findEpisode(podcastTitle: String, episodeTitle: String) -> (episode: PodcastEpisodeInfo, imageURL: String?, language: String)? {
         guard let context = modelContext else { return nil }
-        
+
         let descriptor = FetchDescriptor<PodcastInfoModel>(
             predicate: #Predicate { $0.title == podcastTitle }
         )
-        
+
         guard let podcast = try? context.fetch(descriptor).first,
               let episode = podcast.podcastInfo.episodes.first(where: { $0.title == episodeTitle }) else {
             return nil
         }
-        
+
         return (episode, podcast.podcastInfo.imageURL, "en")
+    }
+
+    /// Find episode by audio URL (for widget deep links)
+    func findEpisodeByAudioURL(_ audioURL: String) -> (episode: PodcastEpisodeInfo, podcastTitle: String, imageURL: String?, language: String)? {
+        guard let context = modelContext else { return nil }
+
+        let descriptor = FetchDescriptor<PodcastInfoModel>()
+
+        guard let podcasts = try? context.fetch(descriptor) else { return nil }
+
+        for podcast in podcasts {
+            if let episode = podcast.podcastInfo.episodes.first(where: { $0.audioURL == audioURL }) {
+                return (episode, podcast.podcastInfo.title, podcast.podcastInfo.imageURL, podcast.podcastInfo.language)
+            }
+        }
+
+        return nil
+    }
+
+    /// Navigate to episode from widget deep link
+    func navigateToEpisode(audioURL: String) {
+        guard let result = findEpisodeByAudioURL(audioURL) else { return }
+
+        navigationTarget = NotificationNavigationTarget(
+            podcastTitle: result.podcastTitle,
+            episodeTitle: result.episode.title,
+            audioURL: audioURL,
+            imageURL: result.imageURL ?? "",
+            language: result.language
+        )
+        shouldNavigate = true
+    }
+
+    /// Navigate to currently playing episode
+    func navigateToNowPlaying() {
+        guard let currentEpisode = EnhancedAudioManager.shared.currentEpisode else { return }
+
+        navigationTarget = NotificationNavigationTarget(
+            podcastTitle: currentEpisode.podcastTitle,
+            episodeTitle: currentEpisode.title,
+            audioURL: currentEpisode.audioURL,
+            imageURL: currentEpisode.imageURL ?? "",
+            language: "en"
+        )
+        shouldNavigate = true
     }
 }

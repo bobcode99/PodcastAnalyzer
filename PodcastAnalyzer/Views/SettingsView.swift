@@ -8,28 +8,27 @@ import UIKit
 
 struct SettingsView: View {
   @State private var viewModel = SettingsViewModel()
-  @State private var syncManager = BackgroundSyncManager.shared
+  private var syncManager: BackgroundSyncManager { .shared }
   @Environment(\.modelContext) var modelContext
   @State private var showAddFeedSheet = false
 
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
   var body: some View {
-    NavigationStack {
-      List {
+    List {
         // MARK: - Sync & Notifications Section
         Section {
           Toggle(isOn: Binding(get: { syncManager.isBackgroundSyncEnabled }, set: { syncManager.isBackgroundSyncEnabled = $0 })) {
             HStack {
               Image(systemName: "arrow.triangle.2.circlepath")
-                .foregroundColor(.blue)
+                .foregroundStyle(.blue)
                 .frame(width: 24)
               VStack(alignment: .leading, spacing: 2) {
                 Text("Background Sync")
                 if let lastSync = syncManager.lastSyncDate {
                   Text("Last: \(lastSync.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 }
               }
             }
@@ -38,7 +37,7 @@ struct SettingsView: View {
           Toggle(isOn: Binding(get: { syncManager.isNotificationsEnabled }, set: { syncManager.isNotificationsEnabled = $0 })) {
             HStack {
               Image(systemName: "bell.badge")
-                .foregroundColor(.orange)
+                .foregroundStyle(.orange)
                 .frame(width: 24)
               VStack(alignment: .leading, spacing: 2) {
                 Text("New Episode Notifications")
@@ -56,7 +55,7 @@ struct SettingsView: View {
             }) {
               HStack {
                 Image(systemName: "arrow.clockwise")
-                  .foregroundColor(.green)
+                  .foregroundStyle(.green)
                   .frame(width: 24)
                 Text("Sync Now")
                 Spacer()
@@ -82,9 +81,25 @@ struct SettingsView: View {
           )) {
             HStack {
               Image(systemName: "photo")
-                .foregroundColor(.blue)
+                .foregroundStyle(.blue)
                 .frame(width: 24)
               Text("Show Episode Artwork")
+            }
+          }
+          Toggle(isOn: Binding(
+            get: { viewModel.showForYouRecommendations },
+            set: { viewModel.setShowForYouRecommendations($0) }
+          )) {
+            HStack {
+              Image(systemName: "star.leadinghalf.filled")
+                .foregroundStyle(.purple)
+                .frame(width: 24)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("For You Recommendations")
+                Text("AI-powered episode suggestions on Home")
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+              }
             }
           }
         } header: {
@@ -100,13 +115,13 @@ struct SettingsView: View {
           }) {
             HStack {
               Image(systemName: "plus.circle.fill")
-                .foregroundColor(.blue)
+                .foregroundStyle(.blue)
                 .font(.title2)
               Text("Add RSS Feed")
-                .foregroundColor(.primary)
+                .foregroundStyle(.primary)
               Spacer()
               Image(systemName: "chevron.right")
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
                 .font(.caption)
             }
           }
@@ -125,7 +140,7 @@ struct SettingsView: View {
           } label: {
             HStack {
               Image(systemName: "gauge.with.dots.needle.33percent")
-                .foregroundColor(.blue)
+                .foregroundStyle(.blue)
                 .frame(width: 24)
               Text("Default Speed")
             }
@@ -140,7 +155,7 @@ struct SettingsView: View {
           )) {
             HStack {
               Image(systemName: "shuffle")
-                .foregroundColor(.purple)
+                .foregroundStyle(.purple)
                 .frame(width: 24)
               Text("Auto-Play Random Episode")
             }
@@ -160,7 +175,7 @@ struct SettingsView: View {
           } label: {
             HStack {
               Image(systemName: "globe")
-                .foregroundColor(.blue)
+                .foregroundStyle(.blue)
                 .frame(width: 24)
               Text("Default Region")
             }
@@ -174,6 +189,45 @@ struct SettingsView: View {
           Text("Region for browsing top podcasts on Home")
         }
 
+        // MARK: - Translation Section
+        Section {
+          Picker(selection: Binding(
+            get: { SubtitleSettingsManager.shared.targetLanguage },
+            set: { SubtitleSettingsManager.shared.targetLanguage = $0 }
+          )) {
+            ForEach(TranslationTargetLanguage.allCases, id: \.self) { language in
+              Text(language.displayName).tag(language)
+            }
+          } label: {
+            HStack {
+              Image(systemName: "translate")
+                .foregroundStyle(.blue)
+                .frame(width: 24)
+              Text("Default Translation Language")
+            }
+          }
+          Toggle(isOn: Binding(
+            get: { SubtitleSettingsManager.shared.autoTranslateOnLoad },
+            set: { SubtitleSettingsManager.shared.autoTranslateOnLoad = $0 }
+          )) {
+            HStack {
+              Image(systemName: "text.bubble")
+                .foregroundStyle(.purple)
+                .frame(width: 24)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Auto-Translate on Load")
+                Text("Translate transcripts when loaded")
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+              }
+            }
+          }
+        } header: {
+          Text("Translation")
+        } footer: {
+          Text("Default target language for translating transcripts and episode descriptions")
+        }
+
         // MARK: - Transcript Section
         Section {
           // Language picker
@@ -184,7 +238,7 @@ struct SettingsView: View {
           } label: {
             HStack {
               Image(systemName: "globe")
-                .foregroundColor(.blue)
+                .foregroundStyle(.blue)
                 .frame(width: 24)
               Text("Language")
             }
@@ -196,7 +250,7 @@ struct SettingsView: View {
           // Speech model status
           HStack {
             Image(systemName: "text.bubble")
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
               .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -207,6 +261,23 @@ struct SettingsView: View {
             Spacer()
 
             transcriptActionButton
+          }
+
+          Toggle(isOn: Binding(
+            get: { SubtitleSettingsManager.shared.autoGenerateTranscripts },
+            set: { SubtitleSettingsManager.shared.autoGenerateTranscripts = $0 }
+          )) {
+            HStack {
+              Image(systemName: "waveform")
+                .foregroundStyle(.orange)
+                .frame(width: 24)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Auto-Generate Transcripts")
+                Text("Generate when episodes are downloaded")
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+              }
+            }
           }
         } header: {
           Text("Transcript")
@@ -223,18 +294,18 @@ struct SettingsView: View {
           } label: {
             HStack {
               Image(systemName: "sparkles")
-                .foregroundColor(.purple)
+                .foregroundStyle(.purple)
                 .frame(width: 24)
               Text("AI Settings")
               Spacer()
               if AISettingsManager.shared.hasConfiguredProvider {
                 Text(AISettingsManager.shared.selectedProvider.displayName)
                   .font(.caption)
-                  .foregroundColor(.secondary)
+                  .foregroundStyle(.secondary)
               } else {
                 Text("Not configured")
                   .font(.caption)
-                  .foregroundColor(.orange)
+                  .foregroundStyle(.orange)
               }
             }
           }
@@ -244,6 +315,24 @@ struct SettingsView: View {
           Text("Configure cloud AI providers (OpenAI, Claude, Gemini, Grok) for transcript analysis")
         }
 
+        // MARK: - Insights Section
+        Section {
+          NavigationLink {
+            ListeningStatsView()
+          } label: {
+            HStack {
+              Image(systemName: "chart.bar.fill")
+                .foregroundStyle(.indigo)
+                .frame(width: 24)
+              Text("Listening Stats")
+            }
+          }
+        } header: {
+          Text("Insights")
+        } footer: {
+          Text("View your listening history, top shows, and trends")
+        }
+
         // MARK: - Data Management Section
         Section {
           NavigationLink {
@@ -251,7 +340,7 @@ struct SettingsView: View {
           } label: {
             HStack {
               Image(systemName: "externaldrive")
-                .foregroundColor(.gray)
+                .foregroundStyle(.gray)
                 .frame(width: 24)
               Text("Data Management")
             }
@@ -266,12 +355,12 @@ struct SettingsView: View {
         Section {
           HStack {
             Image(systemName: "info.circle")
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
               .frame(width: 24)
             Text("Version")
             Spacer()
             Text("1.0.0")
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
         } header: {
           Text("About")
@@ -293,7 +382,6 @@ struct SettingsView: View {
         viewModel.loadFeeds(modelContext: modelContext)
         viewModel.checkTranscriptModelStatus()
       }
-    }
   }
 
   // MARK: - Notification Status Text
@@ -304,15 +392,15 @@ struct SettingsView: View {
     case .authorized:
       Text("Enabled")
         .font(.caption2)
-        .foregroundColor(.green)
+        .foregroundStyle(.green)
     case .denied:
       Text("Denied - Enable in Settings")
         .font(.caption2)
-        .foregroundColor(.red)
+        .foregroundStyle(.red)
     case .notDetermined:
       Text("Permission required")
         .font(.caption2)
-        .foregroundColor(.orange)
+        .foregroundStyle(.orange)
     default:
       EmptyView()
     }
@@ -326,28 +414,28 @@ struct SettingsView: View {
     case .checking:
       Text("Checking...")
         .font(.caption)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
     case .notDownloaded:
       Text("Not installed")
         .font(.caption)
-        .foregroundColor(.orange)
+        .foregroundStyle(.orange)
     case .downloading(let progress):
       Text("Downloading \(Int(progress * 100))%")
         .font(.caption)
-        .foregroundColor(.blue)
+        .foregroundStyle(.blue)
     case .ready:
       Text("Ready")
         .font(.caption)
-        .foregroundColor(.green)
+        .foregroundStyle(.green)
     case .error(let message):
       Text(message)
         .font(.caption)
-        .foregroundColor(.red)
+        .foregroundStyle(.red)
         .lineLimit(1)
     case .simulatorNotSupported:
       Text("Requires physical device")
         .font(.caption)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
     }
   }
 
@@ -371,16 +459,16 @@ struct SettingsView: View {
           viewModel.cancelTranscriptDownload()
         } label: {
           Image(systemName: "xmark.circle.fill")
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         }
         .buttonStyle(.plain)
       }
     case .ready:
       Image(systemName: "checkmark.circle.fill")
-        .foregroundColor(.green)
+        .foregroundStyle(.green)
     case .simulatorNotSupported:
       Image(systemName: "desktopcomputer")
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
     }
   }
 
@@ -416,7 +504,7 @@ struct FeedRowView: View {
             image.resizable().scaledToFill()
           case .failure:
             Image(systemName: "mic.fill")
-              .foregroundColor(.purple)
+              .foregroundStyle(.purple)
           @unknown default:
             EmptyView()
           }
@@ -429,7 +517,7 @@ struct FeedRowView: View {
           .frame(width: 50, height: 50)
           .overlay(
             Image(systemName: "mic.fill")
-              .foregroundColor(.purple)
+              .foregroundStyle(.purple)
           )
       }
 
@@ -441,7 +529,7 @@ struct FeedRowView: View {
 
         Text("\(feed.podcastInfo.episodes.count) episodes")
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
     }
     .padding(.vertical, 4)
@@ -462,7 +550,7 @@ struct AddFeedView: View {
         // Icon
         Image(systemName: "antenna.radiowaves.left.and.right")
           .font(.system(size: 60))
-          .foregroundColor(.blue)
+          .foregroundStyle(.blue)
           .padding(.top, 40)
 
         // Title and description
@@ -473,7 +561,7 @@ struct AddFeedView: View {
 
           Text("Enter the RSS feed URL to subscribe")
             .font(.subheadline)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
         }
 
@@ -483,7 +571,7 @@ struct AddFeedView: View {
             .textFieldStyle(.plain)
             .padding(16)
             .background(Color.platformSystemGray6)
-            .cornerRadius(12)
+            .clipShape(.rect(cornerRadius: 12))
             .autocorrectionDisabled()
             #if os(iOS)
             .textInputAutocapitalization(.never)
@@ -499,23 +587,23 @@ struct AddFeedView: View {
                 .scaleEffect(0.8)
               Text("Validating feed...")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             }
           } else if !viewModel.successMessage.isEmpty {
             HStack(spacing: 6) {
               Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
+                .foregroundStyle(.green)
               Text(viewModel.successMessage)
                 .font(.caption)
-                .foregroundColor(.green)
+                .foregroundStyle(.green)
             }
           } else if !viewModel.errorMessage.isEmpty {
             HStack(spacing: 6) {
               Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.red)
+                .foregroundStyle(.red)
               Text(viewModel.errorMessage)
                 .font(.caption)
-                .foregroundColor(.red)
+                .foregroundStyle(.red)
             }
           }
         }
@@ -527,7 +615,8 @@ struct AddFeedView: View {
         Button(action: {
           viewModel.addRssLink(modelContext: modelContext) {
             // Dismiss on success
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            Task {
+              try? await Task.sleep(for: .seconds(1.5))
               onDismiss()
             }
           }
@@ -542,7 +631,7 @@ struct AddFeedView: View {
             }
           }
           .font(.headline)
-          .foregroundColor(.white)
+          .foregroundStyle(.white)
           .frame(maxWidth: .infinity)
           .padding(.vertical, 16)
           .background(

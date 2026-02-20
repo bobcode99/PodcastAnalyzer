@@ -8,11 +8,35 @@
 import SwiftData
 import SwiftUI
 
+/// Navigation state for expanded player -> main nav transitions
+enum ExpandedPlayerNavigation: Equatable {
+  case none
+  case episodeDetail(PodcastEpisodeInfo, podcastTitle: String, imageURL: String?)
+  case podcastEpisodeList(PodcastInfoModel)
+
+  static func == (lhs: ExpandedPlayerNavigation, rhs: ExpandedPlayerNavigation) -> Bool {
+    switch (lhs, rhs) {
+    case (.none, .none):
+      return true
+    case let (.episodeDetail(e1, t1, i1), .episodeDetail(e2, t2, i2)):
+      return e1.title == e2.title && t1 == t2 && i1 == i2
+    case let (.podcastEpisodeList(p1), .podcastEpisodeList(p2)):
+      return p1.id == p2.id
+    default:
+      return false
+    }
+  }
+}
+
 struct MiniPlayerBar: View {
   @Environment(\.tabViewBottomAccessoryPlacement) var placement
   @Environment(\.modelContext) private var modelContext
-  @State private var audioManager = EnhancedAudioManager.shared
+  // Access singleton directly without @State to avoid unnecessary observation overhead
+  private var audioManager: EnhancedAudioManager { .shared }
   @State private var showExpandedPlayer = false
+
+  // Pending navigation after expanded player dismisses
+  @Binding var pendingNavigation: ExpandedPlayerNavigation
 
   private var progress: Double {
     guard audioManager.duration > 0 else { return 0 }
@@ -22,56 +46,54 @@ struct MiniPlayerBar: View {
   var body: some View {
     VStack(spacing: 0) {
       // Progress bar (hidden or 0 if not playing)
-      GeometryReader { geometry in
-        ZStack(alignment: .leading) {
-          Rectangle()
-            .fill(Color.gray.opacity(0.3))
-            .frame(height: 3)
-
-          Rectangle()
-            .fill(Color.blue)
-            .frame(
-              width: geometry.size.width * CGFloat(progress),
-              height: 3
-            )
-        }
-      }
-      .frame(height: 3)
-      .opacity(audioManager.currentEpisode == nil ? 0 : 1)
+      ProgressView(value: progress)
+        .progressViewStyle(.linear)
+        .tint(.blue)
+        .frame(height: 3)
+        .opacity(audioManager.currentEpisode == nil ? 0 : 1)
 
       // Main content
       HStack(spacing: 12) {
-        // Artwork or Placeholder
-        Group {
-          if let urlString = audioManager.currentEpisode?.imageURL, let url = URL(string: urlString) {
-            AsyncImage(url: url) { phase in
-              if let image = phase.image {
-                image.resizable().aspectRatio(contentMode: .fill)
+        // Tappable area: artwork + episode info opens expanded player
+        Button {
+          if audioManager.currentEpisode != nil {
+            showExpandedPlayer = true
+          }
+        } label: {
+          HStack(spacing: 12) {
+            // Artwork or Placeholder
+            Group {
+              if let urlString = audioManager.currentEpisode?.imageURL, let url = URL(string: urlString) {
+
+                CachedAsyncImage(url: url) { image in
+                  image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                  Color.gray
+                }
               } else {
-                Color.gray
+                RoundedRectangle(cornerRadius: 8)
+                  .fill(Color.gray.opacity(0.3))
+                  .overlay(Image(systemName: "music.note").foregroundStyle(.secondary))
               }
             }
-          } else {
-            RoundedRectangle(cornerRadius: 8)
-              .fill(Color.gray.opacity(0.3))
-              .overlay(Image(systemName: "music.note").foregroundColor(.secondary))
+            .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            // Episode info
+            VStack(alignment: .leading, spacing: 2) {
+              Text(audioManager.currentEpisode?.title ?? "Not Playing")
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .lineLimit(1)
+
+              Text(audioManager.currentEpisode?.podcastTitle ?? "Select an episode to play")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
           }
         }
-        .frame(width: 48, height: 48)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-        // Episode info
-        VStack(alignment: .leading, spacing: 2) {
-          Text(audioManager.currentEpisode?.title ?? "Not Playing")
-            .font(.subheadline)
-            .fontWeight(.medium)
-            .lineLimit(1)
-
-          Text(audioManager.currentEpisode?.podcastTitle ?? "Select an episode to play")
-            .font(.caption)
-            .foregroundColor(.secondary)
-            .lineLimit(1)
-        }
+        .buttonStyle(.plain)
 
         Spacer()
 
@@ -82,22 +104,23 @@ struct MiniPlayerBar: View {
           Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
             .font(.title2)
             .frame(width: 32)
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
         }
 
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 10)
-      .background(Color.platformSecondaryBackground)
-      .contentShape(Rectangle())
-      .onTapGesture {
-        if audioManager.currentEpisode != nil {
-          showExpandedPlayer = true
-        }
-      }
+      .glassEffect(Glass.regular)
     }
     .sheet(isPresented: $showExpandedPlayer) {
-      ExpandedPlayerView()
+      ExpandedPlayerView(
+        onNavigateToEpisodeDetail: { episode, podcastTitle, imageURL in
+          pendingNavigation = .episodeDetail(episode, podcastTitle: podcastTitle, imageURL: imageURL)
+        },
+        onNavigateToPodcast: { podcast in
+          pendingNavigation = .podcastEpisodeList(podcast)
+        }
+      )
     }
   }
 
@@ -120,21 +143,24 @@ struct MiniPlayerBar: View {
     audioManager.restoreLastEpisode()
     if audioManager.currentEpisode != nil {
       // Successfully restored - start playing
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+      Task {
+        try? await Task.sleep(for: .seconds(0.1))
         audioManager.resume()
       }
       return
     }
 
-    // Case 4: No last episode - find one from SwiftData
-    if let episode = findEpisodeToPlay() {
-      audioManager.play(
-        episode: episode,
-        audioURL: episode.audioURL,
-        startTime: 0,
-        imageURL: episode.imageURL,
-        useDefaultSpeed: true
-      )
+    // Case 4: No last episode - find one from SwiftData (async to avoid blocking UI)
+    Task { @MainActor in
+      if let episode = findEpisodeToPlay() {
+        audioManager.play(
+          episode: episode,
+          audioURL: episode.audioURL,
+          startTime: 0,
+          imageURL: episode.imageURL,
+          useDefaultSpeed: true
+        )
+      }
     }
   }
 
@@ -200,5 +226,5 @@ struct MiniPlayerBar: View {
 // MARK: - Preview
 
 #Preview {
-  MiniPlayerBar()
+  MiniPlayerBar(pendingNavigation: .constant(.none))
 }

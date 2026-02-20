@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import os.log
+import OSLog
 
 #if os(iOS)
 import UIKit
@@ -38,7 +38,7 @@ class ShortcutsAIService {
     private var timeoutTask: Task<Void, Never>?
 
     // Default shortcut name
-    static let defaultShortcutName = "Podcast AI Analysis"
+    static let defaultShortcutName = "PA-WithAIViaGPT" // CHANGE THIS TO THE NAME OF YOUR SHORTCUT
 
     private init() {
         self.shortcutName = UserDefaults.standard.string(forKey: "shortcuts_ai_name")
@@ -249,54 +249,45 @@ class ShortcutsAIService {
     }
 
     /// Nonisolated helper to execute the shortcuts CLI process
+    /// Detached to avoid blocking @MainActor with synchronous Process I/O
     private nonisolated static func executeShortcutProcess(
         shortcutName: String,
         input: String
     ) async throws -> ShortcutCLIResult {
-        // Run process on background thread
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
-                process.arguments = ["run", shortcutName]
+        try await Task.detached(priority: .userInitiated) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
+            process.arguments = ["run", shortcutName]
 
-                let outputPipe = Pipe()
-                let errorPipe = Pipe()
-                process.standardOutput = outputPipe
-                process.standardError = errorPipe
+            let outputPipe = Pipe()
+            let errorPipe = Pipe()
+            process.standardOutput = outputPipe
+            process.standardError = errorPipe
 
-                do {
-                    try process.run()
-                    process.waitUntilExit()
+            try process.run()
+            process.waitUntilExit()
 
-                    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
 
-                    let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let errorOutput = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let errorOutput = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                    if process.terminationStatus != 0 {
-                        let errorMsg = errorOutput ?? "Shortcut execution failed (exit code: \(process.terminationStatus))"
-                        continuation.resume(returning: ShortcutCLIResult(output: nil, error: errorMsg))
-                    } else if let output = output, !output.isEmpty {
-                        continuation.resume(returning: ShortcutCLIResult(output: output, error: nil))
-                    } else {
-                        // Check clipboard for result (on main queue)
-                        DispatchQueue.main.async {
-                            if let clipboardResult = PlatformClipboard.string,
-                               !clipboardResult.isEmpty,
-                               clipboardResult != input {
-                                continuation.resume(returning: ShortcutCLIResult(output: clipboardResult, error: nil))
-                            } else {
-                                continuation.resume(returning: ShortcutCLIResult(output: nil, error: nil))
-                            }
-                        }
-                    }
-                } catch {
-                    continuation.resume(throwing: error)
+            if process.terminationStatus != 0 {
+                let errorMsg = errorOutput ?? "Shortcut execution failed (exit code: \(process.terminationStatus))"
+                return ShortcutCLIResult(output: nil, error: errorMsg)
+            } else if let output = output, !output.isEmpty {
+                return ShortcutCLIResult(output: output, error: nil)
+            } else {
+                // Check clipboard for result on MainActor (pasteboard requires main thread)
+                let clipboardResult = await MainActor.run { PlatformClipboard.string }
+                if let clipboardResult, !clipboardResult.isEmpty, clipboardResult != input {
+                    return ShortcutCLIResult(output: clipboardResult, error: nil)
+                } else {
+                    return ShortcutCLIResult(output: nil, error: nil)
                 }
             }
-        }
+        }.value
     }
     #endif
 
@@ -383,14 +374,15 @@ class ShortcutsAIService {
 
     // MARK: - Analyze Transcript
 
-    /// Analyze transcript using Shortcuts with Apple Intelligence
+    /// Analyze transcript using Shortcuts
     func analyzeTranscript(
         transcript: String,
         episodeTitle: String,
         podcastTitle: String,
         analysisType: CloudAnalysisType,
-        timeout: TimeInterval = 180
+        timeout: TimeInterval? = nil
     ) async throws -> CloudAnalysisResult {
+        let timeout = timeout ?? (AISettingsManager.shared.shortcutsTimeout * 1.5)
         let prompt = buildPrompt(
             transcript: transcript,
             episodeTitle: episodeTitle,
@@ -408,7 +400,7 @@ class ShortcutsAIService {
             parsedHighlights: nil,
             parsedFullAnalysis: nil,
             provider: .applePCC,
-            model: "Apple Intelligence (via Shortcuts)",
+            model: "Shortcuts",
             timestamp: Date()
         )
     }

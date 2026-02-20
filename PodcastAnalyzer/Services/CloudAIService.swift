@@ -3,11 +3,11 @@
 //  PodcastAnalyzer
 //
 //  Service for cloud-based AI analysis using user-provided API keys (BYOK)
-//  Supports OpenAI, Claude, Gemini, Grok, and Apple Intelligence via Shortcuts
+//  Supports OpenAI, Claude, Gemini, Grok, and Shortcuts integration
 //
 
 import Foundation
-import os.log
+import OSLog
 #if os(iOS)
 import UIKit
 #endif
@@ -46,8 +46,8 @@ final class CloudAIService {
     func fetchAvailableModels(for provider: CloudAIProvider, apiKey: String) async throws -> [String] {
         switch provider {
         case .applePCC:
-            // Apple PCC uses Shortcuts with Apple Intelligence - no model selection needed
-            return ["Apple Intelligence"]
+            // Shortcuts - no model selection needed
+            return ["Shortcuts"]
         case .openai:
             return try await fetchOpenAIModels(apiKey: apiKey)
         case .claude:
@@ -404,7 +404,7 @@ final class CloudAIService {
 
     // MARK: - Apple PCC via Shortcuts
 
-    /// Analyze transcript using Apple Intelligence via Shortcuts
+    /// Analyze transcript using Shortcuts
     private func analyzeWithShortcuts(
         transcript: String,
         episodeTitle: String,
@@ -433,7 +433,7 @@ final class CloudAIService {
         let shortcutsService = ShortcutsAIService.shared
 
         do {
-            let rawResult = try await shortcutsService.runShortcut(input: prompt, timeout: 180)
+            let rawResult = try await shortcutsService.runShortcut(input: prompt, timeout: settings.shortcutsTimeout * 1.5)
 
             progressCallback?("Parsing response...", 0.8)
 
@@ -494,7 +494,7 @@ final class CloudAIService {
                 parsedHighlights: parsedHighlights,
                 parsedFullAnalysis: parsedFullAnalysis,
                 provider: .applePCC,
-                model: "Apple Intelligence (via Shortcuts)",
+                model: "Shortcuts",
                 timestamp: Date(),
                 jsonParseWarning: jsonParseWarning
             )
@@ -540,7 +540,7 @@ final class CloudAIService {
         return response
     }
 
-    /// Ask a question using Apple Intelligence via Shortcuts
+    /// Ask a question using Shortcuts
     private func askQuestionWithShortcuts(
         question: String,
         transcript: String,
@@ -582,7 +582,7 @@ final class CloudAIService {
         let shortcutsService = ShortcutsAIService.shared
 
         do {
-            let rawResult = try await shortcutsService.runShortcut(input: prompt, timeout: 180)
+            let rawResult = try await shortcutsService.runShortcut(input: prompt, timeout: settings.shortcutsTimeout * 1.5)
 
             progressCallback?("Parsing response...", 0.8)
 
@@ -608,7 +608,7 @@ final class CloudAIService {
                 relatedTopics: parsed?.relatedTopics,
                 sources: parsed?.sources,
                 provider: .applePCC,
-                model: "Apple Intelligence (via Shortcuts)",
+                model: "Shortcuts",
                 timestamp: Date(),
                 jsonParseWarning: jsonParseWarning
             )
@@ -747,11 +747,15 @@ final class CloudAIService {
         let apiKey = settings.currentAPIKey
         let model = settings.currentModel
 
+        // Format transcript based on user's preference (segment-based vs sentence-based)
+        let formattedTranscript = settings.transcriptFormat.formatTranscript(transcript)
+        logger.info("Transcript formatted using \(self.settings.transcriptFormat.rawValue) format")
+
         // Handle Apple PCC via Shortcuts
         if provider == .applePCC {
             progressCallback?("Preparing for Shortcuts...", 0.2)
             return try await analyzeWithShortcuts(
-                transcript: transcript,
+                transcript: formattedTranscript,
                 episodeTitle: episodeTitle,
                 podcastTitle: podcastTitle,
                 analysisType: analysisType,
@@ -772,7 +776,7 @@ final class CloudAIService {
 
         let systemPrompt = buildSystemPrompt(for: analysisType, podcastLanguage: podcastLanguage)
         let userPrompt = buildUserPrompt(
-            transcript: transcript,
+            transcript: formattedTranscript,
             episodeTitle: episodeTitle,
             podcastTitle: podcastTitle,
             analysisType: analysisType
@@ -853,9 +857,12 @@ final class CloudAIService {
 
         progressCallback?("Preparing analysis...", 0.1)
 
+        // Format transcript based on user's preference (segment-based vs sentence-based)
+        let formattedTranscript = settings.transcriptFormat.formatTranscript(transcript)
+
         let systemPrompt = buildSystemPrompt(for: analysisType, podcastLanguage: podcastLanguage)
         let userPrompt = buildUserPrompt(
-            transcript: transcript,
+            transcript: formattedTranscript,
             episodeTitle: episodeTitle,
             podcastTitle: podcastTitle,
             analysisType: analysisType
@@ -944,11 +951,14 @@ final class CloudAIService {
         let apiKey = settings.currentAPIKey
         let model = settings.currentModel
 
+        // Format transcript based on user's preference (segment-based vs sentence-based)
+        let formattedTranscript = settings.transcriptFormat.formatTranscript(transcript)
+
         // Handle Apple PCC via Shortcuts
         if provider == .applePCC {
             return try await askQuestionWithShortcuts(
                 question: question,
-                transcript: transcript,
+                transcript: formattedTranscript,
                 episodeTitle: episodeTitle,
                 podcastLanguage: podcastLanguage,
                 progressCallback: progressCallback
@@ -984,13 +994,17 @@ final class CloudAIService {
         }\(languageLine)
         """
 
+        let timestampNote = settings.transcriptFormat == .segmentBased
+            ? "\nNote: The transcript includes timestamps in [MM:SS] or [H:MM:SS] format. Include relevant timestamps in your sources."
+            : ""
+
         let userPrompt = """
         Episode: \(episodeTitle)
 
-        Question: \(question)
+        Question: \(question)\(timestampNote)
 
         Transcript:
-        \(transcript)
+        \(formattedTranscript)
         """
 
         progressCallback?("Getting answer from \(provider.displayName)...", 0.5)
@@ -1126,11 +1140,16 @@ final class CloudAIService {
             instruction = "Please provide a complete analysis of this podcast episode."
         }
 
+        // When using segment-based format, tell the AI timestamps are present so it uses them
+        let timestampNote = settings.transcriptFormat == .segmentBased
+            ? "\nNote: The transcript includes timestamps in [MM:SS] or [H:MM:SS] format. Reference these timestamps when relevant (e.g. for highlights, quotes, and key moments)."
+            : ""
+
         return """
         Podcast: \(podcastTitle)
         Episode: \(episodeTitle)
 
-        \(instruction)
+        \(instruction)\(timestampNote)
 
         Transcript:
         \(transcript)
@@ -1631,7 +1650,7 @@ struct CloudAnalysisResult {
     let provider: CloudAIProvider
     let model: String
     let timestamp: Date
-    /// Warning message when JSON parsing fails (e.g., when using Apple Intelligence via Shortcuts)
+    /// Warning message when JSON parsing fails (e.g., when using Shortcuts)
     let jsonParseWarning: String?
 
     init(

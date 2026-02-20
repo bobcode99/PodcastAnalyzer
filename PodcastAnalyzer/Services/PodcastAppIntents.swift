@@ -361,11 +361,150 @@ struct AnalysisTypeQuery: EntityQuery {
     }
 }
 
+// MARK: - Siri Playback Intents
+
+/// Intent to play the last episode or resume playback
+@available(iOS 16.0, macOS 13.0, *)
+struct PlayLastEpisodeIntent: AppIntent {
+    static let title: LocalizedStringResource = "Play My Podcast"
+    static let description = IntentDescription(
+        "Resume playback of the last podcast episode or start a new one"
+    )
+
+    static let openAppWhenRun: Bool = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        let audioManager = EnhancedAudioManager.shared
+
+        // If nothing is loaded, try to restore the last episode
+        if audioManager.currentEpisode == nil {
+            audioManager.restoreLastEpisode()
+        }
+
+        // Resume playback
+        audioManager.resume()
+
+        return .result()
+    }
+}
+
+/// Intent to play or pause the current episode
+@available(iOS 16.0, macOS 13.0, *)
+struct PlayPauseIntent: AppIntent {
+    static let title: LocalizedStringResource = "Play/Pause Podcast"
+    static let description = IntentDescription(
+        "Toggle playback of the current podcast episode"
+    )
+
+    static let openAppWhenRun: Bool = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        let audioManager = EnhancedAudioManager.shared
+
+        if audioManager.isPlaying {
+            audioManager.pause()
+        } else {
+            // If nothing is loaded, try to restore the last episode first
+            if audioManager.currentEpisode == nil {
+                audioManager.restoreLastEpisode()
+            }
+            audioManager.resume()
+        }
+
+        return .result()
+    }
+}
+
+/// Intent to pause playback
+@available(iOS 16.0, macOS 13.0, *)
+struct PausePodcastIntent: AppIntent {
+    static let title: LocalizedStringResource = "Pause Podcast"
+    static let description = IntentDescription(
+        "Pause the currently playing podcast episode"
+    )
+
+    static let openAppWhenRun: Bool = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        EnhancedAudioManager.shared.pause()
+        return .result()
+    }
+}
+
+/// Intent to skip forward in the current episode
+@available(iOS 16.0, macOS 13.0, *)
+struct SkipForwardIntent: AppIntent {
+    static let title: LocalizedStringResource = "Skip Forward"
+    static let description = IntentDescription(
+        "Skip forward 15 seconds in the current episode"
+    )
+
+    static let openAppWhenRun: Bool = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        EnhancedAudioManager.shared.skipForward()
+        return .result()
+    }
+}
+
+/// Intent to skip backward in the current episode
+@available(iOS 16.0, macOS 13.0, *)
+struct SkipBackwardIntent: AppIntent {
+    static let title: LocalizedStringResource = "Skip Backward"
+    static let description = IntentDescription(
+        "Skip backward 15 seconds in the current episode"
+    )
+
+    static let openAppWhenRun: Bool = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        EnhancedAudioManager.shared.skipBackward()
+        return .result()
+    }
+}
+
 // MARK: - App Shortcuts Provider
 
 @available(iOS 16.0, macOS 13.0, *)
 struct PodcastAnalyzerShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: PlayLastEpisodeIntent(),
+            phrases: [
+                "Play my podcast with \(.applicationName)",
+                "Resume podcast in \(.applicationName)",
+                "Play podcast using \(.applicationName)",
+                "Continue listening with \(.applicationName)"
+            ],
+            shortTitle: "Play Podcast",
+            systemImageName: "play.fill"
+        )
+
+        AppShortcut(
+            intent: PlayPauseIntent(),
+            phrases: [
+                "Play pause \(.applicationName)",
+                "Toggle playback in \(.applicationName)"
+            ],
+            shortTitle: "Play/Pause",
+            systemImageName: "playpause.fill"
+        )
+
+        AppShortcut(
+            intent: PausePodcastIntent(),
+            phrases: [
+                "Pause \(.applicationName)",
+                "Stop podcast in \(.applicationName)"
+            ],
+            shortTitle: "Pause",
+            systemImageName: "pause.fill"
+        )
+
         AppShortcut(
             intent: ImportPodcastsIntent(),
             phrases: [

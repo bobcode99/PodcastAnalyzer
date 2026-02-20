@@ -7,7 +7,7 @@
 
 import Foundation
 import SwiftData
-import os.log
+import OSLog
 
 /// Tracks the status of a transcript generation job
 enum TranscriptJobStatus: Equatable {
@@ -58,19 +58,21 @@ class TranscriptManager {
     return min(max(processorCount / 2, 2), 4)
   }()
   
-  // Dedicated background queue for CPU-intensive transcription work
-  private let transcriptionQueue = DispatchQueue(
-    label: "com.podcast.analyzer.transcription",
-    qos: .userInitiated,
-    attributes: .concurrent
-  )
-
   // Queue for pending jobs
   private var pendingJobs: [TranscriptJob] = []
   private var runningJobIds: Set<String> = []
   private var processingTasks: [String: Task<Void, Never>] = [:]
 
   private init() {}
+
+  deinit {
+    MainActor.assumeIsolated {
+      for task in processingTasks.values {
+        task.cancel()
+      }
+      processingTasks.removeAll()
+    }
+  }
 
   // MARK: - Public API
 
@@ -184,10 +186,19 @@ class TranscriptManager {
     // Use Task.detached to ensure CPU-intensive work runs on a background thread
     // This prevents blocking the main actor and allows better parallelization
     await Task.detached(priority: .userInitiated) { [weak self] in
-      guard let self = self else { return }
-      
+      guard let self = self, !Task.isCancelled else { return }
+
       do {
+        // Verify audio file exists before starting
         let audioURL = URL(fileURLWithPath: job.audioPath)
+        guard FileManager.default.fileExists(atPath: job.audioPath) else {
+          throw NSError(
+            domain: "TranscriptManager", code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "Audio file not found: \(job.audioPath)"]
+          )
+        }
+        
+        // Create a fresh TranscriptService for each job to avoid state issues
         let transcriptService = TranscriptService(language: job.language)
 
         // Check if model is ready
@@ -226,7 +237,7 @@ class TranscriptManager {
 
         // CPU-intensive transcription work happens here
         // Task.detached ensures this runs on a background thread
-        for try await progressUpdate in await transcriptService.audioToSRTWithProgress(
+        for try await progressUpdate in await transcriptService.audioToSRTChunkedWithProgress(
           inputFile: audioURL)
         {
           await MainActor.run {

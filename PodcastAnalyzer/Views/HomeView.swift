@@ -22,49 +22,55 @@ struct HomeView: View {
   @State private var showSubscribeSheet = false
 
   var body: some View {
-    NavigationStack {
-      ScrollView {
-        VStack(alignment: .leading, spacing: 24) {
-          // Up Next Section
-          upNextSection
+    ScrollView {
+      VStack(alignment: .leading, spacing: 24) {
+        // Up Next Section
+        upNextSection
 
-          // Popular Shows Section
-          popularShowsSection
+        // For You Section (on-device AI recommendations)
+        if #available(iOS 26.0, macOS 26.0, *) {
+          forYouSection
         }
-        .padding(.vertical)
+
+        // Popular Shows Section
+        popularShowsSection
       }
-      .navigationTitle(Constants.homeString)
-      .platformToolbarTitleDisplayMode()
-      .toolbar {
-        ToolbarItem(placement: .primaryAction) {
-          Button(action: { showRegionPicker = true }) {
-            HStack(spacing: 4) {
-              Text(viewModel.selectedRegionName)
-                .font(.caption)
-              Image(systemName: "chevron.down")
-                .font(.caption2)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.gray.opacity(0.15))
-            .cornerRadius(12)
+      .padding(.vertical)
+    }
+    .navigationTitle(Constants.homeString)
+    .platformToolbarTitleDisplayMode()
+    .toolbar {
+      ToolbarItem(placement: .primaryAction) {
+        Button(action: { showRegionPicker = true }) {
+          HStack(spacing: 4) {
+            Text(viewModel.selectedRegionFlag)
+              .font(.title3)
+            Image(systemName: "chevron.down")
+              .font(.caption2)
           }
+          .padding(.horizontal, 8)
+          .padding(.vertical, 4)
+          .glassEffect(Glass.regular.interactive(), in: .rect(cornerRadius: 12))
         }
       }
-      .sheet(isPresented: $showRegionPicker) {
-        RegionPickerSheet(
-          selectedRegion: $viewModel.selectedRegion,
-          isPresented: $showRegionPicker
-        )
-        .presentationDetents([.medium])
-      }
-      .refreshable {
-        await viewModel.refresh()
-      }
+    }
+    .sheet(isPresented: $showRegionPicker) {
+      RegionPickerSheet(
+        selectedRegion: $viewModel.selectedRegion,
+        isPresented: $showRegionPicker
+      )
+      .presentationDetents([.medium])
+    }
+    .refreshable {
+      await viewModel.refresh()
     }
     .onAppear {
       // This is the key: set the context once
       viewModel.setModelContext(modelContext)
+    }
+    .onDisappear {
+      // Cleanup region observer task to prevent memory leaks
+      viewModel.cleanup()
     }
   }
 
@@ -84,7 +90,7 @@ struct HomeView: View {
           NavigationLink(destination: UpNextListView(episodes: viewModel.upNextEpisodes)) {
             Text("See All")
               .font(.subheadline)
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
           }
         }
       }
@@ -94,13 +100,13 @@ struct HomeView: View {
         VStack(spacing: 8) {
           Image(systemName: "play.circle")
             .font(.system(size: 40))
-            .foregroundColor(.gray)
+            .foregroundStyle(.gray)
           Text("No unplayed episodes")
             .font(.subheadline)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
           Text("Subscribe to podcasts to see new episodes here")
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -134,6 +140,85 @@ struct HomeView: View {
     }
   }
 
+  // MARK: - For You Section
+
+  @available(iOS 26.0, macOS 26.0, *)
+  @ViewBuilder
+  private var forYouSection: some View {
+    let showForYou = UserDefaults.standard.object(forKey: "showForYouRecommendations") == nil ||
+                     UserDefaults.standard.bool(forKey: "showForYouRecommendations")
+
+    if showForYou && (!viewModel.recommendedEpisodes.isEmpty || viewModel.isLoadingRecommendations) {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack {
+          Image(systemName: "star.leadinghalf.filled")
+            .foregroundStyle(.purple)
+          Text("For You")
+            .font(.title2)
+            .fontWeight(.bold)
+
+          Spacer()
+
+          if viewModel.isLoadingRecommendations {
+            ProgressView()
+              .scaleEffect(0.8)
+          } else {
+            Button {
+              viewModel.recommendations = nil
+              viewModel.recommendedEpisodes = []
+              viewModel.loadRecommendations()
+            } label: {
+              Image(systemName: "arrow.clockwise")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+          }
+        }
+        .padding(.horizontal)
+
+        if viewModel.isLoadingRecommendations && viewModel.recommendedEpisodes.isEmpty {
+          HStack(spacing: 8) {
+            ProgressView()
+              .scaleEffect(0.7)
+            Text("Finding episodes for you...")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 24)
+        } else {
+          ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+              ForEach(Array(viewModel.recommendedEpisodes.enumerated()), id: \.element.id) { index, episode in
+                NavigationLink(
+                  destination: EpisodeDetailView(
+                    episode: episode.episodeInfo,
+                    podcastTitle: episode.podcastTitle,
+                    fallbackImageURL: episode.imageURL,
+                    podcastLanguage: episode.language
+                  )
+                ) {
+                  ForYouCard(
+                    episode: episode
+                  )
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                  UpNextContextMenu(
+                    episode: episode,
+                    viewModel: viewModel
+                  )
+                }
+              }
+            }
+            .padding(.horizontal)
+          }
+        }
+      }
+    }
+  }
+
   // MARK: - Popular Shows Section
 
   @ViewBuilder
@@ -157,10 +242,10 @@ struct HomeView: View {
         VStack(spacing: 8) {
           Image(systemName: "chart.line.uptrend.xyaxis")
             .font(.system(size: 40))
-            .foregroundColor(.gray)
+            .foregroundStyle(.gray)
           Text("Unable to load popular shows")
             .font(.subheadline)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
@@ -218,14 +303,15 @@ struct UpNextCard: View {
 
         // Status icons overlay (reactive)
         if let observer = statusObserver {
-          EpisodeStatusIconsCompact(
+          EpisodeStatusIcons(
             isStarred: episode.isStarred,
             isDownloaded: observer.isDownloaded,
             hasTranscript: observer.hasTranscript,
             hasAIAnalysis: observer.hasAIAnalysis,
             isDownloading: observer.isDownloading,
             downloadProgress: observer.downloadProgress,
-            isTranscribing: observer.isTranscribing
+            isTranscribing: observer.isTranscribing,
+            isCompact: true
           )
         }
       }
@@ -233,7 +319,7 @@ struct UpNextCard: View {
       // Podcast title
       Text(episode.podcastTitle)
         .font(.caption)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .lineLimit(1)
 
       // Episode title
@@ -243,13 +329,106 @@ struct UpNextCard: View {
         .lineLimit(2)
         .multilineTextAlignment(.leading)
 
-      // Play button with progress (reactive for live updates)
-      ReactiveEpisodePlayButton(
+      Spacer(minLength: 0)
+
+      // Play button with progress - uses live audio manager state
+      LivePlaybackButton(
         episode: episode,
+        style: .compact,
         action: playEpisode
       )
     }
-    .frame(width: 140)
+    .frame(width: 140, height: 258, alignment: .top)
+    .onAppear {
+      if statusObserver == nil {
+        statusObserver = EpisodeStatusObserver(episode: episode)
+      }
+      statusObserver?.setModelContext(modelContext)
+    }
+    .onDisappear {
+      statusObserver?.cleanup()
+    }
+  }
+}
+
+// MARK: - For You Card
+
+struct ForYouCard: View {
+  let episode: LibraryEpisode
+  @Environment(\.modelContext) private var modelContext
+  @State private var statusObserver: EpisodeStatusObserver?
+
+  private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
+
+  private func playEpisode() {
+    guard episode.episodeInfo.audioURL != nil else { return }
+    guard let observer = statusObserver else { return }
+
+    let playbackEpisode = PlaybackEpisode(
+      id: EpisodeKeyUtils.makeKey(podcastTitle: episode.podcastTitle, episodeTitle: episode.episodeInfo.title),
+      title: episode.episodeInfo.title,
+      podcastTitle: episode.podcastTitle,
+      audioURL: observer.playbackURL,
+      imageURL: episode.imageURL,
+      episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+      pubDate: episode.episodeInfo.pubDate,
+      duration: episode.episodeInfo.duration,
+      guid: episode.episodeInfo.guid
+    )
+
+    audioManager.play(
+      episode: playbackEpisode,
+      audioURL: observer.playbackURL,
+      startTime: episode.lastPlaybackPosition,
+      imageURL: episode.imageURL ?? "",
+      useDefaultSpeed: episode.lastPlaybackPosition == 0
+    )
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      // Episode artwork
+      ZStack(alignment: .bottomTrailing) {
+        CachedArtworkImage(urlString: episode.imageURL, size: 140, cornerRadius: 12)
+
+        // Status icons overlay
+        if let observer = statusObserver {
+          EpisodeStatusIcons(
+            isStarred: episode.isStarred,
+            isDownloaded: observer.isDownloaded,
+            hasTranscript: observer.hasTranscript,
+            hasAIAnalysis: observer.hasAIAnalysis,
+            isDownloading: observer.isDownloading,
+            downloadProgress: observer.downloadProgress,
+            isTranscribing: observer.isTranscribing,
+            isCompact: true
+          )
+        }
+      }
+
+      // Podcast title
+      Text(episode.podcastTitle)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+
+      // Episode title
+      Text(episode.episodeInfo.title)
+        .font(.subheadline)
+        .fontWeight(.medium)
+        .lineLimit(2)
+        .multilineTextAlignment(.leading)
+
+      Spacer(minLength: 0)
+
+      // Play button
+      LivePlaybackButton(
+        episode: episode,
+        style: .compact,
+        action: playEpisode
+      )
+    }
+    .frame(width: 140, height: 258, alignment: .top)
     .onAppear {
       if statusObserver == nil {
         statusObserver = EpisodeStatusObserver(episode: episode)
@@ -403,7 +582,7 @@ struct TopPodcastRow: View {
   var body: some View {
     NavigationLink(destination: EpisodeListView(
       podcastName: podcast.name,
-      podcastArtwork: podcast.artworkUrl100,
+      podcastArtwork: podcast.safeArtworkUrl,
       artistName: podcast.artistName,
       collectionId: podcast.id,
       applePodcastUrl: podcast.url
@@ -412,11 +591,11 @@ struct TopPodcastRow: View {
         // Rank
         Text("\(rank)")
           .font(.headline)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .frame(width: 24)
 
         // Artwork - using CachedAsyncImage for better performance
-        CachedArtworkImage(urlString: podcast.artworkUrl100, size: 56, cornerRadius: 8)
+        CachedArtworkImage(urlString: podcast.safeArtworkUrl, size: 56, cornerRadius: 8)
 
         // Info
         VStack(alignment: .leading, spacing: 2) {
@@ -424,17 +603,17 @@ struct TopPodcastRow: View {
             .font(.subheadline)
             .fontWeight(.medium)
             .lineLimit(1)
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
 
           Text(podcast.artistName)
             .font(.caption)
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .lineLimit(1)
 
           if let genres = podcast.genres, let first = genres.first {
             Text(first.name)
               .font(.caption2)
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
           }
         }
 
@@ -442,7 +621,7 @@ struct TopPodcastRow: View {
 
         Image(systemName: "chevron.right")
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
       .padding(.vertical, 8)
     }
@@ -451,7 +630,7 @@ struct TopPodcastRow: View {
       // View episodes
       NavigationLink(destination: EpisodeListView(
         podcastName: podcast.name,
-        podcastArtwork: podcast.artworkUrl100,
+        podcastArtwork: podcast.safeArtworkUrl,
         artistName: podcast.artistName,
         collectionId: podcast.id,
         applePodcastUrl: podcast.url
@@ -464,7 +643,7 @@ struct TopPodcastRow: View {
       // Subscribe
       if viewModel.isAlreadySubscribed(podcast) {
         Label("Already Subscribed", systemImage: "checkmark.circle.fill")
-          .foregroundColor(.green)
+          .foregroundStyle(.green)
       } else {
         Button {
           viewModel.subscribeToPodcast(podcast)
@@ -514,14 +693,16 @@ struct RegionPickerSheet: View {
             isPresented = false
           }) {
             HStack {
+              Text(region.flag)
+                .font(.title2)
               Text(region.name)
-                .foregroundColor(.primary)
+                .foregroundStyle(.primary)
 
               Spacer()
 
               if selectedRegion == region.code {
                 Image(systemName: "checkmark")
-                  .foregroundColor(.blue)
+                  .foregroundStyle(.blue)
               }
             }
           }
@@ -554,15 +735,13 @@ struct PodcastPreviewSheet: View {
       ScrollView {
         VStack(spacing: 20) {
           // Artwork
-          AsyncImage(url: URL(string: podcast.artworkUrl100.replacingOccurrences(of: "100x100", with: "600x600"))) { phase in
-            if let image = phase.image {
+          CachedAsyncImage(url: URL(string: podcast.safeArtworkUrl.replacingOccurrences(of: "100x100", with: "600x600"))) { image in
               image.resizable().scaledToFit()
-            } else {
+          } placeholder: {
               Color.gray
-            }
           }
           .frame(width: 200, height: 200)
-          .cornerRadius(16)
+          .clipShape(.rect(cornerRadius: 16))
           .shadow(radius: 8)
 
           // Title and Artist
@@ -574,7 +753,7 @@ struct PodcastPreviewSheet: View {
 
             Text(podcast.artistName)
               .font(.subheadline)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
 
           // Genres
@@ -585,9 +764,8 @@ struct PodcastPreviewSheet: View {
                   .font(.caption)
                   .padding(.horizontal, 10)
                   .padding(.vertical, 4)
-                  .background(Color.blue.opacity(0.15))
-                  .foregroundColor(.blue)
-                  .cornerRadius(12)
+                  .foregroundStyle(.blue)
+                  .glassEffect(.regular.tint(.blue), in: .rect(cornerRadius: 12))
               }
             }
           }
@@ -596,22 +774,21 @@ struct PodcastPreviewSheet: View {
           if viewModel.isAlreadySubscribed(podcast) {
             HStack {
               Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
+                .foregroundStyle(.green)
               Text("Already Subscribed")
                 .font(.headline)
-                .foregroundColor(.green)
+                .foregroundStyle(.green)
             }
             .frame(maxWidth: .infinity)
             .padding()
-            .background(Color.green.opacity(0.15))
-            .cornerRadius(12)
+            .glassEffect(.regular.tint(.green), in: .rect(cornerRadius: 12))
             .padding(.horizontal)
           } else if viewModel.isSubscribing {
             ProgressView("Subscribing...")
           } else if viewModel.subscriptionError != nil {
             VStack(spacing: 8) {
               Text("Failed to subscribe")
-                .foregroundColor(.red)
+                .foregroundStyle(.red)
               Button("Try Again") {
                 viewModel.subscribeToPodcast(podcast)
               }
@@ -624,10 +801,8 @@ struct PodcastPreviewSheet: View {
                 .font(.headline)
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(12)
             }
+            .buttonStyle(.glassProminent)
             .padding(.horizontal)
           }
 
@@ -665,7 +840,6 @@ struct PodcastPreviewSheet: View {
 struct UpNextListView: View {
   let episodes: [LibraryEpisode]
   @Environment(\.modelContext) private var modelContext
-  @State private var viewModel = HomeViewModel()
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
 
@@ -689,9 +863,6 @@ struct UpNextListView: View {
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif
-    .onAppear {
-      viewModel.setModelContext(modelContext)
-    }
     .confirmationDialog(
       "Delete Download",
       isPresented: $showDeleteConfirmation,

@@ -18,39 +18,30 @@ import AppKit
 @MainActor
 @Observable
 final class ExpandedPlayerViewModel {
-  var isPlaying: Bool = false
-  var episodeTitle: String = ""
-  var podcastTitle: String = ""
-  var imageURL: URL?
-  var progress: Double = 0
-  var currentTime: TimeInterval = 0
-  var duration: TimeInterval = 1
-  var playbackSpeed: Float = 1.0
-  var currentEpisode: PlaybackEpisode?
-  var episodeDate: Date?
+  // Pre-compiled SRT regex (compiled once, reused for every parse)
+  private static let srtRegex: NSRegularExpression? = {
+    let entryPattern =
+      #"(?:^|\n)(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n"#
+    return try? NSRegularExpression(pattern: entryPattern, options: [])
+  }()
+
+  // Stored properties that require SwiftData lookups
   var isStarred: Bool = false
   var isCompleted: Bool = false
-  var queue: [PlaybackEpisode] = []
-  var episodeDescription: String?
-  var downloadState: DownloadState = .notDownloaded
   var podcastModel: PodcastInfoModel?
 
-  // Transcript properties
+  // Transcript properties (loaded from disk)
   var hasTranscript: Bool = false
   var transcriptSegments: [TranscriptSegment] = []
   var transcriptSearchQuery: String = ""
 
-  @ObservationIgnored
+  // Observable singletons — NOT @ObservationIgnored so SwiftUI can observe through them
   private let audioManager = EnhancedAudioManager.shared
-
-  @ObservationIgnored
   private let downloadManager = DownloadManager.shared
+  private let subtitleSettings = SubtitleSettingsManager.shared
 
   @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
-
-  @ObservationIgnored
-  private var updateTimer: Timer?
 
   @ObservationIgnored
   private let applePodcastService = ApplePodcastService()
@@ -59,80 +50,80 @@ final class ExpandedPlayerViewModel {
   private var shareTask: Task<Void, Never>?
 
   @ObservationIgnored
+  private var loadTranscriptTask: Task<Void, Never>?
+
+  @ObservationIgnored
   private var modelContext: ModelContext?
 
   @ObservationIgnored
   private var lastLoadedEpisodeId: String?
 
+  @ObservationIgnored
+  private var lastObservedEpisodeId: String?
+
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
   private static let episodeKeyDelimiter = "\u{1F}"
 
+  // MARK: - Computed Properties (delegating to @Observable singletons)
+
+  var isPlaying: Bool { audioManager.isPlaying }
+  var currentEpisode: PlaybackEpisode? { audioManager.currentEpisode }
+  var episodeTitle: String { audioManager.currentEpisode?.title ?? "" }
+  var podcastTitle: String { audioManager.currentEpisode?.podcastTitle ?? "" }
+  var currentTime: TimeInterval { audioManager.currentTime }
+  var duration: TimeInterval { audioManager.duration > 0 ? audioManager.duration : 1 }
+  var playbackSpeed: Float { audioManager.playbackRate }
+  var sleepTimerOption: SleepTimerOption { audioManager.sleepTimerOption }
+  var sleepTimerRemaining: TimeInterval { audioManager.sleepTimerRemaining }
+  var queue: [PlaybackEpisode] { audioManager.queue }
+  var displayMode: SubtitleDisplayMode { subtitleSettings.displayMode }
+
+  var imageURL: URL? {
+    guard let urlString = audioManager.currentEpisode?.imageURL else { return nil }
+    return URL(string: urlString)
+  }
+
+  var episodeDate: Date? { audioManager.currentEpisode?.pubDate }
+  var episodeDescription: String? { audioManager.currentEpisode?.episodeDescription }
+
+  var progress: Double {
+    guard audioManager.duration > 0 else { return 0 }
+    return audioManager.currentTime / audioManager.duration
+  }
+
+  var downloadState: DownloadState {
+    guard let episode = audioManager.currentEpisode else { return .notDownloaded }
+    return downloadManager.getDownloadState(
+      episodeTitle: episode.title,
+      podcastTitle: episode.podcastTitle
+    )
+  }
+
   init() {
-    // Update state immediately before setting up timer
-    updateState()
-    setupUpdateTimer()
+    // Load episode-specific state on init
+    checkEpisodeChange()
   }
 
   func setModelContext(_ context: ModelContext) {
     self.modelContext = context
+    checkEpisodeChange()
+  }
+
+  /// Check if the current episode changed and reload stored state if needed.
+  /// Called from setModelContext and can be called from view's onChange.
+  func checkEpisodeChange() {
+    let currentId = audioManager.currentEpisode?.id
+    guard currentId != lastObservedEpisodeId else { return }
+    lastObservedEpisodeId = currentId
     loadEpisodeState()
     loadPodcastModel()
-  }
-
-  private func setupUpdateTimer() {
-    updateTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-      guard let self else { return }
-      Task { @MainActor in
-        self.updateState()
-      }
-    }
-  }
-
-  private func updateState() {
-    if let episode = audioManager.currentEpisode {
-      let previousEpisodeId = currentEpisode?.id
-      currentEpisode = episode
-      isPlaying = audioManager.isPlaying
-      episodeTitle = episode.title
-      podcastTitle = episode.podcastTitle
-
-      if let imageURLString = episode.imageURL {
-        imageURL = URL(string: imageURLString)
-      }
-
-      // Update episode date from current episode
-      episodeDate = episode.pubDate
-
-      currentTime = audioManager.currentTime
-      duration = audioManager.duration
-      playbackSpeed = audioManager.playbackRate
-
-      if duration > 0 {
-        progress = currentTime / duration
-      }
-
-      // Update queue
-      queue = audioManager.queue
-
-      // Update download state
-      downloadState = downloadManager.getDownloadState(
-        episodeTitle: episode.title,
-        podcastTitle: episode.podcastTitle
-      )
-
-      // Reload episode state when episode changes
-      if previousEpisodeId != episode.id {
-        loadEpisodeState()
-        loadPodcastModel()
-        loadTranscript()
-      }
-    }
+    loadTranscript()
   }
 
   // MARK: - SwiftData Loading
 
   private func loadEpisodeState() {
-    guard let context = modelContext, let episode = currentEpisode else { return }
+    guard let context = modelContext, let episode = audioManager.currentEpisode else { return }
 
     let episodeKey = "\(episode.podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
 
@@ -153,7 +144,7 @@ final class ExpandedPlayerViewModel {
     }
   }
 
-  private func loadPodcastModel() {
+  func loadPodcastModel() {
     guard let context = modelContext else { return }
 
     let podcastName = podcastTitle
@@ -169,7 +160,7 @@ final class ExpandedPlayerViewModel {
   }
 
   private func getOrCreateEpisodeModel() -> EpisodeDownloadModel? {
-    guard let context = modelContext, let episode = currentEpisode else { return nil }
+    guard let context = modelContext, let episode = audioManager.currentEpisode else { return nil }
 
     let episodeKey = "\(episode.podcastTitle)\(Self.episodeKeyDelimiter)\(episode.title)"
 
@@ -271,8 +262,22 @@ final class ExpandedPlayerViewModel {
     try? modelContext?.save()
   }
 
+  // MARK: - Sleep Timer
+
+  func setSleepTimer(_ option: SleepTimerOption) {
+    audioManager.setSleepTimer(option)
+  }
+
+  var isSleepTimerActive: Bool {
+    audioManager.isSleepTimerActive
+  }
+
+  var sleepTimerRemainingFormatted: String {
+    audioManager.sleepTimerRemainingFormatted
+  }
+
   func shareEpisode() {
-    guard let episode = currentEpisode else { return }
+    guard let episode = audioManager.currentEpisode else { return }
 
     // Cancel previous share task
     shareTask?.cancel()
@@ -319,7 +324,7 @@ final class ExpandedPlayerViewModel {
   }
 
   func playNextCurrentEpisode() {
-    guard let episode = currentEpisode else { return }
+    guard let episode = audioManager.currentEpisode else { return }
     audioManager.playNext(episode)
   }
 
@@ -331,11 +336,11 @@ final class ExpandedPlayerViewModel {
   }
 
   var audioURL: String? {
-    currentEpisode?.audioURL
+    audioManager.currentEpisode?.audioURL
   }
 
   func startDownload() {
-    guard let episode = currentEpisode else { return }
+    guard let episode = audioManager.currentEpisode else { return }
     // Create a PodcastEpisodeInfo to pass to download manager
     let episodeInfo = PodcastEpisodeInfo(
       title: episode.title,
@@ -354,7 +359,7 @@ final class ExpandedPlayerViewModel {
   }
 
   func cancelDownload() {
-    guard let episode = currentEpisode else { return }
+    guard let episode = audioManager.currentEpisode else { return }
     downloadManager.cancelDownload(
       episodeTitle: episode.title,
       podcastTitle: episode.podcastTitle
@@ -362,7 +367,7 @@ final class ExpandedPlayerViewModel {
   }
 
   func deleteDownload() {
-    guard let episode = currentEpisode else { return }
+    guard let episode = audioManager.currentEpisode else { return }
     downloadManager.deleteDownload(
       episodeTitle: episode.title,
       podcastTitle: episode.podcastTitle
@@ -415,14 +420,14 @@ final class ExpandedPlayerViewModel {
     guard !transcriptSearchQuery.isEmpty else {
       return transcriptSegments
     }
-    let query = transcriptSearchQuery.lowercased()
+    let query = transcriptSearchQuery
     return transcriptSegments.filter { segment in
-      segment.text.lowercased().contains(query)
+      segment.text.localizedStandardContains(query)
     }
   }
 
   private func loadTranscript() {
-    guard let episode = currentEpisode else {
+    guard let episode = audioManager.currentEpisode else {
       hasTranscript = false
       transcriptSegments = []
       return
@@ -434,7 +439,8 @@ final class ExpandedPlayerViewModel {
       return
     }
 
-    Task {
+    loadTranscriptTask?.cancel()
+    loadTranscriptTask = Task {
       let exists = await fileStorage.captionFileExists(
         for: episode.title,
         podcastTitle: episode.podcastTitle
@@ -476,10 +482,7 @@ final class ExpandedPlayerViewModel {
       .replacingOccurrences(of: "\r", with: "\n")
       .trimmingCharacters(in: .whitespacesAndNewlines)
 
-    let entryPattern =
-      #"(?:^|\n)(\d+)\n(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})\n"#
-
-    guard let regex = try? NSRegularExpression(pattern: entryPattern, options: []) else {
+    guard let regex = Self.srtRegex else {
       return []
     }
 
@@ -573,9 +576,17 @@ final class ExpandedPlayerViewModel {
     }
   }
 
+  deinit {
+    MainActor.assumeIsolated {
+      cleanup()
+    }
+  }
+
   /// Clean up resources. Call this from onDisappear.
   func cleanup() {
-    updateTimer?.invalidate()
-    updateTimer = nil
+    shareTask?.cancel()
+    shareTask = nil
+    loadTranscriptTask?.cancel()
+    loadTranscriptTask = nil
   }
 }

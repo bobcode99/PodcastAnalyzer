@@ -7,9 +7,8 @@
 
 import AVFoundation
 import Foundation
-import NaturalLanguage
 import Speech
-import os.log
+import OSLog
 
 // Change availability to iOS and a more realistic version number (e.g., 17.0)
 @available(iOS 17.0, *)
@@ -19,6 +18,19 @@ public actor TranscriptService {
   private var censor: Bool = false
   private var needsAudioTimeRange: Bool = true
   private var targetLocale: Locale
+
+  /// Whether the target locale is CJK (Chinese, Japanese, Korean).
+  /// CJK characters carry ~1 word of meaning each, so segments need fewer characters.
+  var isCJKLocale: Bool {
+    let lang = targetLocale.language.languageCode?.identifier ?? ""
+    return ["zh", "ja", "ko"].contains(lang)
+  }
+
+  /// Default max characters per subtitle segment, adjusted for character density.
+  /// CJK: 18 chars (~18 words of content), Latin: 40 chars (~6-8 words)
+  var defaultMaxLength: Int {
+    isCJKLocale ? 18 : 40
+  }
 
   /// Converts a podcast language code (e.g., "zh-tw") to a Locale identifier (e.g., "zh_TW")
   /// - Parameter languageCode: The language code from podcast RSS feed (e.g., "zh-tw", "en-us", "ja")
@@ -129,12 +141,11 @@ public actor TranscriptService {
       attributeOptions: needsAudioTimeRange ? [.audioTimeRange] : []
     )
     self.transcriber = newTranscriber
-      let detector = SpeechDetector()
 
     // Release and reserve locales
     await releaseAndReserveLocales()
 
-      let modules: [any SpeechModule] = [newTranscriber, detector]
+      let modules: [any SpeechModule] = [newTranscriber]
     let installed = await Set(SpeechTranscriber.installedLocales)
     logger.info("Installed locales: \(installed.map { $0.identifier }.joined(separator: ", "))")
 
@@ -158,13 +169,14 @@ public actor TranscriptService {
       if let request = try await AssetInventory.assetInstallationRequest(
         supporting: modules)
       {
-        // 4. Start a nested Task to monitor progress
-        Task {
-          while !request.progress.isFinished {
+        // 4. Start a nested Task to monitor progress; tie its lifetime to the stream
+        let pollingTask = Task {
+          while !request.progress.isFinished && !Task.isCancelled {
             continuation.yield(request.progress.fractionCompleted)
             try? await Task.sleep(for: .milliseconds(100))
           }
         }
+        continuation.onTermination = { _ in pollingTask.cancel() }
 
         // 6. Start the actual download and installation
         try await request.downloadAndInstall()
@@ -302,8 +314,18 @@ public actor TranscriptService {
       transcript += result.text
     }
 
+    // Apply Chinese punctuation restoration for CJK locales
+    var processedTranscript = transcript
+    if isCJKLocale {
+      let restorer = ChinesePunctuationRestorer()
+      processedTranscript = restorer.restore(transcript: transcript)
+    }
+
     // Convert transcript to SRT format
-    return transcriptToSRT(transcript: transcript, maxLength: maxLength)
+    let effectiveMaxLength = maxLength ?? defaultMaxLength
+    let segmenter = TranscriptSegmenter(isCJK: isCJKLocale, maxLength: effectiveMaxLength)
+    let segments = segmenter.splitTranscriptIntoSegments(transcript: processedTranscript)
+    return SRTFormatter.format(segments: segments)
   }
 
   /// Transcription progress update
@@ -333,7 +355,9 @@ public actor TranscriptService {
             self.analyzer,
             self.needsAudioTimeRange
           )
-          
+          let isCJK = await self.isCJKLocale
+          let defaultMaxLen = await self.defaultMaxLength
+
           // Ensure transcriber and analyzer are initialized
           guard let transcriber = transcriber, let analyzer = analyzer else {
             throw NSError(
@@ -404,9 +428,28 @@ public actor TranscriptService {
             }
           }
 
-          // Convert transcript to SRT format (CPU-intensive, runs on background thread)
-          // Call through actor since transcriptToSRT is actor-isolated
-          let srtContent = await self.transcriptToSRT(transcript: transcript, maxLength: maxLength)
+          // Check if we actually got any transcript content
+          guard !transcript.characters.isEmpty else {
+            throw NSError(
+              domain: "TranscriptService", code: 3,
+              userInfo: [
+                NSLocalizedDescriptionKey:
+                  "Transcription produced no content. The audio may be silent or in an unsupported format."
+              ])
+          }
+
+          // Apply Chinese punctuation restoration for CJK locales
+          var processedTranscript = transcript
+          if isCJK {
+            let restorer = ChinesePunctuationRestorer()
+            processedTranscript = restorer.restore(transcript: transcript)
+          }
+
+          // Convert transcript to SRT format
+          let effectiveMaxLength = maxLength ?? defaultMaxLen
+          let segmenter = TranscriptSegmenter(isCJK: isCJK, maxLength: effectiveMaxLength)
+          let segments = segmenter.splitTranscriptIntoSegments(transcript: processedTranscript)
+          let srtContent = SRTFormatter.format(segments: segments)
 
           // Send final progress with completed content
           continuation.yield(
@@ -426,156 +469,246 @@ public actor TranscriptService {
     }
   }
 
-  /// Formats a TimeInterval into SRT time format (HH:MM:SS,mmm)
-  /// - Parameter timeInterval: The time interval in seconds
-  /// - Returns: Formatted time string in SRT format
-  private func formatSRTTime(_ timeInterval: TimeInterval) -> String {
-    let ms = Int(timeInterval.truncatingRemainder(dividingBy: 1) * 1000)
-    let s = Int(timeInterval) % 60
-    let m = (Int(timeInterval) / 60) % 60
-    let h = Int(timeInterval) / 60 / 60
-    return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
-  }
-
-  /// Helper to check for sentence endings in various languages
-  private func isSentenceEnd(_ text: String) -> Bool {
-    // Includes:
-    // English/European: . ! ?
-    // Chinese/CJK: 。 (IDEOGRAPHIC FULL STOP), ！ (FULLWIDTH EXCLAMATION MARK), ？ (FULLWIDTH QUESTION MARK)
-    let terminators: Set<Character> = [".", "!", "?", "。", "！", "？"]
-
-    // Check the last character (trimming whitespace/newlines first just in case)
-    guard let lastChar = text.trimmingCharacters(in: .whitespacesAndNewlines).last else {
-      return false
-    }
-    return terminators.contains(lastChar)
-  }
-
-  /// Splits an AttributedString transcript into segments using NLTokenizer with maxLength constraint
-  /// This creates segments of approximately 5-6 seconds duration, similar to yap CLI tool
-  /// - Parameters:
-  ///   - transcript: The full transcript as AttributedString with audioTimeRange attributes
-  ///   - maxLength: Maximum character length per segment (default: 40)
-  /// - Returns: Array of AttributedString segments with proper time ranges
-  private func splitTranscriptIntoSegments(
-    transcript: AttributedString, maxLength: Int
-  ) -> [AttributedString] {
-    let tokenizer = NLTokenizer(unit: .sentence)
-    let string = String(transcript.characters)
-    tokenizer.string = string
-
-    // Get all sentence ranges
-    let sentenceRanges = tokenizer.tokens(for: string.startIndex..<string.endIndex).compactMap {
-      stringRange -> (Range<String.Index>, Range<AttributedString.Index>)? in
-      guard
-        let attrLower = AttributedString.Index(stringRange.lowerBound, within: transcript),
-        let attrUpper = AttributedString.Index(stringRange.upperBound, within: transcript)
-      else { return nil }
-      return (stringRange, attrLower..<attrUpper)
+  /// Converts audio to SRT format with additional JSON file containing word timings
+  /// - Parameter inputFile: The URL of the audio file to transcribe
+  /// - Parameter maxLength: Maximum length for each subtitle entry (optional, defaults to nil)
+  /// - Returns: Tuple of (SRT content, JSON word timings content)
+  public func audioToSRTWithWordTimings(inputFile: URL, maxLength: Int? = nil) async throws -> (srt: String, wordTimingsJSON: String) {
+    guard let transcriber = transcriber, let analyzer = analyzer else {
+      throw NSError(
+        domain: "TranscriptService", code: 1,
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "Transcriber or analyzer not initialized. Call setupAndInstallAssets() first."
+        ])
     }
 
-    // Process each sentence and split if needed
-    let allRanges: [Range<AttributedString.Index>] = sentenceRanges.flatMap {
-      sentenceStringRange, sentenceAttrRange -> [Range<AttributedString.Index>] in
-      let sentence = transcript[sentenceAttrRange]
+    guard needsAudioTimeRange else {
+      throw NSError(
+        domain: "TranscriptService", code: 2,
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "audioTimeRange must be enabled to generate word timings."
+        ])
+    }
 
-      // If sentence is within maxLength, keep it as-is
-      guard sentence.characters.count > maxLength else {
-        return [sentenceAttrRange]
-      }
+    let audioURL = try await resolveAudioURL(inputFile)
+    let audioFile = try AVAudioFile(forReading: audioURL)
 
-      // Sentence exceeds maxLength - split by words
-      let wordTokenizer = NLTokenizer(unit: .word)
-      wordTokenizer.string = string
+    try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
 
-      var wordRanges: [Range<AttributedString.Index>] = wordTokenizer.tokens(
-        for: sentenceStringRange
-      ).compactMap { wordStringRange -> Range<AttributedString.Index>? in
-        guard
-          let attrLower = AttributedString.Index(wordStringRange.lowerBound, within: transcript),
-          let attrUpper = AttributedString.Index(wordStringRange.upperBound, within: transcript)
-        else { return nil }
-        return attrLower..<attrUpper
-      }
+    var transcript: AttributedString = ""
+    for try await result in transcriber.results {
+      transcript += result.text
+    }
 
-      guard !wordRanges.isEmpty else { return [sentenceAttrRange] }
+    // Apply Chinese punctuation restoration for CJK locales
+    var processedTranscript = transcript
+    if isCJKLocale {
+      let restorer = ChinesePunctuationRestorer()
+      processedTranscript = restorer.restore(transcript: transcript)
+    }
 
-      // Extend first word to include leading whitespace/punctuation
-      wordRanges[0] = sentenceAttrRange.lowerBound..<wordRanges[0].upperBound
-      // Extend last word to include trailing whitespace/punctuation
-      wordRanges[wordRanges.count - 1] =
-        wordRanges[wordRanges.count - 1].lowerBound..<sentenceAttrRange.upperBound
+    let effectiveMaxLength = maxLength ?? defaultMaxLength
+    let segmenter = TranscriptSegmenter(isCJK: isCJKLocale, maxLength: effectiveMaxLength)
+    let segments = segmenter.extractSegmentsWithWordTimings(transcript: processedTranscript)
+    let transcriptData = TranscriptData(segments: segments)
 
-      // Accumulate words into segments respecting maxLength
-      var segmentRanges: [Range<AttributedString.Index>] = []
-      for wordRange in wordRanges {
-        if let lastRange = segmentRanges.last,
-          transcript[lastRange].characters.count + transcript[wordRange].characters.count
-            <= maxLength
-        {
-          // Extend the last segment
-          segmentRanges[segmentRanges.count - 1] = lastRange.lowerBound..<wordRange.upperBound
-        } else {
-          // Start a new segment
-          segmentRanges.append(wordRange)
+    // Generate SRT
+    let srtSegments = segmenter.splitTranscriptIntoSegments(transcript: processedTranscript)
+    let srtContent = SRTFormatter.format(segments: srtSegments)
+
+    // Generate JSON word timings
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let jsonData = try encoder.encode(transcriptData)
+    let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+    return (srtContent, jsonString)
+  }
+
+  /// Converts audio file to SRT subtitle format with parallel chunk processing for long audio.
+  /// For audio shorter than 10 minutes, falls back to sequential processing.
+  /// For longer audio, splits into 5-minute chunks processed in parallel for ~3-4x speedup.
+  public func audioToSRTChunkedWithProgress(
+    inputFile: URL,
+    maxLength: Int? = nil,
+    chunkDuration: TimeInterval = 300
+  ) -> AsyncThrowingStream<TranscriptionProgress, Error> {
+    return AsyncThrowingStream { continuation in
+      Task.detached(priority: .userInitiated) { [self] in
+        do {
+          // Capture actor-isolated state upfront so chunk tasks don't need the actor
+          let locale = await self.targetLocale
+          let censor = await self.censor
+          let isCJK = await self.isCJKLocale
+          let defaultMaxLen = await self.defaultMaxLength
+          let effectiveMaxLength = maxLength ?? defaultMaxLen
+
+          let audioURL = try await self.resolveAudioURL(inputFile)
+          let audioFile = try AVAudioFile(forReading: audioURL)
+          let sampleRate = audioFile.processingFormat.sampleRate
+          let audioFileDuration: TimeInterval =
+            sampleRate > 0 ? Double(audioFile.length) / sampleRate : 0
+
+          guard audioFileDuration.isFinite && audioFileDuration > 0 else {
+            throw NSError(
+              domain: "TranscriptService", code: 12,
+              userInfo: [NSLocalizedDescriptionKey: "Invalid audio file duration"]
+            )
+          }
+
+          self.logger.info(
+            "Audio duration: \(audioFileDuration)s — evaluating chunked vs sequential")
+
+          // Threshold: audio shorter than 10 minutes uses sequential processing
+          if audioFileDuration < 600 {
+            self.logger.info("Audio < 10 min, using sequential processing")
+            for try await progress in await self.audioToSRTWithProgress(
+              inputFile: inputFile, maxLength: maxLength
+            ) {
+              continuation.yield(progress)
+            }
+            continuation.finish()
+            return
+          }
+
+          // Send initial progress
+          continuation.yield(TranscriptionProgress(
+            progress: 0.0,
+            currentTimeSeconds: 0,
+            totalDurationSeconds: audioFileDuration,
+            isComplete: false,
+            srtContent: nil
+          ))
+
+          // Export audio chunks
+          self.logger.info("Exporting audio chunks (chunkDuration: \(chunkDuration)s)")
+          let overlap: TimeInterval = 2.0
+          let chunks = try await ChunkedTranscriptionService.exportAudioChunks(
+            from: audioURL,
+            totalDuration: audioFileDuration,
+            chunkDuration: chunkDuration,
+            overlap: overlap
+          )
+          self.logger.info("Exported \(chunks.count) chunks")
+
+          defer { ChunkedTranscriptionService.cleanupTempFiles(chunks) }
+
+          // Determine concurrency limit (at least 1)
+          let maxConcurrent = max(min(
+            chunks.count,
+            ProcessInfo.processInfo.processorCount / 2,
+            4
+          ), 1)
+          self.logger.info("Processing with concurrency limit: \(maxConcurrent)")
+
+          let progressTracker = ChunkProgressTracker(totalChunks: chunks.count)
+
+          // Process chunks in parallel
+          let allChunkResults: [[ChunkedTranscriptionService.ChunkSegment]] = try await withThrowingTaskGroup(
+            of: (Int, [ChunkedTranscriptionService.ChunkSegment]).self
+          ) { group in
+            var results = [[ChunkedTranscriptionService.ChunkSegment]](repeating: [], count: chunks.count)
+            var launched = 0
+
+            // Launch initial batch up to concurrency limit
+            for i in 0..<min(maxConcurrent, chunks.count) {
+              let chunk = chunks[i]
+              group.addTask {
+                let segments = try await ChunkedTranscriptionService.transcribeChunkParallel(
+                  chunk: chunk,
+                  locale: locale,
+                  censor: censor,
+                  isCJK: isCJK,
+                  maxSegmentLength: effectiveMaxLength,
+                  onProgress: { chunkProgress in
+                    Task {
+                      let overall = await progressTracker.updateProgress(
+                        chunkIndex: chunk.index, progress: chunkProgress
+                      )
+                      continuation.yield(TranscriptionProgress(
+                        progress: min(overall, 0.99),
+                        currentTimeSeconds: overall * audioFileDuration,
+                        totalDurationSeconds: audioFileDuration,
+                        isComplete: false,
+                        srtContent: nil
+                      ))
+                    }
+                  }
+                )
+                return (chunk.index, segments)
+              }
+              launched += 1
+            }
+
+            // As each task completes, launch the next pending chunk
+            for try await (chunkIndex, segments) in group {
+              results[chunkIndex] = segments
+
+              // Launch next chunk if available
+              if launched < chunks.count {
+                let chunk = chunks[launched]
+                group.addTask {
+                  let segments = try await ChunkedTranscriptionService.transcribeChunkParallel(
+                    chunk: chunk,
+                    locale: locale,
+                    censor: censor,
+                    isCJK: isCJK,
+                    maxSegmentLength: effectiveMaxLength,
+                    onProgress: { chunkProgress in
+                      Task {
+                        let overall = await progressTracker.updateProgress(
+                          chunkIndex: chunk.index, progress: chunkProgress
+                        )
+                        continuation.yield(TranscriptionProgress(
+                          progress: min(overall, 0.99),
+                          currentTimeSeconds: overall * audioFileDuration,
+                          totalDurationSeconds: audioFileDuration,
+                          isComplete: false,
+                          srtContent: nil
+                        ))
+                      }
+                    }
+                  )
+                  return (chunk.index, segments)
+                }
+                launched += 1
+              }
+            }
+
+            return results
+          }
+
+          // Merge results with overlap de-duplication
+          let mergedSegments = ChunkedTranscriptionService.mergeChunkSegments(allChunkResults, overlap: overlap)
+
+          guard !mergedSegments.isEmpty else {
+            throw NSError(
+              domain: "TranscriptService", code: 3,
+              userInfo: [
+                NSLocalizedDescriptionKey:
+                  "Transcription produced no content. The audio may be silent or in an unsupported format."
+              ])
+          }
+
+          // Convert to SRT
+          let srtContent = SRTFormatter.format(chunkSegments: mergedSegments)
+
+          // Send final progress
+          continuation.yield(TranscriptionProgress(
+            progress: 1.0,
+            currentTimeSeconds: audioFileDuration,
+            totalDurationSeconds: audioFileDuration,
+            isComplete: true,
+            srtContent: srtContent
+          ))
+
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
         }
       }
-
-      return segmentRanges
     }
-
-    // Convert ranges to AttributedStrings with proper time ranges
-    return allRanges.compactMap { range -> AttributedString? in
-      let segment = transcript[range]
-
-      // Collect time ranges from non-empty runs
-      let audioTimeRanges = segment.runs.filter {
-        !String(transcript[$0.range].characters)
-          .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      }.compactMap(\.audioTimeRange)
-
-      guard !audioTimeRanges.isEmpty else { return nil }
-
-      // Calculate combined time range (start of first, end of last)
-      let start = audioTimeRanges.first!.start
-      let end = audioTimeRanges.last!.end
-
-      // Create new AttributedString with the combined time range
-      var attributes = AttributeContainer()
-      attributes[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] = CMTimeRange(
-        start: start,
-        end: end
-      )
-      return AttributedString(segment.characters, attributes: attributes)
-    }
-  }
-
-  /// Converts an AttributedString transcript to SRT subtitle format
-  /// Uses NLTokenizer for smart sentence detection and splits long sentences by word
-  /// - Parameters:
-  ///   - transcript: The full transcript as AttributedString
-  ///   - maxLength: Maximum character length per segment (default: 40 for ~5 second segments)
-  /// - Returns: SRT formatted string
-  private func transcriptToSRT(transcript: AttributedString, maxLength: Int?) -> String {
-    // Default to 40 characters if not specified (creates ~5 second segments)
-    let effectiveMaxLength = maxLength ?? 40
-
-    let segments = splitTranscriptIntoSegments(
-      transcript: transcript, maxLength: effectiveMaxLength)
-
-    let srtEntries = segments.enumerated().compactMap { index, segment -> String? in
-      guard let timeRange = segment.audioTimeRange else { return nil }
-
-      let text = String(segment.characters).trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !text.isEmpty else { return nil }
-
-      let entryNumber = index + 1
-      let startTime = formatSRTTime(timeRange.start.seconds)
-      let endTime = formatSRTTime(timeRange.end.seconds)
-
-      return "\(entryNumber)\n\(startTime) --> \(endTime)\n\(text)"
-    }
-
-    return srtEntries.joined(separator: "\n\n")
   }
 }

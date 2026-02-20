@@ -5,8 +5,11 @@
 //  Redesigned to look like Apple Podcasts player
 //
 
+import OSLog
 import SwiftData
 import SwiftUI
+
+private let logger = Logger(subsystem: "com.podcast.analyzer", category: "ExpandedPlayerView")
 
 #if os(iOS)
 import UIKit
@@ -16,12 +19,10 @@ struct ExpandedPlayerView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.modelContext) private var modelContext
   @State private var viewModel = ExpandedPlayerViewModel()
-  @State private var showEpisodeDetail = false
-  @State private var showPodcastEpisodeList = false
   @State private var showSpeedPicker = false
   @State private var showQueue = false
   @State private var showEllipsisMenu = false
-  @State private var showFullTranscript = false
+  @State private var showSleepTimerPicker = false
 
   // Scrubbing state for smooth slider interaction
   @State private var isScrubbing = false
@@ -30,6 +31,10 @@ struct ExpandedPlayerView: View {
   // Speed options matching Apple Podcasts
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
   private let quickSpeeds: [Float] = [0.8, 1.0, 1.3, 1.5, 1.8, 2.0]
+
+  // Navigation callbacks - dismiss sheet first, then navigate in parent
+  var onNavigateToEpisodeDetail: ((PodcastEpisodeInfo, String, String?) -> Void)?
+  var onNavigateToPodcast: ((PodcastInfoModel) -> Void)?
 
   var body: some View {
     NavigationStack {
@@ -42,46 +47,36 @@ struct ExpandedPlayerView: View {
         )
         .ignoresSafeArea()
 
-        GeometryReader { geometry in
-            ScrollView {
-                // This container ensures content spans at least the full screen height
+        ScrollView {
+            // This container ensures content spans at least the full screen height
+            VStack(spacing: 0) {
+
+                // 1. Artwork & Info Group
                 VStack(spacing: 0) {
-                    
-                    // 1. Artwork & Info Group
-                    VStack(spacing: 0) {
-                        artworkSection
-                            .padding(.top, geometry.size.height * 0.02)
-                        
-                        episodeInfoSection
-                            .padding(.top, 24)
-                    }
-                    
-                    Spacer(minLength: 20) // Flexible space
+                    artworkSection
+                        .padding(.top, 16)
 
-                    // 2. Playback Group (Progress + Controls)
-                    VStack(spacing: 24) {
-                        progressSection
-                            .padding(.horizontal, 24)
-                        
-                        controlsSection
-                    }
-
-                    Spacer(minLength: 20) // Flexible space
-
-                    // 3. Bottom Actions
-                    bottomActionsSection
-                        .padding(.bottom, (viewModel.hasTranscript && !viewModel.transcriptSegments.isEmpty) ? 20 : 40)
-
-                    // 4. Transcript - ONLY renders if data exists
-                    if viewModel.hasTranscript && !viewModel.transcriptSegments.isEmpty {
-                        transcriptPreviewSection
-                            .padding(.top, 10)
-                            .padding(.bottom, 40)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
+                    episodeInfoSection
+                        .padding(.top, 24)
                 }
-                .frame(minHeight: geometry.size.height) // Forces the Spacers to work
+
+                Spacer(minLength: 20) // Flexible space
+
+                // 2. Playback Group (Progress + Controls)
+                VStack(spacing: 24) {
+                    progressSection
+                        .padding(.horizontal, 24)
+
+                    controlsSection
+                }
+
+                Spacer(minLength: 20) // Flexible space
+
+                // 3. Bottom Actions
+                bottomActionsSection
+                    .padding(.bottom, 40)
             }
+            .containerRelativeFrame(.vertical, alignment: .center)
         }
         .blur(radius: showSpeedPicker || showQueue ? 3 : 0)
 
@@ -127,123 +122,16 @@ struct ExpandedPlayerView: View {
           .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
       }
-      .navigationDestination(isPresented: $showEpisodeDetail) {
-        if let episode = viewModel.currentEpisode {
-          EpisodeDetailView(
-            episode: PodcastEpisodeInfo(
-              title: episode.title,
-              podcastEpisodeDescription: episode.episodeDescription,
-              pubDate: episode.pubDate,
-              audioURL: episode.audioURL,
-              imageURL: episode.imageURL,
-              duration: episode.duration,
-              guid: episode.guid
-            ),
-            podcastTitle: episode.podcastTitle,
-            fallbackImageURL: episode.imageURL
-          )
-        }
-      }
-      .navigationDestination(isPresented: $showPodcastEpisodeList) {
-        if let podcastModel = viewModel.podcastModel {
-          EpisodeListView(podcastModel: podcastModel)
-        }
-      }
       .onAppear {
         viewModel.setModelContext(modelContext)
       }
       .onDisappear {
         viewModel.cleanup()
       }
-      .sheet(isPresented: $showFullTranscript) {
-        TranscriptFullScreenView(viewModel: viewModel)
+      .onChange(of: viewModel.currentEpisode?.id) {
+        viewModel.checkEpisodeChange()
       }
     }
-  }
-
-  // MARK: - Transcript Preview Section
-  private var transcriptPreviewSection: some View {
-    VStack(spacing: 12) {
-      // Header
-      HStack {
-        HStack(spacing: 6) {
-          Image(systemName: "captions.bubble.fill")
-            .foregroundColor(.purple)
-          Text("Transcript")
-            .font(.headline)
-        }
-
-        Spacer()
-
-        Button(action: { showFullTranscript = true }) {
-          HStack(spacing: 4) {
-            Text("Expand")
-              .font(.subheadline)
-            Image(systemName: "arrow.up.left.and.arrow.down.right")
-              .font(.caption)
-          }
-          .foregroundColor(.blue)
-        }
-      }
-      .padding(.horizontal, 20)
-
-      // Current segment highlight
-      if let currentText = viewModel.currentSegmentText {
-        Text(currentText)
-          .font(.body)
-          .foregroundColor(.primary)
-          .multilineTextAlignment(.center)
-          .padding(.horizontal, 20)
-          .padding(.vertical, 12)
-          .frame(maxWidth: .infinity)
-          .background(Color.blue.opacity(0.1))
-          .cornerRadius(12)
-          .padding(.horizontal, 16)
-      }
-
-      // Preview of segments (show 3 upcoming)
-      VStack(spacing: 0) {
-        ForEach(getPreviewSegments(), id: \.id) { segment in
-          Button(action: { viewModel.seekToSegment(segment) }) {
-            HStack(alignment: .top, spacing: 10) {
-              Text(segment.formattedStartTime)
-                .font(.caption)
-                .foregroundColor(.blue)
-                .frame(width: 50, alignment: .leading)
-
-              Text(segment.text)
-                .font(.subheadline)
-                .foregroundColor(viewModel.currentSegmentId == segment.id ? .primary : .secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(
-              viewModel.currentSegmentId == segment.id
-                ? Color.blue.opacity(0.15)
-                : Color.clear
-            )
-          }
-          .buttonStyle(.plain)
-        }
-      }
-      .background(Color.platformSystemGray6)
-      .cornerRadius(12)
-      .padding(.horizontal, 16)
-    }
-  }
-
-  private func getPreviewSegments() -> [TranscriptSegment] {
-    let segments = viewModel.transcriptSegments
-    guard !segments.isEmpty else { return [] }
-
-    let currentId = viewModel.currentSegmentId ?? 0
-    let startIndex = max(0, currentId - 1)
-    let endIndex = min(segments.count, startIndex + 4)
-
-    return Array(segments[startIndex..<endIndex])
   }
 
   // MARK: - Artwork Section
@@ -254,14 +142,13 @@ struct ExpandedPlayerView: View {
 
     return Group {
       if let imageURL = viewModel.imageURL {
-        AsyncImage(url: imageURL) { phase in
-          if let image = phase.image {
-            image
-              .resizable()
-              .aspectRatio(contentMode: .fill)
-          } else {
-            artworkPlaceholder
-          }
+        // Use CachedAsyncImage for better memory management
+        CachedAsyncImage(url: imageURL) { image in
+          image
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+        } placeholder: {
+          artworkPlaceholder
         }
         .frame(width: baseSize, height: baseSize)
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -284,7 +171,7 @@ struct ExpandedPlayerView: View {
       .overlay(
         Image(systemName: "music.note")
           .font(.system(size: 60))
-          .foregroundColor(.white.opacity(0.5))
+          .foregroundStyle(.white.opacity(0.5))
       )
   }
 
@@ -301,30 +188,31 @@ struct ExpandedPlayerView: View {
             .fontWeight(.bold)
             .lineLimit(2)
             .multilineTextAlignment(.center)
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
 
-          // Podcast name button
-          Button(action: { showPodcastEpisodeList = true }) {
+          // Podcast name button - navigates to show's episode list
+          Button(action: { navigateToPodcast() }) {
             Text(viewModel.podcastTitle)
               .font(.subheadline)
               .fontWeight(.medium)
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
           }
         }
         .frame(maxWidth: .infinity)
         // This ensures the title doesn't overlap the button
         .padding(.leading, 44)
 
-        // 2. Enhanced Ellipsis Button
+        // 2. Enhanced Ellipsis Button - larger touch target
         Menu {
           ellipsisMenuContent
         } label: {
           Image(systemName: "ellipsis.circle.fill")
-            .font(.system(size: 24))
-            .foregroundColor(.secondary.opacity(0.5))
-            .frame(width: 44, height: 44)  // Large touch target
-            .contentShape(Rectangle())  // Makes the whole 44x44 area tappable
+            .font(.system(size: 28))
+            .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(.secondary)
         }
+        .frame(width: 48, height: 48)
+        .contentShape(Rectangle())
       }
       .padding(.horizontal, 20)
 
@@ -333,7 +221,7 @@ struct ExpandedPlayerView: View {
         Text(date.formatted(date: .abbreviated, time: .omitted))
           .font(.caption2)
           .fontWeight(.bold)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
           .textCase(.uppercase)
       }
     }
@@ -375,11 +263,11 @@ struct ExpandedPlayerView: View {
 
     // SECTION 3: Navigation & Info
     Section {
-      Button(action: { showEpisodeDetail = true }) {
+      Button(action: { navigateToEpisodeDetail() }) {
         Label("View Episode Description", systemImage: "doc.text")
       }
 
-      Button(action: { showPodcastEpisodeList = true }) {
+      Button(action: { navigateToPodcast() }) {
         Label("Go to Show", systemImage: "square.stack")
       }
     }
@@ -407,13 +295,14 @@ struct ExpandedPlayerView: View {
             .fill(Color.gray.opacity(0.3))
             .frame(height: 6)
 
-          // Progress
+          // Progress - smooth animation when not scrubbing
           Capsule()
             .fill(Color.primary)
             .frame(
               width: geometry.size.width * CGFloat(displayProgress),
               height: 6
             )
+            .animation(isScrubbing ? nil : .linear(duration: 0.1), value: displayProgress)
 
           // Thumb - slightly larger when scrubbing for better feedback
           Circle()
@@ -425,8 +314,10 @@ struct ExpandedPlayerView: View {
                 min(geometry.size.width * CGFloat(displayProgress) - (isScrubbing ? 9 : 7), geometry.size.width - (isScrubbing ? 18 : 14))
               )
             )
-            .animation(.easeOut(duration: 0.1), value: isScrubbing)
+            .animation(isScrubbing ? nil : .easeOut(duration: 0.15), value: displayProgress)
+            .animation(.spring(response: 0.2, dampingFraction: 0.8), value: isScrubbing)
         }
+        .contentShape(Rectangle())
         .gesture(
           DragGesture(minimumDistance: 0)
             .onChanged { value in
@@ -434,7 +325,9 @@ struct ExpandedPlayerView: View {
               guard !viewModel.isDurationLoading else { return }
               // Start scrubbing - only update visual progress, don't seek yet
               if !isScrubbing {
-                isScrubbing = true
+                withAnimation(.easeOut(duration: 0.1)) {
+                  isScrubbing = true
+                }
                 scrubbingProgress = viewModel.progress
               }
               let progress = value.location.x / geometry.size.width
@@ -443,11 +336,18 @@ struct ExpandedPlayerView: View {
             .onEnded { value in
               // Only seek if duration is available
               guard !viewModel.isDurationLoading else { return }
-              // End scrubbing - now perform the actual seek
+              // End scrubbing - perform the actual seek
               let progress = value.location.x / geometry.size.width
               let finalProgress = min(max(0, progress), 1)
+
+              // First seek to the position
               viewModel.seekToProgress(finalProgress)
-              isScrubbing = false
+
+              // Then smoothly transition out of scrubbing mode
+              // Keep scrubbing progress at final value briefly to prevent snap-back
+              withAnimation(.easeOut(duration: 0.2)) {
+                isScrubbing = false
+              }
             }
         )
         .opacity(viewModel.isDurationLoading ? 0.5 : 1.0)
@@ -458,15 +358,17 @@ struct ExpandedPlayerView: View {
       HStack {
         Text(formatTime(displayCurrentTime))
           .font(.caption)
-          .foregroundColor(isScrubbing ? .primary : .secondary)
+          .foregroundStyle(isScrubbing ? .primary : .secondary)
           .monospacedDigit()
+          .animation(.easeOut(duration: 0.15), value: isScrubbing)
 
         Spacer()
 
         Text("-" + formatTime(displayRemainingTime))
           .font(.caption)
-          .foregroundColor(isScrubbing ? .primary : .secondary)
+          .foregroundStyle(isScrubbing ? .primary : .secondary)
           .monospacedDigit()
+          .animation(.easeOut(duration: 0.15), value: isScrubbing)
       }
     }
   }
@@ -488,7 +390,7 @@ struct ExpandedPlayerView: View {
   // MARK: - Controls Section
   private var controlsSection: some View {
     HStack(spacing: 0) {
-      // Speed button
+      // Speed button - larger touch target
       Button(action: {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
           showSpeedPicker = true
@@ -496,11 +398,12 @@ struct ExpandedPlayerView: View {
       }) {
         Text(formatSpeed(viewModel.playbackSpeed))
           .font(.system(size: 16, weight: .medium))
-          .foregroundColor(.primary)
-          .frame(width: 44, height: 44)
-          .background(Color.gray.opacity(0.2))
-          .clipShape(Circle())
+          .foregroundStyle(.primary)
+          .frame(width: 48, height: 48)
+          .glassEffect(.regular, in: .circle)
       }
+      .frame(width: 56, height: 56)
+      .contentShape(Rectangle())
 
       Spacer()
 
@@ -508,7 +411,7 @@ struct ExpandedPlayerView: View {
       Button(action: { viewModel.skipBackward() }) {
         Image(systemName: "gobackward.15")
           .font(.system(size: 32))
-          .foregroundColor(.primary)
+          .foregroundStyle(.primary)
       }
       .frame(width: 60)
 
@@ -516,7 +419,7 @@ struct ExpandedPlayerView: View {
       Button(action: { viewModel.togglePlayPause() }) {
         Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
           .font(.system(size: 72))
-          .foregroundColor(.primary)
+          .foregroundStyle(.primary)
       }
       .frame(width: 80)
 
@@ -524,20 +427,50 @@ struct ExpandedPlayerView: View {
       Button(action: { viewModel.skipForward() }) {
         Image(systemName: "goforward.30")
           .font(.system(size: 32))
-          .foregroundColor(.primary)
+          .foregroundStyle(.primary)
       }
       .frame(width: 60)
 
       Spacer()
 
-      // Sleep timer button
-      Button(action: {}) {
-        Image(systemName: "moon.zzz")
-          .font(.system(size: 20))
-          .foregroundColor(.primary)
-          .frame(width: 44, height: 44)
-          .background(Color.gray.opacity(0.2))
-          .clipShape(Circle())
+      // Sleep timer button - larger touch target
+      Menu {
+        ForEach(SleepTimerOption.allCases, id: \.self) { option in
+          Button(action: { viewModel.setSleepTimer(option) }) {
+            HStack {
+              Label(option.displayName, systemImage: option.systemImage)
+              if viewModel.sleepTimerOption == option {
+                Spacer()
+                Image(systemName: "checkmark")
+              }
+            }
+          }
+        }
+      } label: {
+        ZStack {
+          Circle()
+            .fill(viewModel.isSleepTimerActive ? Color.blue : Color.gray.opacity(0.2))
+            .frame(width: 48, height: 48)
+
+          if viewModel.isSleepTimerActive {
+            if viewModel.sleepTimerOption == .endOfEpisode {
+              Image(systemName: "stop.circle.fill")
+                .font(.system(size: 22))
+                .foregroundStyle(.white)
+            } else {
+              Text(viewModel.sleepTimerRemainingFormatted)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .minimumScaleFactor(0.5)
+            }
+          } else {
+            Image(systemName: "moon.zzz")
+              .font(.system(size: 22))
+              .foregroundStyle(.primary)
+          }
+        }
+        .frame(width: 56, height: 56) // Larger touch target
+        .contentShape(Rectangle())
       }
     }
     .padding(.horizontal, 24)
@@ -553,13 +486,13 @@ struct ExpandedPlayerView: View {
       Spacer()
 
       // Transcript button - go to episode detail
-      Button(action: { showEpisodeDetail = true }) {
+      Button(action: { navigateToEpisodeDetail() }) {
         HStack(spacing: 4) {
           Image(systemName: "text.bubble")
           Text("Detail")
         }
         .font(.subheadline)
-        .foregroundColor(.blue)
+        .foregroundStyle(.blue)
       }
 
       Spacer()
@@ -579,7 +512,7 @@ struct ExpandedPlayerView: View {
           }
         }
         .font(.title3)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       }
     }
     .padding(.horizontal, 40)
@@ -593,6 +526,51 @@ struct ExpandedPlayerView: View {
     } else {
       return String(format: "%.2gx", speed)
     }
+  }
+
+  // MARK: - Navigation Helpers
+
+  /// Navigate to episode detail - dismisses sheet first, then triggers callback
+  private func navigateToEpisodeDetail() {
+    guard let episode = viewModel.currentEpisode else { return }
+    // Fallback: if episodeDescription is nil, look up the full episode from the podcast model
+    var description = episode.episodeDescription
+    var pubDate = episode.pubDate
+    var guid = episode.guid
+    var duration = episode.duration
+    if description == nil, let podcastModel = viewModel.podcastModel {
+      if let fullEpisode = podcastModel.podcastInfo.episodes.first(where: { $0.title == episode.title }) {
+        description = fullEpisode.podcastEpisodeDescription
+        pubDate = pubDate ?? fullEpisode.pubDate
+        guid = guid ?? fullEpisode.guid
+        duration = duration ?? fullEpisode.duration
+      }
+    }
+    let episodeInfo = PodcastEpisodeInfo(
+      title: episode.title,
+      podcastEpisodeDescription: description,
+      pubDate: pubDate,
+      audioURL: episode.audioURL,
+      imageURL: episode.imageURL,
+      duration: duration,
+      guid: guid
+    )
+    dismiss()
+    onNavigateToEpisodeDetail?(episodeInfo, episode.podcastTitle, episode.imageURL)
+  }
+
+  /// Navigate to podcast episode list - dismisses sheet first, then triggers callback
+  private func navigateToPodcast() {
+    // Retry loading if podcastModel is nil (may not have been loaded yet)
+    if viewModel.podcastModel == nil {
+      viewModel.loadPodcastModel()
+    }
+    guard let podcastModel = viewModel.podcastModel else {
+      logger.warning("Podcast not found in library for navigation")
+      return
+    }
+    dismiss()
+    onNavigateToPodcast?(podcastModel)
   }
 }
 
@@ -622,7 +600,7 @@ struct QueueOverlay: View {
           Button(action: onDismiss) {
             Image(systemName: "xmark.circle.fill")
               .font(.title2)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
         }
         .padding()
@@ -633,13 +611,13 @@ struct QueueOverlay: View {
           VStack(spacing: 12) {
             Image(systemName: "list.bullet")
               .font(.system(size: 40))
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
             Text("Queue is empty")
               .font(.subheadline)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
             Text("Add episodes using 'Play Next'")
               .font(.caption)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .padding()
@@ -654,7 +632,7 @@ struct QueueOverlay: View {
                     .lineLimit(1)
                   Text(episode.podcastTitle)
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                 }
 
@@ -664,7 +642,7 @@ struct QueueOverlay: View {
                 Button(action: { onPlayItem(index) }) {
                   Image(systemName: "play.circle")
                     .font(.title2)
-                    .foregroundColor(.blue)
+                    .foregroundStyle(.blue)
                 }
                 .buttonStyle(.plain)
               }
@@ -684,11 +662,7 @@ struct QueueOverlay: View {
         }
       }
       .frame(maxHeight: 400)
-      .background(
-        RoundedRectangle(cornerRadius: 16)
-          .fill(Color.platformBackground)
-          .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
-      )
+      .glassEffect(Glass.regular, in: .rect(cornerRadius: 16))
       .padding(.horizontal, 16)
     }
   }
@@ -732,18 +706,18 @@ struct SpeedPickerOverlay: View {
         // Header
         HStack {
           Image(systemName: "waveform")
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
           Text("Playback Speed")
             .font(.subheadline)
             .fontWeight(.medium)
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
           Spacer()
 
           // Current speed display
           Text(formatSpeed(sliderValue))
             .font(.title2)
             .fontWeight(.bold)
-            .foregroundColor(.blue)
+            .foregroundStyle(.blue)
             .monospacedDigit()
         }
         .padding(.horizontal, 16)
@@ -764,11 +738,11 @@ struct SpeedPickerOverlay: View {
           } minimumValueLabel: {
             Text("0.5x")
               .font(.caption2)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           } maximumValueLabel: {
             Text("2x")
               .font(.caption2)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
           .tint(.blue)
           .onChange(of: sliderValue) { oldValue, newValue in
@@ -842,10 +816,10 @@ struct SpeedPickerOverlay: View {
             HStack(spacing: 4) {
               Text(showAllSpeeds ? "Show Less" : "More Speeds")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
               Image(systemName: showAllSpeeds ? "chevron.up" : "chevron.down")
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             }
           }
 
@@ -854,22 +828,16 @@ struct SpeedPickerOverlay: View {
           Button("Apply") {
             onSelectSpeed(sliderValue)
           }
+          .buttonStyle(.glassProminent)
           .font(.subheadline)
           .fontWeight(.semibold)
-          .foregroundColor(.white)
           .padding(.horizontal, 20)
           .padding(.vertical, 8)
-          .background(Color.blue)
-          .cornerRadius(20)
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 16)
       }
-      .background(
-        RoundedRectangle(cornerRadius: 16)
-          .fill(Color.platformBackground)
-          .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
-      )
+      .glassEffect(Glass.regular, in: .rect(cornerRadius: 16))
       .padding(.horizontal, 24)
     }
   }
@@ -902,18 +870,27 @@ struct SpeedButton: View {
 
   var body: some View {
     Button(action: onTap) {
-      Text(formatSpeed(speed))
-        .font(.subheadline)
-        .fontWeight(isSelected ? .bold : .medium)
-        .foregroundColor(isSelected ? .white : .primary)
-        .frame(minWidth: 44, minHeight: 36)
-        .padding(.horizontal, 12)
-        .background(
-          Capsule()
-            .fill(isSelected ? Color.blue : Color.platformSystemGray5)
-        )
+      speedLabel
     }
     .buttonStyle(.plain)
+  }
+
+  @ViewBuilder
+  private var speedLabel: some View {
+    let label = Text(formatSpeed(speed))
+      .font(.subheadline)
+      .fontWeight(isSelected ? .bold : .medium)
+      .foregroundStyle(isSelected ? .white : .primary)
+      .frame(minWidth: 44, minHeight: 36)
+      .padding(.horizontal, 12)
+
+    if isSelected {
+      label
+        .background(Capsule().fill(Color.blue))
+    } else {
+      label
+        .glassEffect(Glass.regular.interactive(), in: .capsule)
+    }
   }
 
   private func formatSpeed(_ speed: Float) -> String {
@@ -944,64 +921,25 @@ struct TranscriptFullScreenView: View {
   var body: some View {
     NavigationStack {
       VStack(spacing: 0) {
-        // Search bar
-        HStack {
-          Image(systemName: "magnifyingglass")
-            .foregroundColor(.secondary)
-            .font(.system(size: 14))
-          TextField(
-            "Search transcript...",
-            text: $viewModel.transcriptSearchQuery
-          )
-          .textFieldStyle(.plain)
-          .font(.subheadline)
-          if !viewModel.transcriptSearchQuery.isEmpty {
-            Button(action: { viewModel.transcriptSearchQuery = "" }) {
-              Image(systemName: "xmark.circle.fill")
-                .foregroundColor(.secondary)
-                .font(.system(size: 14))
-            }
-          }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color.platformSystemGray6)
-        .cornerRadius(10)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-
         // Mini player bar
         miniPlayerBar
           .padding(.horizontal, 16)
+          .padding(.top, 10)
           .padding(.bottom, 8)
 
         Divider()
 
-        // Transcript segments
-        ScrollViewReader { proxy in
-          ScrollView {
-            LazyVStack(spacing: 0) {
-              ForEach(viewModel.filteredTranscriptSegments, id: \.id) { segment in
-                TranscriptSegmentRow(
-                  segment: segment,
-                  isCurrentSegment: viewModel.currentSegmentId == segment.id,
-                  searchQuery: viewModel.transcriptSearchQuery,
-                  showTimestamp: true,
-                  onTap: { viewModel.seekToSegment(segment) }
-                )
-                .id(segment.id)
-              }
-            }
-            .padding(.vertical, 8)
+        // Transcript content with search and flowing view
+        FullTranscriptContent(
+          segments: viewModel.transcriptSegments,
+          currentSegmentId: viewModel.currentSegmentId,
+          currentTime: viewModel.isPlaying ? viewModel.currentTime : nil,
+          searchQuery: $viewModel.transcriptSearchQuery,
+          filteredSegments: viewModel.filteredTranscriptSegments,
+          onSegmentTap: { segment in
+            viewModel.seekToSegment(segment)
           }
-          .onChange(of: viewModel.currentSegmentId) { _, newId in
-            if let id = newId, viewModel.transcriptSearchQuery.isEmpty {
-              withAnimation(.easeInOut(duration: 0.3)) {
-                proxy.scrollTo(id, anchor: .center)
-              }
-            }
-          }
-        }
+        )
       }
       .navigationTitle("Transcript")
       #if os(iOS)
@@ -1020,17 +958,15 @@ struct TranscriptFullScreenView: View {
   // Mini player bar inside transcript sheet
   private var miniPlayerBar: some View {
     HStack(spacing: 12) {
-      // Small artwork
+      // Small artwork - use CachedAsyncImage for better memory management
       if let imageURL = viewModel.imageURL {
-        AsyncImage(url: imageURL) { phase in
-          if let image = phase.image {
-            image.resizable().aspectRatio(contentMode: .fill)
-          } else {
-            Color.gray.opacity(0.3)
-          }
+        CachedAsyncImage(url: imageURL) { image in
+          image.resizable().aspectRatio(contentMode: .fill)
+        } placeholder: {
+          Color.gray.opacity(0.3)
         }
         .frame(width: 44, height: 44)
-        .cornerRadius(6)
+        .clipShape(.rect(cornerRadius: 6))
       }
 
       // Episode info
@@ -1041,7 +977,7 @@ struct TranscriptFullScreenView: View {
           .lineLimit(1)
         Text(viewModel.currentTimeString)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
 
       Spacer()
@@ -1051,25 +987,24 @@ struct TranscriptFullScreenView: View {
         Button(action: { viewModel.skipBackward() }) {
           Image(systemName: "gobackward.15")
             .font(.system(size: 20))
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
         }
 
         Button(action: { viewModel.togglePlayPause() }) {
           Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
             .font(.system(size: 24))
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
         }
 
         Button(action: { viewModel.skipForward() }) {
           Image(systemName: "goforward.30")
             .font(.system(size: 20))
-            .foregroundColor(.primary)
+            .foregroundStyle(.primary)
         }
       }
     }
     .padding(12)
-    .background(Color.platformSystemGray6)
-    .cornerRadius(12)
+    .glassEffect(.regular, in: .rect(cornerRadius: 12))
   }
 }
 

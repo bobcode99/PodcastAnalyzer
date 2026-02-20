@@ -7,7 +7,7 @@
 
 import SwiftData
 import SwiftUI
-import os.log
+import OSLog
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "App")
 
@@ -21,6 +21,7 @@ struct PodcastAnalyzerApp: App {
       EpisodeDownloadModel.self,
       EpisodeAIAnalysis.self,
       EpisodeQuickTagsModel.self,
+      QueueItemModel.self,
     ])
     let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -58,33 +59,47 @@ struct PodcastAnalyzerApp: App {
   init() {
     // Register background task for episode sync
     BackgroundSyncManager.registerBackgroundTask()
+
+    // Export previous session's os.log entries to Documents/Logs
+    PersistentLogService.shared.exportLogsInBackground()
   }
 
   var body: some Scene {
     WindowGroup {
       ContentView()
-        .onAppear {
-          // Initialize playback state coordinator on first appear
-          Task { @MainActor in
-            if PlaybackStateCoordinator.shared == nil {
-              _ = PlaybackStateCoordinator(modelContext: sharedModelContainer.mainContext)
-            }
+        .task {
+          // Critical: initialize playback state and sync manager first
+          if PlaybackStateCoordinator.shared == nil {
+            _ = PlaybackStateCoordinator(modelContext: sharedModelContainer.mainContext)
+          }
+          // Restore queue if it was deferred (ContentView.onAppear ran before coordinator init)
+          EnhancedAudioManager.shared.restoreQueueIfNeeded()
+          BackgroundSyncManager.shared.setModelContainer(sharedModelContainer)
 
-            // Set up background sync manager
-            BackgroundSyncManager.shared.setModelContainer(sharedModelContainer)
+          // Start foreground sync if enabled
+          if BackgroundSyncManager.shared.isBackgroundSyncEnabled {
+            BackgroundSyncManager.shared.startForegroundSync()
+            BackgroundSyncManager.shared.scheduleBackgroundRefresh()
+          }
 
-            // Set up podcast import manager
-            PodcastImportManager.shared.setModelContainer(sharedModelContainer)
+          // Deferred: non-critical managers initialized after first frame
+          PodcastImportManager.shared.setModelContainer(sharedModelContainer)
+          NotificationNavigationManager.shared.setModelContainer(sharedModelContainer)
 
-            // Set up notification navigation manager
-            NotificationNavigationManager.shared.setModelContainer(sharedModelContainer)
-
-            // Start foreground sync if enabled
-            if BackgroundSyncManager.shared.isBackgroundSyncEnabled {
-              BackgroundSyncManager.shared.startForegroundSync()
-              BackgroundSyncManager.shared.scheduleBackgroundRefresh()
+          // Register low-memory warning handler to clear caches
+          #if os(iOS)
+          NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+          ) { _ in
+            Task { @MainActor in
+              ImageCacheManager.shared.clearMemoryCache()
+              await RSSCacheService.shared.clearAllCache()
+              logger.warning("Low memory warning: cleared image and RSS caches")
             }
           }
+          #endif
         }
         .onOpenURL { url in
           // Handle URL callbacks from Shortcuts
@@ -124,9 +139,32 @@ struct PodcastAnalyzerApp: App {
   private func handleIncomingURL(_ url: URL) {
     logger.info("Received URL: \(url.absoluteString)")
 
-    // Route to ShortcutsAIService for handling
-    Task { @MainActor in
-      ShortcutsAIService.shared.handleURL(url)
+    // Handle widget deep links
+    if url.scheme == "podcastanalyzer" {
+      Task { @MainActor in
+        switch url.host {
+        case "episode":
+          // Widget tap with audio URL: podcastanalyzer://episode?audio=<encoded_url>
+          if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+             let audioParam = components.queryItems?.first(where: { $0.name == "audio" })?.value {
+            NotificationNavigationManager.shared.navigateToEpisode(audioURL: audioParam)
+          }
+        case "nowplaying":
+          // Navigate to currently playing episode
+          NotificationNavigationManager.shared.navigateToNowPlaying()
+        case "library":
+          // Just open the app to library (no specific navigation needed)
+          break
+        default:
+          // Fall back to Shortcuts handling
+          ShortcutsAIService.shared.handleURL(url)
+        }
+      }
+    } else {
+      // Route to ShortcutsAIService for handling
+      Task { @MainActor in
+        ShortcutsAIService.shared.handleURL(url)
+      }
     }
   }
 }
