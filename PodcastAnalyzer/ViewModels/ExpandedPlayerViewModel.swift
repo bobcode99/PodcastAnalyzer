@@ -50,6 +50,9 @@ final class ExpandedPlayerViewModel {
   private var shareTask: Task<Void, Never>?
 
   @ObservationIgnored
+  private var loadTranscriptTask: Task<Void, Never>?
+
+  @ObservationIgnored
   private var modelContext: ModelContext?
 
   @ObservationIgnored
@@ -436,7 +439,8 @@ final class ExpandedPlayerViewModel {
       return
     }
 
-    Task {
+    loadTranscriptTask?.cancel()
+    loadTranscriptTask = Task {
       let exists = await fileStorage.captionFileExists(
         for: episode.title,
         podcastTitle: episode.podcastTitle
@@ -582,5 +586,7 @@ final class ExpandedPlayerViewModel {
   func cleanup() {
     shareTask?.cancel()
     shareTask = nil
+    loadTranscriptTask?.cancel()
+    loadTranscriptTask = nil
   }
 }

@@ -47,6 +47,7 @@ final class SettingsViewModel {
 
   private var successMessageTask: Task<Void, Never>?
   private var transcriptDownloadTask: Task<Void, Never>?
+  private var transcriptModelStatusTask: Task<Void, Never>?
   private let service = PodcastRssService()
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "SettingsViewModel")
 
@@ -84,6 +85,7 @@ final class SettingsViewModel {
     MainActor.assumeIsolated {
       successMessageTask?.cancel()
       transcriptDownloadTask?.cancel()
+      transcriptModelStatusTask?.cancel()
     }
   }
 
@@ -324,7 +326,8 @@ final class SettingsViewModel {
     #else
       transcriptModelStatus = .checking
 
-      Task {
+      transcriptModelStatusTask?.cancel()
+      transcriptModelStatusTask = Task {
         let transcriptService = TranscriptService(language: selectedTranscriptLocale)
         let isReady = await transcriptService.isModelReady()
 

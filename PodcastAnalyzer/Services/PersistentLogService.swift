@@ -24,6 +24,8 @@ final class PersistentLogService {
       .appendingPathComponent("Logs", isDirectory: true)
   }
 
+  @ObservationIgnored private var exportTask: Task<Void, Never>?
+
   private init() {}
 
   // MARK: - Public API
@@ -35,7 +37,8 @@ final class PersistentLogService {
     let logsDir = logsDirectory
     let log = logger
 
-    Task.detached(priority: .utility) {
+    exportTask?.cancel()
+    exportTask = Task.detached(priority: .utility) {
       do {
         try PersistentLogService.exportLogs(subsystems: subsystems, logsDirectory: logsDir, logger: log)
         PersistentLogService.cleanupOldLogs(logsDirectory: logsDir, keeping: 7, logger: log)

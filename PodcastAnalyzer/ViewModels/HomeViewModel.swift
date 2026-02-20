@@ -47,6 +47,12 @@ final class HomeViewModel {
   @ObservationIgnored
   private var recommendationsTask: Task<Void, Never>?
 
+  @ObservationIgnored
+  private var loadTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var subscribeTask: Task<Void, Never>?
+
   // Podcast preview/subscription
   var selectedPodcast: AppleRSSPodcast?
   var isSubscribing = false
@@ -116,7 +122,7 @@ final class HomeViewModel {
     // Only load if we haven't or if we need a fresh start
     if !isAlreadyLoaded {
       isAlreadyLoaded = true  // Set immediately to prevent race condition
-      Task {
+      loadTask = Task {
         await loadAll()
       }
     }
@@ -195,7 +201,8 @@ final class HomeViewModel {
             isStarred: model?.isStarred ?? false,
             isDownloaded: model?.localAudioPath != nil,
             isCompleted: model?.isCompleted ?? false,
-            lastPlaybackPosition: model?.lastPlaybackPosition ?? 0
+            lastPlaybackPosition: model?.lastPlaybackPosition ?? 0,
+            savedDuration: model?.duration ?? 0
           ))
           if let playedDate = model?.lastPlayedDate {
             lastPlayedDates[key] = playedDate
@@ -409,7 +416,8 @@ final class HomeViewModel {
     subscriptionError = nil
     subscriptionSuccess = false
 
-    Task {
+    subscribeTask?.cancel()
+    subscribeTask = Task {
       do {
         // Look up the podcast to get the RSS feed URL
         guard let result = try await applePodcastService.lookupPodcast(collectionId: podcast.id),
@@ -573,7 +581,8 @@ final class HomeViewModel {
             isStarred: model?.isStarred ?? false,
             isDownloaded: model?.localAudioPath != nil,
             isCompleted: model?.isCompleted ?? false,
-            lastPlaybackPosition: model?.lastPlaybackPosition ?? 0
+            lastPlaybackPosition: model?.lastPlaybackPosition ?? 0,
+            savedDuration: model?.duration ?? 0
           ))
           break
         }
@@ -593,6 +602,10 @@ final class HomeViewModel {
     regionObserverTask = nil
     recommendationsTask?.cancel()
     recommendationsTask = nil
+    loadTask?.cancel()
+    loadTask = nil
+    subscribeTask?.cancel()
+    subscribeTask = nil
   }
 
   // MARK: - Find Podcast Model

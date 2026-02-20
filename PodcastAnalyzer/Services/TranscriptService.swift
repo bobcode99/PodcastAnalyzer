@@ -169,13 +169,14 @@ public actor TranscriptService {
       if let request = try await AssetInventory.assetInstallationRequest(
         supporting: modules)
       {
-        // 4. Start a nested Task to monitor progress
-        Task {
-          while !request.progress.isFinished {
+        // 4. Start a nested Task to monitor progress; tie its lifetime to the stream
+        let pollingTask = Task {
+          while !request.progress.isFinished && !Task.isCancelled {
             continuation.yield(request.progress.fractionCompleted)
             try? await Task.sleep(for: .milliseconds(100))
           }
         }
+        continuation.onTermination = { _ in pollingTask.cancel() }
 
         // 6. Start the actual download and installation
         try await request.downloadAndInstall()

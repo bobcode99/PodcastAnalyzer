@@ -82,8 +82,24 @@ actor FileStorageManager {
   }
 
   private init() {
-    Task {
-      await createDirectories()
+    // Compute directory URLs inline (actor computed properties aren't accessible from nonisolated init)
+    let fm = FileManager.default
+    let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    let lib = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+    #if os(macOS)
+    let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    let audio = appSupport.appendingPathComponent("PodcastAnalyzer/Audio", isDirectory: true)
+    #else
+    let audio = lib.appendingPathComponent("Audio", isDirectory: true)
+    #endif
+    let dirs = [
+      audio,
+      docs.appendingPathComponent("Captions", isDirectory: true),
+      docs.appendingPathComponent("Logs", isDirectory: true),
+      fm.temporaryDirectory.appendingPathComponent("Downloads", isDirectory: true)
+    ]
+    for dir in dirs where !fm.fileExists(atPath: dir.path) {
+      try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
     }
   }
 

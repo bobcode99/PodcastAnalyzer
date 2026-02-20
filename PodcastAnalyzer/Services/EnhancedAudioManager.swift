@@ -117,6 +117,7 @@ class EnhancedAudioManager: NSObject {
   private var timeObserver: Any?
   // Task-based observers for Swift 6 concurrency
   private var interruptionTask: Task<Void, Never>?
+  private var interruptionResumeTask: Task<Void, Never>?
   private var playerEndedTask: Task<Void, Never>?
   private var playerStalledTask: Task<Void, Never>?
   private var artworkFetchTask: Task<Void, Never>?
@@ -251,12 +252,13 @@ private func handleAudioInterruption(_ notification: Notification) {
             // 3. Mandatory Session Reactivation
             do {
                 try AVAudioSession.sharedInstance().setActive(true)
-                
+
                 // 4. Delayed Resume with retry
                 // Audio hardware needs a moment to switch back from the other app
-                Task { [weak self] in
+                interruptionResumeTask?.cancel()
+                interruptionResumeTask = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(0.8))
-                    guard let self else { return }
+                    guard let self, !Task.isCancelled else { return }
                     self.resume()
                     self.wasPlayingBeforeInterruption = false
                     // Verify playback actually started; retry once if not
@@ -1148,14 +1150,16 @@ private func handleAudioInterruption(_ notification: Notification) {
     playerStalledTask?.cancel()
 
     // Observe playback end using Task-based async sequence
-    playerEndedTask = Task { @MainActor [weak self] in
+    playerEndedTask = Task { @MainActor [weak self, weak playerItem] in
+      guard let playerItem else { return }
       for await _ in NotificationCenter.default.notifications(named: .AVPlayerItemDidPlayToEndTime, object: playerItem) {
         self?.handlePlaybackEnded()
       }
     }
 
     // Observe playback stall using Task-based async sequence
-    playerStalledTask = Task { [weak self] in
+    playerStalledTask = Task { [weak self, weak playerItem] in
+      guard let playerItem else { return }
       for await _ in NotificationCenter.default.notifications(named: .AVPlayerItemPlaybackStalled, object: playerItem) {
         self?.logger.warning("Playback stalled")
       }
@@ -1219,6 +1223,8 @@ private func handleAudioInterruption(_ notification: Notification) {
     }
 
     // Cancel Task-based observers
+    interruptionResumeTask?.cancel()
+    interruptionResumeTask = nil
     playerEndedTask?.cancel()
     playerEndedTask = nil
     playerStalledTask?.cancel()

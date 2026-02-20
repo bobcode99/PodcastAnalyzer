@@ -197,6 +197,37 @@ final class EpisodeDetailViewModel {
   @ObservationIgnored
   private var checkTranscriptTask: Task<Void, Never>?
 
+  @ObservationIgnored
+  private var availableTranslationsTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var loadTranscriptDateTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var rssTranscriptCheckTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var loadExistingTranscriptTask: Task<Void, Never>?
+
+  // Tasks for AI and playback operations
+  @ObservationIgnored
+  private var seekTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var onDeviceAICheckTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var quickTagsTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var briefSummaryTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var cloudAnalysisTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var cloudQuestionTask: Task<Void, Never>?
+
   // Flag to track transcript manager observation
   @ObservationIgnored
   private var isObservingTranscriptManager = false
@@ -259,7 +290,9 @@ final class EpisodeDetailViewModel {
   var playbackURL: String {
     // Prefer local file if available
     if let localPath = localAudioPath {
-      return "file://" + localPath
+      // Use URL(fileURLWithPath:) to correctly percent-encode special chars
+      // (spaces, #, Chinese characters, etc.) that "file://" + path breaks
+      return URL(fileURLWithPath: localPath).absoluteString
     }
     return episode.audioURL ?? ""
   }
@@ -307,28 +340,16 @@ final class EpisodeDetailViewModel {
     isPlayingThisEpisode ? audioManager.currentCaption : ""
   }
 
-  var isStarred: Bool {
-    episodeModel?.isStarred ?? false
-  }
-
-  var isCompleted: Bool {
-    episodeModel?.isCompleted ?? false
-  }
-
-  var savedDuration: TimeInterval {
-    episodeModel?.duration ?? 0
-  }
-
-  var lastPlaybackPosition: TimeInterval {
-    episodeModel?.lastPlaybackPosition ?? 0
-  }
+  // Tracked stored properties — updated explicitly so SwiftUI re-renders even
+  // when episodeModel was nil at the initial render (episodeModel is @ObservationIgnored).
+  var isStarred: Bool = false
+  var isCompleted: Bool = false
+  var savedDuration: TimeInterval = 0
+  var lastPlaybackPosition: TimeInterval = 0
+  var playbackProgress: Double = 0
 
   var formattedDuration: String? {
     episode.formattedDuration
-  }
-
-  var playbackProgress: Double {
-    episodeModel?.progress ?? 0
   }
 
   var remainingTimeString: String? {
@@ -340,10 +361,12 @@ final class EpisodeDetailViewModel {
   func playAction() {
     guard let audioURLString = episode.audioURL else { return }
 
-    // Prefer local file if available
+    // Prefer local file if available.
+    // Use URL(fileURLWithPath:) to percent-encode special chars (#, spaces,
+    // Chinese characters, etc.) — "file://" + path breaks URL(string:) in AVPlayer.
     let playbackURL: String
     if let localPath = localAudioPath {
-      playbackURL = "file://" + localPath
+      playbackURL = URL(fileURLWithPath: localPath).absoluteString
     } else {
       playbackURL = audioURLString
     }
@@ -369,6 +392,7 @@ final class EpisodeDetailViewModel {
         model.lastPlaybackPosition = 0
         model.isCompleted = false
         try? modelContext?.save()
+        syncTrackedProperties(from: model)
         startTime = 0
 
         // Force new player if this is the same episode (AVPlayer may be at end-of-media)
@@ -450,10 +474,20 @@ final class EpisodeDetailViewModel {
       let results = try context.fetch(descriptor)
       if let model = results.first {
         episodeModel = model
+        syncTrackedProperties(from: model)
       }
     } catch {
       // Silent fail - model will be refreshed on next timer tick
     }
+  }
+
+  /// Sync tracked stored properties from the episodeModel so SwiftUI sees changes.
+  private func syncTrackedProperties(from model: EpisodeDownloadModel) {
+    isStarred = model.isStarred
+    isCompleted = model.isCompleted
+    savedDuration = model.duration
+    lastPlaybackPosition = model.lastPlaybackPosition
+    playbackProgress = model.progress
   }
 
   // MARK: - SwiftData Persistence
@@ -470,6 +504,7 @@ final class EpisodeDetailViewModel {
       let results = try context.fetch(descriptor)
       if let model = results.first {
         episodeModel = model
+        syncTrackedProperties(from: model)
       } else {
         // Create new model
         createEpisodeModel(context: context)
@@ -494,6 +529,7 @@ final class EpisodeDetailViewModel {
     do {
       try context.save()
       episodeModel = model
+      syncTrackedProperties(from: model)
     } catch {
       logger.error("Failed to create episode model: \(error.localizedDescription)")
     }
@@ -518,6 +554,8 @@ final class EpisodeDetailViewModel {
     } catch {
       logger.error("Failed to save playback position: \(error.localizedDescription)")
     }
+
+    syncTrackedProperties(from: model)
   }
 
   private func updateLastPlayed() {
@@ -691,7 +729,8 @@ final class EpisodeDetailViewModel {
 
   /// Check which translation languages are available (cached)
   func checkAvailableTranslations() {
-    Task {
+    availableTranslationsTask?.cancel()
+    availableTranslationsTask = Task {
       let available = await fileStorage.listAvailableTranslations(
         for: episode.title,
         podcastTitle: podcastTitle
@@ -931,6 +970,7 @@ final class EpisodeDetailViewModel {
     } catch {
       logger.error("Failed to save star state: \(error.localizedDescription)")
     }
+    syncTrackedProperties(from: model)
   }
 
   func togglePlayed() {
@@ -953,6 +993,7 @@ final class EpisodeDetailViewModel {
     } catch {
       logger.error("Failed to save played state: \(error.localizedDescription)")
     }
+    syncTrackedProperties(from: model)
   }
 
   func addToPlayNext() {
@@ -986,7 +1027,8 @@ final class EpisodeDetailViewModel {
 
   /// Check if RSS transcript is available from the feed
   func checkRSSTranscriptAvailability() {
-    Task {
+    rssTranscriptCheckTask?.cancel()
+    rssTranscriptCheckTask = Task {
       let state = await transcriptDownloadService.getDownloadState(
         episodeTitle: episode.title,
         podcastTitle: podcastTitle,
@@ -999,8 +1041,9 @@ final class EpisodeDetailViewModel {
 
         // If already downloaded, load the transcript
         if case .downloaded = state {
-          Task {
-            await loadExistingTranscript()
+          self.loadExistingTranscriptTask?.cancel()
+          self.loadExistingTranscriptTask = Task {
+            await self.loadExistingTranscript()
           }
         }
       }
@@ -1179,7 +1222,8 @@ final class EpisodeDetailViewModel {
         transcriptState = .transcribing(progress: progress)
       case .completed:
         // Load the transcript from disk
-        Task {
+        loadExistingTranscriptTask?.cancel()
+        loadExistingTranscriptTask = Task {
           await loadExistingTranscript()
         }
       case .failed(let error):
@@ -1250,7 +1294,8 @@ final class EpisodeDetailViewModel {
 
   /// Load transcript generation date
   func loadTranscriptDate() {
-    Task {
+    loadTranscriptDateTask?.cancel()
+    loadTranscriptDateTask = Task {
       let date = await transcriptGeneratedAt
       await MainActor.run {
         cachedTranscriptDate = date
@@ -1617,9 +1662,11 @@ final class EpisodeDetailViewModel {
     if !isPlayingThisEpisode {
       playAction()
       // Give player time to initialize, then seek
-      Task { [weak self] in
+      seekTask?.cancel()
+      seekTask = Task { [weak self] in
         try? await Task.sleep(for: .seconds(0.3))
-        self?.audioManager.seek(to: segment.startTime)
+        guard let self, !Task.isCancelled else { return }
+        self.audioManager.seek(to: segment.startTime)
       }
     } else {
       audioManager.seek(to: segment.startTime)
@@ -1682,13 +1729,12 @@ final class EpisodeDetailViewModel {
   /// Check if on-device Foundation Models are available
   func checkOnDeviceAIAvailability() {
     if #available(iOS 26.0, macOS 26.0, *) {
-      Task {
+      onDeviceAICheckTask?.cancel()
+      onDeviceAICheckTask = Task {
         let service = AppleFoundationModelsService()
         let availability = await service.checkAvailability()
-
-        await MainActor.run {
-          onDeviceAIAvailability = availability
-        }
+        guard !Task.isCancelled else { return }
+        onDeviceAIAvailability = availability
       }
     } else {
       onDeviceAIAvailability = .unavailable(reason: "Requires iOS 26 or later")
@@ -1707,11 +1753,10 @@ final class EpisodeDetailViewModel {
       return
     }
 
-    Task {
+    quickTagsTask?.cancel()
+    quickTagsTask = Task {
       do {
-        await MainActor.run {
-          quickTagsState = .analyzing(progress: 0, message: "Generating tags...")
-        }
+        quickTagsState = .analyzing(progress: 0, message: "Generating tags...")
 
         let service = AppleFoundationModelsService()
         let tags = try await service.generateQuickTags(
@@ -1758,7 +1803,8 @@ final class EpisodeDetailViewModel {
       return
     }
 
-    Task {
+    briefSummaryTask?.cancel()
+    briefSummaryTask = Task {
       do {
         await MainActor.run {
           quickTagsState = .analyzing(progress: 0, message: "Creating summary...")
@@ -1816,7 +1862,8 @@ final class EpisodeDetailViewModel {
       return
     }
 
-    Task {
+    cloudAnalysisTask?.cancel()
+    cloudAnalysisTask = Task {
       do {
         await MainActor.run {
           cloudAnalysisState = .analyzing(progress: 0, message: "Preparing...")
@@ -1896,7 +1943,8 @@ final class EpisodeDetailViewModel {
       return
     }
 
-    Task {
+    cloudQuestionTask?.cancel()
+    cloudQuestionTask = Task {
       do {
         await MainActor.run {
           cloudQuestionState = .analyzing(progress: 0, message: "Processing question...")
@@ -2349,6 +2397,36 @@ final class EpisodeDetailViewModel {
 
     checkTranscriptTask?.cancel()
     checkTranscriptTask = nil
+
+    availableTranslationsTask?.cancel()
+    availableTranslationsTask = nil
+
+    loadTranscriptDateTask?.cancel()
+    loadTranscriptDateTask = nil
+
+    rssTranscriptCheckTask?.cancel()
+    rssTranscriptCheckTask = nil
+
+    loadExistingTranscriptTask?.cancel()
+    loadExistingTranscriptTask = nil
+
+    seekTask?.cancel()
+    seekTask = nil
+
+    onDeviceAICheckTask?.cancel()
+    onDeviceAICheckTask = nil
+
+    quickTagsTask?.cancel()
+    quickTagsTask = nil
+
+    briefSummaryTask?.cancel()
+    briefSummaryTask = nil
+
+    cloudAnalysisTask?.cancel()
+    cloudAnalysisTask = nil
+
+    cloudQuestionTask?.cancel()
+    cloudQuestionTask = nil
   }
 
   deinit {
@@ -2358,5 +2436,15 @@ final class EpisodeDetailViewModel {
     shareTask?.cancel()
     parseDescriptionTask?.cancel()
     checkTranscriptTask?.cancel()
+    availableTranslationsTask?.cancel()
+    loadTranscriptDateTask?.cancel()
+    rssTranscriptCheckTask?.cancel()
+    loadExistingTranscriptTask?.cancel()
+    seekTask?.cancel()
+    onDeviceAICheckTask?.cancel()
+    quickTagsTask?.cancel()
+    briefSummaryTask?.cancel()
+    cloudAnalysisTask?.cancel()
+    cloudQuestionTask?.cancel()
   }
 }

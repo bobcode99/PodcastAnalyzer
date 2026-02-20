@@ -26,15 +26,27 @@ struct LibraryEpisode: Identifiable {
   let isDownloaded: Bool
   let isCompleted: Bool
   let lastPlaybackPosition: TimeInterval
+  /// Actual duration measured by AVPlayer and stored in SwiftData.
+  /// More accurate than `episodeInfo.duration` which comes from potentially
+  /// wrong RSS metadata. Zero means not yet measured.
+  let savedDuration: TimeInterval
 
   var hasProgress: Bool {
     lastPlaybackPosition > 0 && !isCompleted
   }
 
-  /// Progress percentage (0.0 to 1.0)
+  /// Progress percentage (0.0 to 1.0).
+  /// Prefers `savedDuration` (measured by AVPlayer) over RSS metadata duration.
   var progress: Double {
-    guard let duration = episodeInfo.duration, duration > 0 else { return 0 }
-    return min(lastPlaybackPosition / Double(duration), 1.0)
+    let dur: Double
+    if savedDuration > 0 {
+      dur = savedDuration
+    } else if let rss = episodeInfo.duration, rss > 0 {
+      dur = Double(rss)
+    } else {
+      return 0
+    }
+    return min(lastPlaybackPosition / dur, 1.0)
   }
 }
 
@@ -105,6 +117,7 @@ final class LibraryViewModel {
     let localAudioPath: String?
     let isCompleted: Bool
     let lastPlaybackPosition: TimeInterval
+    let duration: TimeInterval
   }
 
 
@@ -255,7 +268,7 @@ final class LibraryViewModel {
       let newCount = notification.userInfo?["newEpisodeCount"] as? Int ?? 0
       self.logger.info("Sync completed notification received, \(newCount) new episodes")
 
-      Task { @MainActor in
+      Task {
         // Reload all data sections
         await self.loadAllPodcasts()
         await self.loadLatestEpisodes()
@@ -299,6 +312,7 @@ final class LibraryViewModel {
     )
 
     do {
+      let updatedModel: EpisodeDownloadModel
       if let existingModel = try context.fetch(descriptor).first {
         existingModel.localAudioPath = localPath
         existingModel.downloadedDate = Date()
@@ -307,6 +321,7 @@ final class LibraryViewModel {
           existingModel.fileSize = size
         }
         try context.save()
+        updatedModel = existingModel
       } else {
         // Find the episode from allPodcasts using O(1) lookup
         guard let podcast = podcastTitleMap[podcastTitle],
@@ -328,9 +343,20 @@ final class LibraryViewModel {
         }
         context.insert(model)
         try context.save()
+        updatedModel = model
       }
 
-      // Reload downloaded episodes to update the UI
+      // Optimistic update: immediately add to downloadedEpisodes so the episode
+      // appears in the list in the same render cycle as it leaves downloadingEpisodes.
+      // This prevents a visible flicker where the episode briefly seems to vanish.
+      let libraryEpisode = createLibraryEpisode(from: updatedModel)
+      if !downloadedEpisodes.contains(where: { $0.id == updatedModel.id }) {
+        downloadedEpisodes.insert(libraryEpisode, at: 0)
+      } else if let idx = downloadedEpisodes.firstIndex(where: { $0.id == updatedModel.id }) {
+        downloadedEpisodes[idx] = libraryEpisode
+      }
+
+      // Full async reload for proper sorting and deduplication
       Task {
         await loadDownloadedEpisodesQuick()
       }
@@ -773,7 +799,8 @@ final class LibraryViewModel {
           isStarred: model.isStarred,
           localAudioPath: model.localAudioPath,
           isCompleted: model.isCompleted,
-          lastPlaybackPosition: model.lastPlaybackPosition
+          lastPlaybackPosition: model.lastPlaybackPosition,
+          duration: model.duration
         ))
       }
       episodeDataDict = Dictionary(keyValues, uniquingKeysWith: { _, latest in latest })
@@ -806,7 +833,8 @@ final class LibraryViewModel {
             isStarred: data?.isStarred ?? false,
             isDownloaded: data?.localAudioPath != nil,
             isCompleted: data?.isCompleted ?? false,
-            lastPlaybackPosition: data?.lastPlaybackPosition ?? 0
+            lastPlaybackPosition: data?.lastPlaybackPosition ?? 0,
+            savedDuration: data?.duration ?? 0
           ))
         }
       }
@@ -869,7 +897,8 @@ final class LibraryViewModel {
             isStarred: model.isStarred,
             isDownloaded: model.localAudioPath != nil,
             isCompleted: model.isCompleted,
-            lastPlaybackPosition: model.lastPlaybackPosition
+            lastPlaybackPosition: model.lastPlaybackPosition,
+            savedDuration: model.duration
           )
         }
       }
@@ -897,7 +926,8 @@ final class LibraryViewModel {
       isStarred: model.isStarred,
       isDownloaded: model.localAudioPath != nil,
       isCompleted: model.isCompleted,
-      lastPlaybackPosition: model.lastPlaybackPosition
+      lastPlaybackPosition: model.lastPlaybackPosition,
+      savedDuration: model.duration
     )
   }
 
@@ -941,7 +971,8 @@ final class LibraryViewModel {
         isStarred: model.isStarred,
         isDownloaded: model.localAudioPath != nil,
         isCompleted: model.isCompleted,
-        lastPlaybackPosition: model.lastPlaybackPosition
+        lastPlaybackPosition: model.lastPlaybackPosition,
+        savedDuration: model.duration
       )
     }
 
@@ -973,7 +1004,8 @@ final class LibraryViewModel {
       isStarred: model.isStarred,
       isDownloaded: model.localAudioPath != nil,
       isCompleted: model.isCompleted,
-      lastPlaybackPosition: model.lastPlaybackPosition
+      lastPlaybackPosition: model.lastPlaybackPosition,
+      savedDuration: model.duration
     )
   }
 

@@ -190,6 +190,9 @@ struct EpisodeRowView: View {
     .swipeActions(edge: .leading, allowsFullSwipe: true) {
       leadingSwipeActions
     }
+    .contextMenu {
+      contextMenuContent
+    }
     .onAppear {
       checkAIAnalysis()
       hasCaptionsOnDisk = statusChecker.hasTranscript

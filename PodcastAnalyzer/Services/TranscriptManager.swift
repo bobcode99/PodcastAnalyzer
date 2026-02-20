@@ -65,6 +65,15 @@ class TranscriptManager {
 
   private init() {}
 
+  deinit {
+    MainActor.assumeIsolated {
+      for task in processingTasks.values {
+        task.cancel()
+      }
+      processingTasks.removeAll()
+    }
+  }
+
   // MARK: - Public API
 
   /// Queues a transcript generation job
@@ -177,8 +186,8 @@ class TranscriptManager {
     // Use Task.detached to ensure CPU-intensive work runs on a background thread
     // This prevents blocking the main actor and allows better parallelization
     await Task.detached(priority: .userInitiated) { [weak self] in
-      guard let self = self else { return }
-      
+      guard let self = self, !Task.isCancelled else { return }
+
       do {
         // Verify audio file exists before starting
         let audioURL = URL(fileURLWithPath: job.audioPath)

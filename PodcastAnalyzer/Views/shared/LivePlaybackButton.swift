@@ -261,7 +261,10 @@ extension LivePlaybackButton {
   ) {
     self.episodeTitle = episode.episodeInfo.title
     self.podcastTitle = episode.podcastTitle
-    self.duration = episode.episodeInfo.duration.map { TimeInterval($0) }
+    // Prefer savedDuration (measured by AVPlayer) for accurate "X left" text;
+    // fall back to RSS duration which may be inaccurate for some podcasts.
+    let rssDuration = episode.episodeInfo.duration.map { TimeInterval($0) }
+    self.duration = episode.savedDuration > 0 ? episode.savedDuration : rssDuration
     self.formattedDuration = episode.episodeInfo.formattedDuration
     self.lastPlaybackPosition = episode.lastPlaybackPosition
     self.playbackProgress = episode.progress

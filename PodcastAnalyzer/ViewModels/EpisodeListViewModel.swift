@@ -160,7 +160,7 @@ final class EpisodeListViewModel {
       // Only handle if this is for our podcast
       guard podcastTitle == myPodcastTitle else { return }
 
-      // Dispatch to MainActor for the update
+      // Dispatch to MainActor for the update (handler registered on .main but closure is non-isolated)
       Task { @MainActor in
         self.updateEpisodeDownloadModel(
           episodeTitle: episodeTitle,

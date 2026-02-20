@@ -46,7 +46,11 @@ class PlaybackStateCoordinator {
     logger.info("Playback state coordinator initialized")
   }
 
-  // Note: No deinit needed - task uses [weak self] and will stop when coordinator is deallocated
+  deinit {
+    MainActor.assumeIsolated {
+      notificationTask?.cancel()
+    }
+  }
 
   /// Look up the saved playback position for an episode from SwiftData.
   /// Returns 0 if no saved position or if the episode is already completed.

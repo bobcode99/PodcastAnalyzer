@@ -73,6 +73,12 @@ class BackgroundSyncManager {
     static let lastSyncDate = "lastSyncDate"
   }
 
+  deinit {
+    MainActor.assumeIsolated {
+      foregroundSyncTask?.cancel()
+    }
+  }
+
   private init() {
     // Check if user has explicitly set the preference
     let isFirstLaunch = UserDefaults.standard.object(forKey: Keys.backgroundSyncEnabled) == nil
