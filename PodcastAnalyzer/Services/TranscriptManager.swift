@@ -183,13 +183,16 @@ class TranscriptManager {
       activeJobs[job.id] = updatedJob
     }
 
-    // Use Task.detached to ensure CPU-intensive work runs on a background thread
-    // This prevents blocking the main actor and allows better parallelization
+    // Read the selected engine on the main actor before dispatching work.
+    let engine = await MainActor.run {
+      TranscriptEngine(rawValue: UserDefaults.standard.string(forKey: "transcriptEngine") ?? "")
+        ?? .appleSpeech
+    }
+
     await Task.detached(priority: .userInitiated) { [weak self] in
       guard let self = self, !Task.isCancelled else { return }
 
       do {
-        // Verify audio file exists before starting
         let audioURL = URL(fileURLWithPath: job.audioPath)
         guard FileManager.default.fileExists(atPath: job.audioPath) else {
           throw NSError(
@@ -197,76 +200,133 @@ class TranscriptManager {
             userInfo: [NSLocalizedDescriptionKey: "Audio file not found: \(job.audioPath)"]
           )
         }
-        
-        // Create a fresh TranscriptService for each job to avoid state issues
-        let transcriptService = TranscriptService(language: job.language)
 
-        // Check if model is ready
-        let modelReady = await transcriptService.isModelReady()
+        switch engine {
 
-        if !modelReady {
-          for await progress in await transcriptService.setupAndInstallAssets() {
-            await MainActor.run {
-              var updatedJob = job
-              updatedJob.status = .downloadingModel(progress: progress)
-              self.activeJobs[job.id] = updatedJob
+        // MARK: Apple Speech path (existing behaviour)
+        case .appleSpeech:
+          let transcriptService = TranscriptService(language: job.language)
+
+          let modelReady = await transcriptService.isModelReady()
+          if !modelReady {
+            for await progress in await transcriptService.setupAndInstallAssets() {
+              await MainActor.run {
+                var updatedJob = job
+                updatedJob.status = .downloadingModel(progress: progress)
+                self.activeJobs[job.id] = updatedJob
+              }
             }
+          } else {
+            for await _ in await transcriptService.setupAndInstallAssets() {}
           }
-        } else {
-          // Still need to call setup to initialize
-          for await _ in await transcriptService.setupAndInstallAssets() {
-            // Consume progress
+
+          guard await transcriptService.isInitialized() else {
+            throw NSError(
+              domain: "TranscriptManager", code: 1,
+              userInfo: [NSLocalizedDescriptionKey: "Failed to initialize Apple Speech service"]
+            )
           }
-        }
 
-        guard await transcriptService.isInitialized() else {
-          throw NSError(
-            domain: "TranscriptManager", code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "Failed to initialize transcription service"]
-          )
-        }
-
-        // Start transcription
-        await MainActor.run {
-          var updatedJob = job
-          updatedJob.status = .transcribing(progress: 0)
-          self.activeJobs[job.id] = updatedJob
-        }
-
-        var finalSRTContent: String?
-
-        // CPU-intensive transcription work happens here
-        // Task.detached ensures this runs on a background thread
-        for try await progressUpdate in await transcriptService.audioToSRTChunkedWithProgress(
-          inputFile: audioURL)
-        {
           await MainActor.run {
             var updatedJob = job
-            updatedJob.status = .transcribing(progress: progressUpdate.progress)
+            updatedJob.status = .transcribing(progress: 0)
             self.activeJobs[job.id] = updatedJob
           }
 
-          if progressUpdate.isComplete {
-            finalSRTContent = progressUpdate.srtContent
+          var finalSRTContent: String?
+          for try await progressUpdate in await transcriptService.audioToSRTChunkedWithProgress(
+            inputFile: audioURL)
+          {
+            await MainActor.run {
+              var updatedJob = job
+              updatedJob.status = .transcribing(progress: progressUpdate.progress)
+              self.activeJobs[job.id] = updatedJob
+            }
+            if progressUpdate.isComplete {
+              finalSRTContent = progressUpdate.srtContent
+            }
           }
-        }
 
-        guard let srtContent = finalSRTContent else {
-          throw NSError(
-            domain: "TranscriptManager", code: 2,
-            userInfo: [
-              NSLocalizedDescriptionKey: "Transcription completed but no content was generated"
-            ]
+          guard let srtContent = finalSRTContent else {
+            throw NSError(
+              domain: "TranscriptManager", code: 2,
+              userInfo: [NSLocalizedDescriptionKey: "Transcription produced no content"]
+            )
+          }
+
+          _ = try await self.fileStorage.saveCaptionFile(
+            content: srtContent,
+            episodeTitle: job.episodeTitle,
+            podcastTitle: job.podcastTitle
+          )
+
+        // MARK: Whisper path (WhisperKit)
+        case .whisper:
+          let modelVariant = await MainActor.run {
+            WhisperModelManager.shared.selectedModel
+          }
+
+          // If the model isn't on disk yet, show the downloading phase.
+          if !WhisperModelManager.modelExistsOnDisk(modelVariant) {
+            do {
+              try await WhisperTranscriptService.downloadModel(
+                variant: modelVariant,
+                onProgress: { progress in
+                  Task { @MainActor [weak self] in
+                    var updatedJob = job
+                    updatedJob.status = .downloadingModel(progress: progress)
+                    self?.activeJobs[job.id] = updatedJob
+                  }
+                }
+              )
+            } catch {
+              throw NSError(
+                domain: "TranscriptManager", code: 4,
+                userInfo: [
+                  NSLocalizedDescriptionKey: "Whisper model download failed: \(error.localizedDescription)"
+                ]
+              )
+            }
+          }
+
+          await MainActor.run {
+            var updatedJob = job
+            updatedJob.status = .transcribing(progress: 0)
+            self.activeJobs[job.id] = updatedJob
+          }
+
+          let whisperService = WhisperTranscriptService()
+          var finalSRTContent: String?
+
+          for try await progressUpdate in await whisperService.audioToSRTWithProgress(
+            inputFile: audioURL,
+            modelVariant: modelVariant)
+          {
+            await MainActor.run {
+              var updatedJob = job
+              updatedJob.status = .transcribing(progress: progressUpdate.progress)
+              self.activeJobs[job.id] = updatedJob
+            }
+            if progressUpdate.isComplete {
+              finalSRTContent = progressUpdate.srtContent
+            }
+          }
+
+          guard let srtContent = finalSRTContent else {
+            throw NSError(
+              domain: "TranscriptManager", code: 2,
+              userInfo: [NSLocalizedDescriptionKey: "Whisper transcription produced no content"]
+            )
+          }
+
+          _ = try await self.fileStorage.saveCaptionFile(
+            content: srtContent,
+            episodeTitle: job.episodeTitle,
+            podcastTitle: job.podcastTitle
           )
         }
 
-        // Save the transcript (file I/O can also benefit from background thread)
-        _ = try await fileStorage.saveCaptionFile(
-          content: srtContent,
-          episodeTitle: job.episodeTitle,
-          podcastTitle: job.podcastTitle
-        )
-
+        // MARK: Completion (shared)
         await MainActor.run {
           var updatedJob = job
           updatedJob.status = .completed
@@ -274,7 +334,6 @@ class TranscriptManager {
           self.logger.info("Transcript completed for: \(job.episodeTitle)")
         }
 
-        // Remove from active jobs after a short delay
         try? await Task.sleep(for: .seconds(3))
         _ = await MainActor.run {
           self.activeJobs.removeValue(forKey: job.id)
@@ -285,22 +344,16 @@ class TranscriptManager {
           var updatedJob = job
           updatedJob.status = .failed(error: error.localizedDescription)
           self.activeJobs[job.id] = updatedJob
-          self.logger.error(
-            "Transcript failed for \(job.episodeTitle): \(error.localizedDescription)")
+          self.logger.error("Transcript failed for \(job.episodeTitle): \(error.localizedDescription)")
         }
       }
 
-      // Job completed - clean up and check for more pending jobs
       await MainActor.run {
         self.runningJobIds.remove(job.id)
         self.processingTasks.removeValue(forKey: job.id)
-
-        // Update isProcessing flag
         if self.runningJobIds.isEmpty && self.pendingJobs.isEmpty {
           self.isProcessing = false
         }
-
-        // Start next job if there are pending ones
         self.startProcessingIfNeeded()
       }
     }.value

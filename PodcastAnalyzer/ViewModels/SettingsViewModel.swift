@@ -70,6 +70,32 @@ final class SettingsViewModel {
     static let showEpisodeArtwork = "showEpisodeArtwork"
     static let autoPlayNextEpisode = "autoPlayNextEpisode"
     static let showForYouRecommendations = "showForYouRecommendations"
+    static let transcriptEngine = "transcriptEngine"
+  }
+
+  // MARK: - Transcript Engine
+
+  var selectedTranscriptEngine: TranscriptEngine = .appleSpeech
+
+  func setTranscriptEngine(_ engine: TranscriptEngine) {
+    selectedTranscriptEngine = engine
+    UserDefaults.standard.set(engine.rawValue, forKey: Keys.transcriptEngine)
+    logger.info("Transcript engine set to \(engine.rawValue)")
+    // Refresh Apple Speech model status whenever switching back
+    if engine == .appleSpeech {
+      checkTranscriptModelStatus()
+    } else {
+      WhisperModelManager.shared.checkAllModelStatuses()
+    }
+  }
+
+  private func loadTranscriptEngine() {
+    if let raw = UserDefaults.standard.string(forKey: Keys.transcriptEngine),
+       let engine = TranscriptEngine(rawValue: raw) {
+      selectedTranscriptEngine = engine
+    } else {
+      selectedTranscriptEngine = .appleSpeech
+    }
   }
 
   init() {
@@ -79,6 +105,7 @@ final class SettingsViewModel {
     loadShowEpisodeArtwork()
     loadAutoPlayNextEpisode()
     loadShowForYouRecommendations()
+    loadTranscriptEngine()
   }
 
   deinit {
