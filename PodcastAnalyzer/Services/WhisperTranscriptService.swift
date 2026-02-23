@@ -10,6 +10,17 @@ import Foundation
 import OSLog
 import WhisperKit
 
+// MARK: - Progress Update
+
+/// Progress update emitted during Whisper transcription.
+/// Mirrors the shape of `TranscriptService.TranscriptionProgress` so
+/// `TranscriptManager` can consume both engines identically.
+nonisolated struct TranscriptionProgressUpdate: Sendable {
+    let progress: Double   // 0.0 to 1.0
+    let isComplete: Bool
+    let srtContent: String?  // Only set when isComplete == true
+}
+
 // MARK: - WhisperTranscriptService
 
 /// Actor-isolated service that transcribes audio files using WhisperKit.
@@ -72,16 +83,11 @@ actor WhisperTranscriptService {
                     let options = DecodingOptions(
                         verbose: false,
                         task: .transcribe,
-                        // usePrefillPrompt helps with accuracy on technical content
                         usePrefillPrompt: true,
-                        // Suppress hallucinations on silent segments
-                        noSpeechThreshold: 0.6,
-                        // Compression ratio guard (Whisper default is 2.4)
+                        wordTimestamps: true,
                         compressionRatioThreshold: 2.4,
-                        // Log-probability guard
                         logProbThreshold: -1.0,
-                        // Enable word timestamps for accurate segment boundaries
-                        wordTimestamps: true
+                        noSpeechThreshold: 0.6
                     )
 
                     // WhisperKit streams segment-level results via a callback.
@@ -94,25 +100,27 @@ actor WhisperTranscriptService {
 
                     let results = try await whisper.transcribe(
                         audioPath: inputFile.path,
-                        decodeOptions: options
-                    ) { progress in
-                        // `progress` is a WhisperKit Progress object carrying partial segments.
-                        // Map the last segment end-time to a fraction of total duration.
-                        if let lastEnd = progress.timings?.fullPipeline,
-                           estimatedDuration > 0 {
-                            let fraction = min(Double(lastEnd) / estimatedDuration, 0.95)
-                            if fraction > lastReportedProgress + 0.02 {
-                                lastReportedProgress = fraction
-                                continuation.yield(
-                                    TranscriptionProgressUpdate(
-                                        progress: fraction,
-                                        isComplete: false,
-                                        srtContent: nil
+                        decodeOptions: options,
+                        callback: { progress in
+                            // `progress` is WhisperKit's TranscriptionProgress.
+                            // Map elapsed pipeline time to a fraction of total duration.
+                            let elapsed = progress.timings.fullPipeline
+                            if estimatedDuration > 0 {
+                                let fraction = min(elapsed / estimatedDuration, 0.95)
+                                if fraction > lastReportedProgress + 0.02 {
+                                    lastReportedProgress = fraction
+                                    continuation.yield(
+                                        TranscriptionProgressUpdate(
+                                            progress: fraction,
+                                            isComplete: false,
+                                            srtContent: nil
+                                        )
                                     )
-                                )
+                                }
                             }
+                            return nil  // continue transcription
                         }
-                    }
+                    )
 
                     guard !Task.isCancelled else {
                         continuation.finish(throwing: CancellationError())

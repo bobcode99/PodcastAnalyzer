@@ -267,7 +267,8 @@ class TranscriptManager {
           }
 
           // If the model isn't on disk yet, show the downloading phase.
-          if !WhisperModelManager.modelExistsOnDisk(modelVariant) {
+          let modelOnDisk = await MainActor.run { WhisperModelManager.modelExistsOnDisk(modelVariant) }
+          if !modelOnDisk {
             do {
               try await WhisperTranscriptService.downloadModel(
                 variant: modelVariant,
