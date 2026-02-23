@@ -10,6 +10,7 @@
 		155164762ED374440015567A /* ZMarkupParser in Frameworks */ = {isa = PBXBuildFile; productRef = 155164752ED374440015567A /* ZMarkupParser */; };
 		158240912ED303EC000ABA90 /* FeedKit in Frameworks */ = {isa = PBXBuildFile; productRef = 158240902ED303EC000ABA90 /* FeedKit */; };
 		158240932ED303EC000ABA90 /* XMLKit in Frameworks */ = {isa = PBXBuildFile; productRef = 158240922ED303EC000ABA90 /* XMLKit */; };
+		AA0000032ED303EC000ABAA0 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000022ED303EC000ABAA0 /* WhisperKit */; };
 		15AEEAE02F26464200D90D05 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 15AEEA152F2642D900D90D05 /* WidgetKit.framework */; };
 		15AEEAE12F26464200D90D05 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 15AEEA172F2642D900D90D05 /* SwiftUI.framework */; };
 		15AEEAEE2F26464500D90D05 /* PodcastAnalyzerWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 15AEEADF2F26464200D90D05 /* PodcastAnalyzerWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -125,6 +126,7 @@
 				155164762ED374440015567A /* ZMarkupParser in Frameworks */,
 				158240912ED303EC000ABA90 /* FeedKit in Frameworks */,
 				158240932ED303EC000ABA90 /* XMLKit in Frameworks */,
+				AA0000032ED303EC000ABAA0 /* WhisperKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -224,6 +226,7 @@
 				158240902ED303EC000ABA90 /* FeedKit */,
 				158240922ED303EC000ABA90 /* XMLKit */,
 				155164752ED374440015567A /* ZMarkupParser */,
+				AA0000022ED303EC000ABAA0 /* WhisperKit */,
 			);
 			productName = PodcastAnalyzer;
 			productReference = 15ED5EED2EC44BC6001B6CD7 /* PodcastAnalyzer.app */;
@@ -313,6 +316,7 @@
 			packageReferences = (
 				1582408F2ED303EC000ABA90 /* XCRemoteSwiftPackageReference "FeedKit" */,
 				155164712ED371680015567A /* XCRemoteSwiftPackageReference "ZMarkupParser" */,
+				AA0000012ED303EC000ABAA0 /* XCRemoteSwiftPackageReference "WhisperKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 15ED5EEE2EC44BC6001B6CD7 /* Products */;
@@ -885,6 +889,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		AA0000012ED303EC000ABAA0 /* XCRemoteSwiftPackageReference "WhisperKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/argmaxinc/WhisperKit";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
 		155164712ED371680015567A /* XCRemoteSwiftPackageReference "ZMarkupParser" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/ZhgChgLi/ZMarkupParser.git";
@@ -904,6 +916,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		AA0000022ED303EC000ABAA0 /* WhisperKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0000012ED303EC000ABAA0 /* XCRemoteSwiftPackageReference "WhisperKit" */;
+			productName = WhisperKit;
+		};
 		155164752ED374440015567A /* ZMarkupParser */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 155164712ED371680015567A /* XCRemoteSwiftPackageReference "ZMarkupParser" */;
