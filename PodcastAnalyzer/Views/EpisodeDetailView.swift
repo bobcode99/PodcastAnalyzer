@@ -2,7 +2,7 @@
 //  EpisodeDetailView.swift
 //  PodcastAnalyzer
 //
-//  Redesigned with simpler architecture: single ScrollView + sticky tabs
+//  Fixed header + per-tab ScrollView architecture
 //
 
 import Foundation
@@ -36,7 +36,7 @@ struct EpisodeDetailView: View {
     @State private var showDeleteConfirmation = false
     @State private var showSubtitleSettings = false
     @State private var showTranslationLanguagePicker = false
-    @State private var subtitleSettings = SubtitleSettingsManager.shared
+    private var subtitleSettings: SubtitleSettingsManager { .shared }
 
     // Translation error alert
     @State private var showTranslationError = false
@@ -74,45 +74,6 @@ struct EpisodeDetailView: View {
         )
     }
 
-    /// Destination view for navigating to the podcast's episode list
-    @ViewBuilder
-    private var podcastDestination: some View {
-        // Try to find the podcast model in SwiftData
-        let title = viewModel.podcastTitle
-        let descriptor = FetchDescriptor<PodcastInfoModel>(
-            predicate: #Predicate { $0.title == title }
-        )
-        if let podcastModel = try? modelContext.fetch(descriptor).first {
-            EpisodeListView(podcastModel: podcastModel)
-        } else {
-            // Fallback: show an error or navigate with browse mode
-            ContentUnavailableView(
-                "Podcast Not Found",
-                systemImage: "exclamationmark.triangle",
-                description: Text("This podcast is not in your library")
-            )
-        }
-    }
-
-    private var scrollContent: some View {
-        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-            // Header scrolls away naturally
-            headerSection
-                .padding(.bottom, 8)
-
-            Divider()
-
-            // Sticky tabs + content
-            Section {
-                tabContentView
-                    .frame(minHeight: 400)
-            } header: {
-                tabSelector
-                    .glassEffect(Glass.regular)
-            }
-        }
-    }
-
     /// Current sentence ID for auto-scroll
     private var currentSentenceId: Int? {
         guard viewModel.isCurrentEpisode else { return nil }
@@ -121,32 +82,13 @@ struct EpisodeDetailView: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                scrollContent
-            }
-            .onScrollPhaseChange { _, newPhase in
-                // Disable auto-scroll when user interacts
-                if newPhase == .interacting {
-                    autoScrollEnabled = false
-                }
-            }
-            .onChange(of: currentSentenceId) { _, newId in
-                if autoScrollEnabled, let id = newId, selectedTab == 1, viewModel.transcriptSearchQuery.isEmpty {
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        proxy.scrollTo(id, anchor: .center)
-                    }
-                }
-            }
-            .onChange(of: viewModel.currentMatchIndex) { _, _ in
-                // Scroll to the current search match
-                if !viewModel.searchMatchIds.isEmpty {
-                    let matchId = viewModel.searchMatchIds[viewModel.currentMatchIndex]
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        proxy.scrollTo(matchId, anchor: .center)
-                    }
-                }
-            }
+        VStack(spacing: 0) {
+            EpisodeDetailHeaderView(viewModel: viewModel)
+            Divider()
+            tabSelector
+            Divider()
+            tabContentView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: 80)
@@ -276,9 +218,9 @@ struct EpisodeDetailView: View {
     @ViewBuilder
     private var tabContentView: some View {
         switch selectedTab {
-        case 0: summaryContent
+        case 0: summaryTab
         case 1: transcriptContent
-        case 2: EpisodeAIAnalysisView(viewModel: viewModel, embedsOwnScroll: false)
+        case 2: EpisodeAIAnalysisView(viewModel: viewModel, embedsOwnScroll: true)
         default: EmptyView()
         }
     }
@@ -325,107 +267,18 @@ struct EpisodeDetailView: View {
         )
     }
 
-    // MARK: - Header Section (Updated)
-    private var headerSection: some View {
-        EpisodeDetailHeaderView(viewModel: viewModel)
-    }
-    // MARK: - Download Button (Icon-Only Capsule)
-    @ViewBuilder
-    private var downloadButtonIconOnly: some View {
-        switch viewModel.downloadState {
-        case .notDownloaded:
-            Button(action: { viewModel.startDownload() }) {
-                Image(systemName: "arrow.down.circle")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color.gray)
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-
-        case .downloading(let progress):
-            Button(action: { viewModel.cancelDownload() }) {
-                HStack(spacing: 6) {
-                    // Circular progress indicator
-                    ZStack {
-                        Circle()
-                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
-                            .frame(width: 16, height: 16)
-                        Circle()
-                            .trim(from: 0, to: CGFloat(progress))
-                            .stroke(Color.white, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                            .frame(width: 16, height: 16)
-                            .rotationEffect(.degrees(-90))
-                        Image(systemName: "xmark")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                    Text("\(Int(progress * 100))%")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.white)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Color.orange)
-                .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-
-        case .finishing:
-            HStack(spacing: 6) {
-                ProgressView()
-                    .scaleEffect(0.6)
-                    .tint(.white)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.blue)
-            .clipShape(Capsule())
-
-        case .downloaded:
-            Button(action: { showDeleteConfirmation = true }) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color.green)
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-
-        case .failed:
-            Button(action: { viewModel.startDownload() }) {
-                Image(systemName: "exclamationmark.circle")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color.red)
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
     // MARK: - Tab Selector
     private var tabSelector: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                TabButton(title: "Summary", isSelected: selectedTab == 0) {
-                    withAnimation { selectedTab = 0 }
-                }
-                TabButton(title: "Transcript", isSelected: selectedTab == 1) {
-                    withAnimation { selectedTab = 1 }
-                }
-                TabButton(title: "AI", isSelected: selectedTab == 2) {
-                    withAnimation { selectedTab = 2 }
-                }
+        HStack(spacing: 0) {
+            TabButton(title: "Summary", isSelected: selectedTab == 0) {
+                withAnimation(.easeInOut(duration: 0.2)) { selectedTab = 0 }
             }
-            Divider()
+            TabButton(title: "Transcript", isSelected: selectedTab == 1) {
+                withAnimation(.easeInOut(duration: 0.2)) { selectedTab = 1 }
+            }
+            TabButton(title: "AI", isSelected: selectedTab == 2) {
+                withAnimation(.easeInOut(duration: 0.2)) { selectedTab = 2 }
+            }
         }
     }
 
@@ -445,7 +298,15 @@ struct EpisodeDetailView: View {
         }
     }
 
-    // MARK: - Summary Content (no ScrollView - parent provides scrolling)
+    // MARK: - Summary Tab (owns its own ScrollView)
+    private var summaryTab: some View {
+        ScrollView {
+            summaryContent
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    // MARK: - Summary Content
     private var summaryContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Show translated description if available
@@ -476,18 +337,74 @@ struct EpisodeDetailView: View {
         .padding(.vertical)
     }
 
-    // MARK: - Transcript Content (no ScrollView wrapper - parent provides scrolling)
+    // MARK: - Transcript Content (owns its own ScrollView; search bar always visible)
     private var transcriptContent: some View {
         VStack(spacing: 0) {
+            // Always-visible search bar
+            transcriptHeader
+                .background(.ultraThinMaterial)
+            Divider()
+
+            // Scrollable content area
             if viewModel.hasTranscript && !viewModel.isTranscriptProcessing {
-                // Case 1: Transcript exists and we are idle - show live captions
-                liveCaptionsContent
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            if !viewModel.transcriptSearchQuery.isEmpty,
+                               !viewModel.searchMatchIds.isEmpty {
+                                TranscriptSearchNavigationBar(
+                                    matchCount: viewModel.searchMatchIds.count,
+                                    currentIndex: viewModel.currentMatchIndex,
+                                    onPrevious: { _ = viewModel.previousMatch() },
+                                    onNext: { _ = viewModel.nextMatch() }
+                                )
+                                .padding(.vertical, 4)
+                            }
+
+                            let sentences = viewModel.transcriptSearchQuery.isEmpty
+                                ? viewModel.groupedSentences
+                                : viewModel.filteredGroupedSentences
+                            SentenceBasedTranscriptView(
+                                sentences: sentences,
+                                currentTime: viewModel.isCurrentEpisode ? currentPlaybackTime : nil,
+                                searchQuery: viewModel.transcriptSearchQuery,
+                                onSegmentTap: { viewModel.seekToSegment($0) },
+                                subtitleMode: subtitleSettings.displayMode,
+                                searchMatchIds: Set(viewModel.searchMatchIds),
+                                currentSearchMatchId: viewModel.searchMatchIds.isEmpty
+                                    ? nil : viewModel.searchMatchIds[viewModel.currentMatchIndex]
+                            )
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+                    .onScrollPhaseChange { _, newPhase in
+                        if newPhase == .interacting { autoScrollEnabled = false }
+                    }
+                    .onChange(of: currentSentenceId) { _, newId in
+                        guard autoScrollEnabled,
+                              let id = newId,
+                              viewModel.transcriptSearchQuery.isEmpty else { return }
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                    }
+                    .onChange(of: viewModel.currentMatchIndex) { _, _ in
+                        guard !viewModel.searchMatchIds.isEmpty else { return }
+                        let matchId = viewModel.searchMatchIds[viewModel.currentMatchIndex]
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo(matchId, anchor: .center)
+                        }
+                    }
+                }
             } else {
-                // Case 2: Processing or no transcript
                 transcriptStatusSection
-                    .padding(.vertical)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        .onChange(of: viewModel.transcriptSearchQuery) { _, newQuery in
+            viewModel.updateSearchMatches(query: newQuery)
         }
         .task(id: playbackTimerActive) {
             // Task-based timer for playback updates - automatically cancelled when view disappears
@@ -495,7 +412,6 @@ struct EpisodeDetailView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !Task.isCancelled else { break }
-                // Always update when this episode is current (playing or paused)
                 if viewModel.isCurrentEpisode {
                     await MainActor.run {
                         currentPlaybackTime = viewModel.audioManager.currentTime
@@ -505,59 +421,12 @@ struct EpisodeDetailView: View {
         }
         .onAppear {
             playbackTimerActive = true
-            // Initialize immediately to avoid delay
             if viewModel.isCurrentEpisode {
                 currentPlaybackTime = viewModel.audioManager.currentTime
             }
         }
         .onDisappear {
             playbackTimerActive = false
-        }
-    }
-
-    // MARK: - Live Captions Content (Apple Podcasts Style - Flowing Text)
-    private var liveCaptionsContent: some View {
-        let sentences = viewModel.transcriptSearchQuery.isEmpty
-            ? viewModel.groupedSentences
-            : viewModel.filteredGroupedSentences
-        let searchMatchIdSet = Set(viewModel.searchMatchIds)
-
-        return Section {
-            // Search navigation bar
-            if !viewModel.transcriptSearchQuery.isEmpty && !viewModel.searchMatchIds.isEmpty {
-                TranscriptSearchNavigationBar(
-                    matchCount: viewModel.searchMatchIds.count,
-                    currentIndex: viewModel.currentMatchIndex,
-                    onPrevious: {
-                        _ = viewModel.previousMatch()
-                    },
-                    onNext: {
-                        _ = viewModel.nextMatch()
-                    }
-                )
-                .padding(.vertical, 4)
-            }
-
-            // Sentence-based transcript content
-            SentenceBasedTranscriptView(
-                sentences: sentences,
-                currentTime: viewModel.isCurrentEpisode ? currentPlaybackTime : nil,
-                searchQuery: viewModel.transcriptSearchQuery,
-                onSegmentTap: { segment in
-                    viewModel.seekToSegment(segment)
-                },
-                subtitleMode: subtitleSettings.displayMode,
-                searchMatchIds: searchMatchIdSet,
-                currentSearchMatchId: viewModel.searchMatchIds.isEmpty ? nil : viewModel.searchMatchIds[viewModel.currentMatchIndex]
-            )
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-        } header: {
-            transcriptHeader
-                .background(.ultraThinMaterial)
-        }
-        .onChange(of: viewModel.transcriptSearchQuery) { _, newQuery in
-            viewModel.updateSearchMatches(query: newQuery)
         }
     }
 
