@@ -49,9 +49,9 @@ struct EpisodeListView: View {
 
   @Environment(\.modelContext) private var modelContext
   @Environment(\.dismiss) private var dismiss
-  @Bindable private var downloadManager = DownloadManager.shared
+  private var downloadManager: DownloadManager { .shared }
   @State private var viewModel: EpisodeListViewModel?
-  @State private var settingsViewModel = SettingsViewModel()
+  @AppStorage("showEpisodeArtwork") private var showEpisodeArtwork = true
   @State private var episodeToDelete: PodcastEpisodeInfo?
   @State private var showDeleteConfirmation = false
   @State private var showUnsubscribeConfirmation = false
@@ -157,7 +157,6 @@ struct EpisodeListView: View {
         vm.setModelContext(modelContext)
         viewModel = vm
       }
-      viewModel?.startRefreshTimer()
     }
     .task {
       // Auto-refresh episodes in background when navigating to the podcast
@@ -251,7 +250,6 @@ struct EpisodeListView: View {
       let vm = EpisodeListViewModel(podcastModel: existing)
       vm.setModelContext(modelContext)
       self.viewModel = vm
-      vm.startRefreshTimer()
 
       if applePodcastURL == nil {
         await lookupApplePodcastURL(title: existing.podcastInfo.title)
@@ -281,7 +279,6 @@ struct EpisodeListView: View {
       let vm = EpisodeListViewModel(podcastModel: model)
       vm.setModelContext(modelContext)
       self.viewModel = vm
-      vm.startRefreshTimer()
 
       // Lookup Apple URL if not provided
       if applePodcastURL == nil {
@@ -361,7 +358,7 @@ struct EpisodeListView: View {
             episodeModel: viewModel.episodeModels[
               viewModel.makeEpisodeKey(episode)
             ],
-            showArtwork: settingsViewModel.showEpisodeArtwork,
+            showArtwork: showEpisodeArtwork,
             onToggleStar: {
               viewModel.toggleStar(for: episode)
             },
@@ -572,7 +569,7 @@ struct EpisodeListView: View {
                 )
 
               Button(action: {
-                withAnimation {
+                withAnimation(.easeInOut(duration: 0.2)) {
                   viewModel.isDescriptionExpanded.toggle()
                 }
               }) {
@@ -606,7 +603,7 @@ struct EpisodeListView: View {
   @ViewBuilder
   private func filterSortBar(viewModel: EpisodeListViewModel) -> some View {
     VStack(spacing: 12) {
-      ScrollView(.horizontal, showsIndicators: false) {
+      ScrollView(.horizontal) {
         HStack(spacing: 8) {
           ForEach(EpisodeFilter.allCases, id: \.self) { filter in
             FilterChip(
@@ -648,6 +645,7 @@ struct EpisodeListView: View {
         }
         .padding(.horizontal, 4)
       }
+      .scrollIndicators(.hidden)
     }
     .padding(.horizontal, 16)
     .padding(.bottom, 8)

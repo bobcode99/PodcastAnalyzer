@@ -9,7 +9,7 @@ import UIKit
 struct SettingsView: View {
   @State private var viewModel = SettingsViewModel()
   private var syncManager: BackgroundSyncManager { .shared }
-  @Environment(\.modelContext) var modelContext
+  @Environment(\.modelContext) private var modelContext
   @State private var showAddFeedSheet = false
 
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -381,7 +381,7 @@ struct SettingsView: View {
               .frame(width: 24)
             Text("Version")
             Spacer()
-            Text("1.0.0")
+            Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0")
               .foregroundStyle(.secondary)
           }
         } header: {

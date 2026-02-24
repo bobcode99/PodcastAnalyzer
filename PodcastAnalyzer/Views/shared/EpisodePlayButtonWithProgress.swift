@@ -174,8 +174,5 @@ struct ReactiveEpisodePlayButton: View {
         refreshTrigger.toggle()
       }
     }
-    // Access audioManager properties to trigger observation
-    .onChange(of: audioManager.isPlaying) { _, _ in }
-    .onChange(of: audioManager.currentTime) { _, _ in }
   }
 }

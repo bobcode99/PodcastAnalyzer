@@ -106,6 +106,7 @@ struct MiniPlayerBar: View {
             .frame(width: 32)
             .foregroundStyle(.primary)
         }
+        .accessibilityLabel(audioManager.isPlaying ? "Pause" : "Play")
 
       }
       .padding(.horizontal, 12)

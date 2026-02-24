@@ -253,8 +253,6 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
       // Cancel any pending load when view disappears
       loadTask?.cancel()
       loadTask = nil
-      // Clear image from view state to release memory
-      image = nil
     }
   }
 

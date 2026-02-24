@@ -4,9 +4,23 @@ import SwiftUI
 struct EpisodeTranscriptStatusView: View {
     @Bindable var viewModel: EpisodeDetailViewModel
 
+    /// Maps a bare language code (e.g. "en") to the first matching locale ID (e.g. "en-us")
+    /// so the Picker always has a valid tagged selection.
+    private func resolvedLanguage(_ code: String) -> String {
+        let locales = SettingsViewModel.availableTranscriptLocales
+        // Exact match first
+        if locales.contains(where: { $0.id == code }) { return code }
+        // Prefix match: "en" → "en-us" (first match)
+        if let match = locales.first(where: { $0.id.hasPrefix(code.lowercased() + "-") }) {
+            return match.id
+        }
+        return code
+    }
+
     private var transcriptLanguageName: String {
         let code = viewModel.selectedTranscriptLanguage ?? viewModel.podcastLanguage
-        return SettingsViewModel.availableTranscriptLocales.first { $0.id == code }?.name ?? code
+        let resolved = resolvedLanguage(code)
+        return SettingsViewModel.availableTranscriptLocales.first { $0.id == resolved }?.name ?? code
     }
 
     var body: some View {
@@ -55,9 +69,10 @@ struct EpisodeTranscriptStatusView: View {
 
                         // Language picker for transcript generation
                         Picker("Language", selection: Binding(
-                            get: { viewModel.selectedTranscriptLanguage ?? viewModel.podcastLanguage },
+                            get: { resolvedLanguage(viewModel.selectedTranscriptLanguage ?? viewModel.podcastLanguage) },
                             set: { newValue in
-                                viewModel.selectedTranscriptLanguage = (newValue == viewModel.podcastLanguage) ? nil : newValue
+                                let defaultLocale = resolvedLanguage(viewModel.podcastLanguage)
+                                viewModel.selectedTranscriptLanguage = (newValue == defaultLocale) ? nil : newValue
                             }
                         )) {
                             ForEach(SettingsViewModel.availableTranscriptLocales) { locale in

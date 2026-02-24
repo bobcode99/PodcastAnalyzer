@@ -465,6 +465,13 @@ final class HomeViewModel {
   // MARK: - For You Recommendations
 
   @available(iOS 26.0, macOS 26.0, *)
+  func refreshRecommendations() {
+    recommendations = nil
+    recommendedEpisodes = []
+    loadRecommendations()
+  }
+
+  @available(iOS 26.0, macOS 26.0, *)
   func loadRecommendations() {
     guard !isLoadingRecommendations else { return }
 

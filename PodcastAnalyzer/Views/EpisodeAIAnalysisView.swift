@@ -38,7 +38,7 @@ struct EpisodeAIAnalysisView: View {
       configurationBanner
 
       // Tab selection
-      ScrollView(.horizontal, showsIndicators: false) {
+      ScrollView(.horizontal) {
         HStack(spacing: 12) {
           ForEach(CloudAnalysisTab.allCases) { tab in
             tabButton(for: tab)
@@ -47,6 +47,7 @@ struct EpisodeAIAnalysisView: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
       }
+      .scrollIndicators(.hidden)
 
       Divider()
 

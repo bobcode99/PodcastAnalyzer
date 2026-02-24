@@ -102,6 +102,7 @@ struct EpisodeDetailView: View {
                     Button(action: { showTranslationLanguagePicker = true }) {
                         Image(systemName: "translate")
                     }
+                    .accessibilityLabel("Translate")
                     Menu {
                         EpisodeMenuActions(
                             isStarred: viewModel.isStarred,
@@ -129,6 +130,7 @@ struct EpisodeDetailView: View {
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
+                    .accessibilityLabel("More options")
                 }
             }
         }
@@ -412,9 +414,19 @@ struct EpisodeDetailView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !Task.isCancelled else { break }
-                if viewModel.isCurrentEpisode {
-                    await MainActor.run {
-                        currentPlaybackTime = viewModel.audioManager.currentTime
+                if viewModel.isCurrentEpisode && viewModel.audioManager.isPlaying {
+                    let newTime = viewModel.audioManager.currentTime
+                    // Skip update if time diff < 0.5s and sentence unchanged
+                    let timeDiff = abs(newTime - currentPlaybackTime)
+                    if timeDiff >= 0.5 {
+                        currentPlaybackTime = newTime
+                    } else {
+                        // Check if sentence changed even with small time diff
+                        let newSentenceId = viewModel.groupedSentences.first { $0.containsTime(newTime) }?.id
+                        let oldSentenceId = currentSentenceId
+                        if newSentenceId != oldSentenceId {
+                            currentPlaybackTime = newTime
+                        }
                     }
                 }
             }
@@ -513,6 +525,7 @@ struct EpisodeDetailView: View {
                     .font(.system(size: 18))
                     .foregroundStyle(autoScrollEnabled ? .blue : .secondary)
             }
+            .accessibilityLabel(autoScrollEnabled ? "Disable auto-scroll" : "Enable auto-scroll")
 
             // Display mode picker (when translation exists) or settings button
             if viewModel.hasExistingTranslation {
@@ -547,6 +560,7 @@ struct EpisodeDetailView: View {
                         .font(.system(size: 20))
                         .foregroundStyle(.secondary)
                 }
+                .accessibilityLabel("Subtitle settings")
             }
 
             // Options menu
@@ -596,6 +610,7 @@ struct EpisodeDetailView: View {
                     .font(.system(size: 22))
                     .foregroundStyle(.secondary)
             }
+            .accessibilityLabel("Transcript options")
             } // end else (not searching)
         }
         .animation(.easeInOut(duration: 0.2), value: transcriptSearchFocused)

@@ -112,7 +112,7 @@ struct HomeView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
       } else {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal) {
           HStack(spacing: 12) {
             ForEach(viewModel.upNextEpisodes.prefix(10)) { episode in
               NavigationLink(
@@ -136,6 +136,7 @@ struct HomeView: View {
           }
           .padding(.horizontal)
         }
+        .scrollIndicators(.hidden)
       }
     }
   }
@@ -164,9 +165,7 @@ struct HomeView: View {
               .scaleEffect(0.8)
           } else {
             Button {
-              viewModel.recommendations = nil
-              viewModel.recommendedEpisodes = []
-              viewModel.loadRecommendations()
+              viewModel.refreshRecommendations()
             } label: {
               Image(systemName: "arrow.clockwise")
                 .font(.subheadline)
@@ -188,7 +187,7 @@ struct HomeView: View {
           .frame(maxWidth: .infinity)
           .padding(.vertical, 24)
         } else {
-          ScrollView(.horizontal, showsIndicators: false) {
+          ScrollView(.horizontal) {
             HStack(spacing: 12) {
               ForEach(Array(viewModel.recommendedEpisodes.enumerated()), id: \.element.id) { index, episode in
                 NavigationLink(
@@ -214,6 +213,7 @@ struct HomeView: View {
             }
             .padding(.horizontal)
           }
+          .scrollIndicators(.hidden)
         }
       }
     }
@@ -653,8 +653,10 @@ struct TopPodcastRow: View {
       }
 
       // View on Apple Podcasts
-      Link(destination: URL(string: podcast.url)!) {
-        Label("View on Apple Podcasts", systemImage: "link")
+      if let url = URL(string: podcast.url) {
+        Link(destination: url) {
+          Label("View on Apple Podcasts", systemImage: "link")
+        }
       }
 
       Divider()
@@ -667,10 +669,12 @@ struct TopPodcastRow: View {
       }
 
       // Share
-      Button {
-        PlatformShareSheet.share(url: URL(string: podcast.url)!)
-      } label: {
-        Label("Share", systemImage: "square.and.arrow.up")
+      if let url = URL(string: podcast.url) {
+        Button {
+          PlatformShareSheet.share(url: url)
+        } label: {
+          Label("Share", systemImage: "square.and.arrow.up")
+        }
       }
     }
 
@@ -807,11 +811,13 @@ struct PodcastPreviewSheet: View {
           }
 
           // View on Apple Podcasts
-          Link(destination: URL(string: podcast.url)!) {
-            Label("View on Apple Podcasts", systemImage: "link")
-              .font(.subheadline)
+          if let url = URL(string: podcast.url) {
+            Link(destination: url) {
+              Label("View on Apple Podcasts", systemImage: "link")
+                .font(.subheadline)
+            }
+            .padding(.top, 8)
           }
-          .padding(.top, 8)
         }
         .padding()
       }
@@ -842,12 +848,13 @@ struct UpNextListView: View {
   @Environment(\.modelContext) private var modelContext
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
+  @State private var episodeModels: [String: EpisodeDownloadModel] = [:]
 
   var body: some View {
     List(episodes) { episode in
       EpisodeRowView(
         libraryEpisode: episode,
-        episodeModel: fetchEpisodeModel(for: episode),
+        episodeModel: episodeModels[episode.id],
         onToggleStar: { toggleStar(episode) },
         onDownload: { downloadEpisode(episode) },
         onDeleteRequested: {
@@ -859,6 +866,8 @@ struct UpNextListView: View {
       .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
     }
     .listStyle(.plain)
+    .onAppear { batchFetchEpisodeModels() }
+    .onChange(of: episodes.map(\.id)) { _, _ in batchFetchEpisodeModels() }
     .navigationTitle("Up Next")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
@@ -884,16 +893,18 @@ struct UpNextListView: View {
 
   // MARK: - Helper Methods
 
-  private func fetchEpisodeModel(for episode: LibraryEpisode) -> EpisodeDownloadModel? {
-    let episodeId = episode.id
-    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      predicate: #Predicate { $0.id == episodeId }
-    )
-    return try? modelContext.fetch(descriptor).first
+  private func batchFetchEpisodeModels() {
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+    guard let results = try? modelContext.fetch(descriptor) else { return }
+    var models: [String: EpisodeDownloadModel] = [:]
+    for model in results {
+      models[model.id] = model
+    }
+    episodeModels = models
   }
 
   private func toggleStar(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isStarred.toggle()
       try? modelContext.save()
     } else if let audioURL = episode.episodeInfo.audioURL {
@@ -907,11 +918,12 @@ struct UpNextListView: View {
       model.isStarred = true
       modelContext.insert(model)
       try? modelContext.save()
+      episodeModels[episode.id] = model
     }
   }
 
   private func togglePlayed(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isCompleted.toggle()
       if !model.isCompleted {
         model.lastPlaybackPosition = 0
@@ -928,6 +940,7 @@ struct UpNextListView: View {
       model.isCompleted = true
       modelContext.insert(model)
       try? modelContext.save()
+      episodeModels[episode.id] = model
     }
   }
 

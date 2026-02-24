@@ -43,11 +43,6 @@ struct iOSContentView: View {
   @State private var expandedPlayerPodcastModel: PodcastInfoModel?
   @State private var showExpandedPlayerPodcast: Bool = false
 
-    private var showMiniPlayer: Bool {
-        // Change this to true so it always shows even if empty
-        return true
-    }
-
   var body: some View {
     TabView {
       Tab(Constants.homeString, systemImage: Constants.homeIconName) {
@@ -127,9 +122,7 @@ struct iOSContentView: View {
       }
     }
     .tabViewBottomAccessory {
-      if showMiniPlayer {
-        MiniPlayerBar(pendingNavigation: $expandedPlayerNavigation)
-      }
+      MiniPlayerBar(pendingNavigation: $expandedPlayerNavigation)
     }
     .onChange(of: expandedPlayerNavigation) { _, newValue in
       handleExpandedPlayerNavigation(newValue)

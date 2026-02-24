@@ -22,14 +22,22 @@ private let viewModelLogger = Logger(subsystem: "com.podcast.analyzer", category
 @MainActor
 @Observable
 final class EpisodeListViewModel {
-  var episodeModels: [String: EpisodeDownloadModel] = [:]
+  var episodeModels: [String: EpisodeDownloadModel] = [:] {
+    didSet { recomputeFilteredEpisodes() }
+  }
 
   #if DEBUG
   private let instanceId = UUID()
   #endif
-  var selectedFilter: EpisodeFilter = .all
-  var sortOldestFirst: Bool = false
-  var searchText: String = ""
+  var selectedFilter: EpisodeFilter = .all {
+    didSet { recomputeFilteredEpisodes() }
+  }
+  var sortOldestFirst: Bool = false {
+    didSet { recomputeFilteredEpisodes() }
+  }
+  var searchText: String = "" {
+    didSet { recomputeFilteredEpisodes() }
+  }
   var isRefreshing: Bool = false
   var isDescriptionExpanded: Bool = false
 
@@ -47,19 +55,24 @@ final class EpisodeListViewModel {
   private let downloadManager = DownloadManager.shared
   private let rssService = PodcastRssService()
   private var modelContext: ModelContext?
-  private var refreshTask: Task<Void, Never>?
   private var downloadCompletionObserver: NSObjectProtocol?
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
   private static let episodeKeyDelimiter = "\u{1F}"
 
-  // MARK: - Computed Properties
+  // MARK: - Cached Filtered Episodes
+
+  private(set) var filteredEpisodes: [PodcastEpisodeInfo] = []
 
   var podcastInfo: PodcastInfo {
     podcastModel.podcastInfo
   }
 
-  var filteredEpisodes: [PodcastEpisodeInfo] {
+  var filteredEpisodeCount: Int {
+    filteredEpisodes.count
+  }
+
+  private func recomputeFilteredEpisodes() {
     var episodes = podcastModel.podcastInfo.episodes
 
     // Apply search filter first
@@ -112,11 +125,7 @@ final class EpisodeListViewModel {
       }
     }
 
-    return episodes
-  }
-
-  var filteredEpisodeCount: Int {
-    filteredEpisodes.count
+    filteredEpisodes = episodes
   }
 
   // MARK: - Initialization
@@ -124,6 +133,7 @@ final class EpisodeListViewModel {
   init(podcastModel: PodcastInfoModel, initialFilter: EpisodeFilter = .all) {
     self.podcastModel = podcastModel
     self.selectedFilter = initialFilter
+    recomputeFilteredEpisodes()
     parseDescription()
     #if DEBUG
     viewModelLogger.info("📦 EpisodeListViewModel INIT: \(self.instanceId) for \(podcastModel.podcastInfo.title)")
@@ -246,27 +256,6 @@ final class EpisodeListViewModel {
     }
   }
 
-  // MARK: - Timer Management
-
-  func startRefreshTimer() {
-    // Stop any existing timer first to prevent duplicates
-    stopRefreshTimer()
-
-    // Refresh every 5 seconds instead of 2 to reduce CPU usage
-    refreshTask = Task { [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .seconds(5))
-        guard let self, !Task.isCancelled else { return }
-        self.loadEpisodeModels()
-      }
-    }
-  }
-
-  func stopRefreshTimer() {
-    refreshTask?.cancel()
-    refreshTask = nil
-  }
-
   // MARK: - Episode Key Helper
 
   func makeEpisodeKey(_ episode: PodcastEpisodeInfo) -> String {
@@ -305,6 +294,7 @@ final class EpisodeListViewModel {
       let updatedPodcast = try await rssService.fetchPodcast(
         from: podcastModel.podcastInfo.rssUrl)
       podcastModel.podcastInfo = updatedPodcast
+      recomputeFilteredEpisodes()
       try? modelContext?.save()
     } catch {
       print("Failed to refresh podcast: \(error)")
@@ -390,7 +380,6 @@ final class EpisodeListViewModel {
     #if DEBUG
     viewModelLogger.info("🗑️ EpisodeListViewModel CLEANUP: \(self.instanceId)")
     #endif
-    stopRefreshTimer()
     if let observer = downloadCompletionObserver {
       NotificationCenter.default.removeObserver(observer)
       downloadCompletionObserver = nil

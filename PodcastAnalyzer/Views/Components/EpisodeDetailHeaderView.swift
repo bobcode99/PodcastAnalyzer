@@ -5,19 +5,14 @@ import SwiftUI
 struct EpisodeDetailHeaderView: View {
     @Bindable var viewModel: EpisodeDetailViewModel
     @Environment(\.modelContext) private var modelContext
+    @State private var cachedPodcastModel: PodcastInfoModel?
 
     /// Destination view for navigating to the podcast's episode list
     @ViewBuilder
     private var podcastDestination: some View {
-        // Try to find the podcast model in SwiftData
-        let title = viewModel.podcastTitle
-        let descriptor = FetchDescriptor<PodcastInfoModel>(
-            predicate: #Predicate { $0.title == title }
-        )
-        if let podcastModel = try? modelContext.fetch(descriptor).first {
+        if let podcastModel = cachedPodcastModel {
             EpisodeListView(podcastModel: podcastModel)
         } else {
-            // Fallback: show an error or navigate with browse mode
             ContentUnavailableView(
                 "Podcast Not Found",
                 systemImage: "exclamationmark.triangle",
@@ -189,5 +184,12 @@ struct EpisodeDetailHeaderView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
+        .task {
+            let title = viewModel.podcastTitle
+            let descriptor = FetchDescriptor<PodcastInfoModel>(
+                predicate: #Predicate { $0.title == title }
+            )
+            cachedPodcastModel = try? modelContext.fetch(descriptor).first
+        }
     }
 }

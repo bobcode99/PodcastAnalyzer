@@ -786,7 +786,7 @@ struct SpeedPickerOverlay: View {
           .padding(.horizontal, 12)
 
         // Quick speed buttons
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal) {
           HStack(spacing: 8) {
             ForEach(showAllSpeeds ? allSpeeds : quickSpeeds, id: \.self) { speed in
               SpeedButton(
@@ -805,6 +805,7 @@ struct SpeedPickerOverlay: View {
           .padding(.horizontal, 16)
           .padding(.vertical, 12)
         }
+        .scrollIndicators(.hidden)
 
         // "More Speeds" hint and Apply button
         HStack {

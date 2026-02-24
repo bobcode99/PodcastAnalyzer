@@ -12,7 +12,7 @@ import UIKit
 #endif
 
 struct AISettingsView: View {
-    @State private var settings = AISettingsManager.shared
+    @Bindable private var settings = AISettingsManager.shared
     @State private var showingTestResult = false
     @State private var testResultMessage = ""
     @State private var testResultSuccess = false

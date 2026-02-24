@@ -18,7 +18,7 @@ import UIKit
 
 struct LibraryView: View {
   @State private var viewModel = LibraryViewModel(modelContext: nil)
-  @State private var settingsViewModel = SettingsViewModel()
+  @AppStorage("showEpisodeArtwork") private var showEpisodeArtwork = true
   @Environment(\.modelContext) private var modelContext
 
   // Use @Query for instant persistence and automatic updates
@@ -127,7 +127,7 @@ struct LibraryView: View {
       // Row of quick access cards
       HStack(spacing: 12) {
         // Saved (Starred) card
-        NavigationLink(destination: SavedEpisodesView(viewModel: viewModel, showEpisodeArtwork: settingsViewModel.showEpisodeArtwork)) {
+        NavigationLink(destination: SavedEpisodesView(viewModel: viewModel, showEpisodeArtwork: showEpisodeArtwork)) {
           QuickAccessCard(
             icon: "star.fill",
             iconColor: .yellow,
@@ -152,7 +152,7 @@ struct LibraryView: View {
       }
 
       // Latest episodes row
-      NavigationLink(destination: LatestEpisodesView(viewModel: viewModel, showEpisodeArtwork: settingsViewModel.showEpisodeArtwork)) {
+      NavigationLink(destination: LatestEpisodesView(viewModel: viewModel, showEpisodeArtwork: showEpisodeArtwork)) {
         HStack {
           HStack(spacing: 8) {
             Image(systemName: "clock.fill")
@@ -389,11 +389,15 @@ struct QuickAccessCard: View {
 struct PodcastGridCell: View {
   let podcast: PodcastInfoModel
 
-  private var latestEpisodeDate: String? {
-    guard let date = podcast.podcastInfo.episodes.first?.pubDate else { return nil }
+  private static let relativeDateFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
     formatter.unitsStyle = .abbreviated
-    return formatter.localizedString(for: date, relativeTo: Date())
+    return formatter
+  }()
+
+  private var latestEpisodeDate: String? {
+    guard let date = podcast.podcastInfo.episodes.first?.pubDate else { return nil }
+    return Self.relativeDateFormatter.localizedString(for: date, relativeTo: Date())
   }
 
   var body: some View {
@@ -435,6 +439,7 @@ struct SavedEpisodesView: View {
   @Environment(\.modelContext) private var modelContext
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
+  @State private var episodeModels: [String: EpisodeDownloadModel] = [:]
 
   var body: some View {
     Group {
@@ -444,7 +449,7 @@ struct SavedEpisodesView: View {
         List(viewModel.filteredSavedEpisodes) { episode in
           EpisodeRowView(
             libraryEpisode: episode,
-            episodeModel: fetchEpisodeModel(for: episode),
+            episodeModel: episodeModels[episode.id],
             showArtwork: showEpisodeArtwork,
             onToggleStar: { toggleStar(episode) },
             onDownload: { downloadEpisode(episode) },
@@ -469,6 +474,7 @@ struct SavedEpisodesView: View {
     #endif
     .onAppear {
       viewModel.setModelContext(modelContext)
+      batchFetchEpisodeModels()
       Task {
         await viewModel.refreshSavedEpisodes()
       }
@@ -510,31 +516,29 @@ struct SavedEpisodesView: View {
 
   // MARK: - Helper Methods
 
-  private func fetchEpisodeModel(for episode: LibraryEpisode) -> EpisodeDownloadModel? {
-    let episodeId = episode.id
-    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      predicate: #Predicate { $0.id == episodeId }
-    )
-    return try? modelContext.fetch(descriptor).first
+  private func batchFetchEpisodeModels() {
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+    guard let results = try? modelContext.fetch(descriptor) else { return }
+    var models: [String: EpisodeDownloadModel] = [:]
+    for model in results { models[model.id] = model }
+    episodeModels = models
   }
 
   private func toggleStar(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isStarred.toggle()
       try? modelContext.save()
-      // Refresh only saved section
       Task { await viewModel.refreshSavedEpisodes() }
     }
   }
 
   private func togglePlayed(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isCompleted.toggle()
       if !model.isCompleted {
         model.lastPlaybackPosition = 0
       }
       try? modelContext.save()
-      // Refresh to update UI state
       Task { await viewModel.refreshSavedEpisodes() }
     }
   }
@@ -552,14 +556,10 @@ struct SavedEpisodesView: View {
       episodeTitle: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle
     )
-    
-    // Update model immediately
-    if let model = fetchEpisodeModel(for: episode) {
-        model.localAudioPath = nil
-        try? modelContext.save()
+    if let model = episodeModels[episode.id] {
+      model.localAudioPath = nil
+      try? modelContext.save()
     }
-    
-    // Refresh list
     Task { await viewModel.refreshSavedEpisodes() }
   }
 }
@@ -659,6 +659,7 @@ struct DownloadedEpisodesView: View {
   @Environment(\.modelContext) private var modelContext
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
+  @State private var episodeModels: [String: EpisodeDownloadModel] = [:]
 
   var body: some View {
     Group {
@@ -688,7 +689,7 @@ struct DownloadedEpisodesView: View {
               ForEach(viewModel.filteredDownloadedEpisodes) { episode in
                 EpisodeRowView(
                   libraryEpisode: episode,
-                  episodeModel: fetchEpisodeModel(for: episode),
+                  episodeModel: episodeModels[episode.id],
                   showArtwork: showEpisodeArtwork,
                   onToggleStar: { toggleStar(episode) },
                   onDownload: { downloadEpisode(episode) },
@@ -724,6 +725,7 @@ struct DownloadedEpisodesView: View {
     #endif
     .onAppear {
       viewModel.setModelContext(modelContext)
+      batchFetchEpisodeModels()
       Task {
         await viewModel.refreshDownloadedEpisodes()
       }
@@ -765,16 +767,16 @@ struct DownloadedEpisodesView: View {
 
   // MARK: - Helper Methods
 
-  private func fetchEpisodeModel(for episode: LibraryEpisode) -> EpisodeDownloadModel? {
-    let episodeId = episode.id
-    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      predicate: #Predicate { $0.id == episodeId }
-    )
-    return try? modelContext.fetch(descriptor).first
+  private func batchFetchEpisodeModels() {
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+    guard let results = try? modelContext.fetch(descriptor) else { return }
+    var models: [String: EpisodeDownloadModel] = [:]
+    for model in results { models[model.id] = model }
+    episodeModels = models
   }
 
   private func toggleStar(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isStarred.toggle()
       try? modelContext.save()
       Task { await viewModel.refreshDownloadedEpisodes() }
@@ -782,7 +784,7 @@ struct DownloadedEpisodesView: View {
   }
 
   private func togglePlayed(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isCompleted.toggle()
       if !model.isCompleted {
         model.lastPlaybackPosition = 0
@@ -805,14 +807,10 @@ struct DownloadedEpisodesView: View {
       episodeTitle: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle
     )
-    
-    // Update model immediately
-    if let model = fetchEpisodeModel(for: episode) {
-        model.localAudioPath = nil
-        try? modelContext.save()
+    if let model = episodeModels[episode.id] {
+      model.localAudioPath = nil
+      try? modelContext.save()
     }
-    
-    // Refresh list
     Task { await viewModel.refreshDownloadedEpisodes() }
   }
 }
@@ -890,6 +888,7 @@ struct LatestEpisodesView: View {
   @Environment(\.modelContext) private var modelContext
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
+  @State private var episodeModels: [String: EpisodeDownloadModel] = [:]
 
   var body: some View {
     Group {
@@ -899,7 +898,7 @@ struct LatestEpisodesView: View {
         List(viewModel.filteredLatestEpisodes) { episode in
           EpisodeRowView(
             libraryEpisode: episode,
-            episodeModel: fetchEpisodeModel(for: episode),
+            episodeModel: episodeModels[episode.id],
             showArtwork: showEpisodeArtwork,
             onToggleStar: { toggleStar(episode) },
             onDownload: { downloadEpisode(episode) },
@@ -924,6 +923,7 @@ struct LatestEpisodesView: View {
     #endif
     .onAppear {
       viewModel.setModelContext(modelContext)
+      batchFetchEpisodeModels()
     }
     .confirmationDialog(
       "Delete Download",
@@ -962,21 +962,20 @@ struct LatestEpisodesView: View {
 
   // MARK: - Helper Methods
 
-  private func fetchEpisodeModel(for episode: LibraryEpisode) -> EpisodeDownloadModel? {
-    let episodeId = episode.id
-    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      predicate: #Predicate { $0.id == episodeId }
-    )
-    return try? modelContext.fetch(descriptor).first
+  private func batchFetchEpisodeModels() {
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+    guard let results = try? modelContext.fetch(descriptor) else { return }
+    var models: [String: EpisodeDownloadModel] = [:]
+    for model in results { models[model.id] = model }
+    episodeModels = models
   }
 
   private func toggleStar(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isStarred.toggle()
       try? modelContext.save()
       viewModel.setModelContext(modelContext)
     } else if let audioURL = episode.episodeInfo.audioURL {
-      // Create model if it doesn't exist
       let model = EpisodeDownloadModel(
         episodeTitle: episode.episodeInfo.title,
         podcastTitle: episode.podcastTitle,
@@ -987,12 +986,13 @@ struct LatestEpisodesView: View {
       model.isStarred = true
       modelContext.insert(model)
       try? modelContext.save()
+      episodeModels[episode.id] = model
       viewModel.setModelContext(modelContext)
     }
   }
 
   private func togglePlayed(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isCompleted.toggle()
       if !model.isCompleted {
         model.lastPlaybackPosition = 0
@@ -1000,7 +1000,6 @@ struct LatestEpisodesView: View {
       try? modelContext.save()
       viewModel.setModelContext(modelContext)
     } else if let audioURL = episode.episodeInfo.audioURL {
-      // Create model if it doesn't exist
       let model = EpisodeDownloadModel(
         episodeTitle: episode.episodeInfo.title,
         podcastTitle: episode.podcastTitle,
@@ -1011,6 +1010,7 @@ struct LatestEpisodesView: View {
       model.isCompleted = true
       modelContext.insert(model)
       try? modelContext.save()
+      episodeModels[episode.id] = model
       viewModel.setModelContext(modelContext)
     }
   }
@@ -1041,6 +1041,7 @@ struct LibraryEpisodeContextMenu: View {
 
   private let downloadManager = DownloadManager.shared
   private let audioManager = EnhancedAudioManager.shared
+  @State private var cachedPodcastModel: PodcastInfoModel?
 
   private var statusChecker: EpisodeStatusChecker {
     EpisodeStatusChecker(episode: episode)
@@ -1052,89 +1053,94 @@ struct LibraryEpisodeContextMenu: View {
   private var playbackURL: String { statusChecker.playbackURL }
 
   var body: some View {
-    // Go to Show
-    goToShowButton
+    Group {
+      // Go to Show
+      goToShowButton
 
-    Divider()
+      Divider()
 
-    // Play episode
-    Button {
-      playEpisode()
-    } label: {
-      Label("Play Episode", systemImage: "play.fill")
-    }
-    .disabled(episode.episodeInfo.audioURL == nil)
-
-    // Play Next
-    Button {
-      addToPlayNext()
-    } label: {
-      Label("Play Next", systemImage: "text.insert")
-    }
-    .disabled(episode.episodeInfo.audioURL == nil)
-
-    Divider()
-
-    // Star/Unstar
-    Button {
-      toggleStar()
-    } label: {
-      Label(
-        episode.isStarred ? "Remove from Saved" : "Save Episode",
-        systemImage: episode.isStarred ? "star.slash" : "star"
-      )
-    }
-
-    // Mark as Played/Unplayed
-    Button {
-      togglePlayed()
-    } label: {
-      Label(
-        episode.isCompleted ? "Mark as Unplayed" : "Mark as Played",
-        systemImage: episode.isCompleted ? "arrow.counterclockwise" : "checkmark.circle"
-      )
-    }
-
-    Divider()
-
-    // Download/Delete download
-    if isDownloaded {
-      Button(role: .destructive) {
-        deleteDownload()
-      } label: {
-        Label("Delete Download", systemImage: "trash")
-      }
-    } else if case .downloading = downloadState {
+      // Play episode
       Button {
-        cancelDownload()
+        playEpisode()
       } label: {
-        Label("Cancel Download", systemImage: "xmark.circle")
+        Label("Play Episode", systemImage: "play.fill")
       }
-    } else if episode.episodeInfo.audioURL != nil {
+      .disabled(episode.episodeInfo.audioURL == nil)
+
+      // Play Next
       Button {
-        startDownload()
+        addToPlayNext()
       } label: {
-        Label("Download", systemImage: "arrow.down.circle")
+        Label("Play Next", systemImage: "text.insert")
+      }
+      .disabled(episode.episodeInfo.audioURL == nil)
+
+      Divider()
+
+      // Star/Unstar
+      Button {
+        toggleStar()
+      } label: {
+        Label(
+          episode.isStarred ? "Remove from Saved" : "Save Episode",
+          systemImage: episode.isStarred ? "star.slash" : "star"
+        )
+      }
+
+      // Mark as Played/Unplayed
+      Button {
+        togglePlayed()
+      } label: {
+        Label(
+          episode.isCompleted ? "Mark as Unplayed" : "Mark as Played",
+          systemImage: episode.isCompleted ? "arrow.counterclockwise" : "checkmark.circle"
+        )
+      }
+
+      Divider()
+
+      // Download/Delete download
+      if isDownloaded {
+        Button(role: .destructive) {
+          deleteDownload()
+        } label: {
+          Label("Delete Download", systemImage: "trash")
+        }
+      } else if case .downloading = downloadState {
+        Button {
+          cancelDownload()
+        } label: {
+          Label("Cancel Download", systemImage: "xmark.circle")
+        }
+      } else if episode.episodeInfo.audioURL != nil {
+        Button {
+          startDownload()
+        } label: {
+          Label("Download", systemImage: "arrow.down.circle")
+        }
+      }
+
+      Divider()
+
+      // Share
+      Button {
+        shareEpisode()
+      } label: {
+        Label("Share", systemImage: "square.and.arrow.up")
       }
     }
-
-    Divider()
-
-    // Share
-    Button {
-      shareEpisode()
-    } label: {
-      Label("Share", systemImage: "square.and.arrow.up")
+    .onAppear {
+      let title = episode.podcastTitle
+      let descriptor = FetchDescriptor<PodcastInfoModel>(
+        predicate: #Predicate { $0.title == title }
+      )
+      cachedPodcastModel = try? modelContext.fetch(descriptor).first
     }
   }
 
   @ViewBuilder
   private var goToShowButton: some View {
-    let title = episode.podcastTitle
-    let descriptor = FetchDescriptor<PodcastInfoModel>(
-      predicate: #Predicate { $0.title == title }
-    )
-    if let podcastModel = try? modelContext.fetch(descriptor).first {
+    if let podcastModel = cachedPodcastModel {
       NavigationLink(destination: EpisodeListView(podcastModel: podcastModel)) {
         Label("Go to Show", systemImage: "square.stack")
       }

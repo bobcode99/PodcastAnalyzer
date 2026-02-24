@@ -18,7 +18,7 @@ struct EpisodeRowView: View {
   let podcastTitle: String
   let fallbackImageURL: String?
   let podcastLanguage: String
-  var downloadManager: DownloadManager
+  let downloadManager: DownloadManager
   let episodeModel: EpisodeDownloadModel?
   var showArtwork: Bool = true
   let onToggleStar: () -> Void
@@ -51,6 +51,7 @@ struct EpisodeRowView: View {
     self.onDownload = onDownload
     self.onDeleteRequested = onDeleteRequested
     self.onTogglePlayed = onTogglePlayed
+    self.statusChecker = EpisodeStatusChecker(episode: episode, podcastTitle: podcastTitle)
   }
 
   /// Convenience initializer for LibraryEpisode (used in Library views)
@@ -75,6 +76,7 @@ struct EpisodeRowView: View {
     self.onDownload = onDownload
     self.onDeleteRequested = onDeleteRequested
     self.onTogglePlayed = onTogglePlayed
+    self.statusChecker = EpisodeStatusChecker(episode: libraryEpisode.episodeInfo, podcastTitle: libraryEpisode.podcastTitle)
   }
 
   @Environment(\.modelContext) private var modelContext
@@ -84,6 +86,7 @@ struct EpisodeRowView: View {
   private let applePodcastService = ApplePodcastService()
   @State private var shareTask: Task<Void, Never>?
   @State private var hasAIAnalysis: Bool = false
+  @State private var cachedPlainDescription: String?
 
   // Transcript state - computed from TranscriptManager (reactive) + filesystem check
   @State private var hasCaptionsOnDisk: Bool = false
@@ -119,10 +122,8 @@ struct EpisodeRowView: View {
     return false
   }
 
-  // Status checker using centralized utility
-  private var statusChecker: EpisodeStatusChecker {
-    EpisodeStatusChecker(episode: episode, podcastTitle: podcastTitle)
-  }
+  // Status checker using centralized utility — created once, reused for all derived properties
+  private let statusChecker: EpisodeStatusChecker
 
   private var downloadState: DownloadState { statusChecker.downloadState }
   private var isDownloaded: Bool { statusChecker.isDownloaded }
@@ -196,6 +197,7 @@ struct EpisodeRowView: View {
     .onAppear {
       checkAIAnalysis()
       hasCaptionsOnDisk = statusChecker.hasTranscript
+      cachedPlainDescription = plainDescription
     }
     .onChange(of: activeTranscriptJob?.status) { _, newStatus in
       // Refresh filesystem check when job completes (file was just written)
@@ -226,12 +228,16 @@ struct EpisodeRowView: View {
     }
   }
 
+  private static let relativeDateFormatter: RelativeDateTimeFormatter = {
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .abbreviated
+    return formatter
+  }()
+
   /// Format episode date - relative for today, otherwise abbreviated
   private func formatEpisodeDate(_ date: Date) -> String {
     if Calendar.current.isDateInToday(date) {
-      let formatter = RelativeDateTimeFormatter()
-      formatter.unitsStyle = .abbreviated
-      return formatter.localizedString(for: date, relativeTo: Date())
+      return Self.relativeDateFormatter.localizedString(for: date, relativeTo: Date())
     } else {
       return date.formatted(date: .abbreviated, time: .omitted)
     }
@@ -255,7 +261,7 @@ struct EpisodeRowView: View {
         .foregroundStyle(.primary)
 
       // Description
-      if let description = plainDescription {
+      if let description = cachedPlainDescription {
         Text(description)
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -366,6 +372,7 @@ struct EpisodeRowView: View {
           .frame(width: 28, height: 28)
           .contentShape(Rectangle())
       }
+      .accessibilityLabel("Episode options")
       .compositingGroup()
       .buttonStyle(.plain)
     }
