@@ -254,28 +254,24 @@ final class WhisperModelManager {
 
     // MARK: - Disk Helpers
 
-    /// WhisperKit stores models in `~/Library/Caches/huggingface/models/argmaxinc/whisperkit-coreml/`.
-    static func modelExistsOnDisk(_ variant: WhisperModelVariant) -> Bool {
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let modelDir = cacheDir
+    /// WhisperKit's HubApi stores models in `~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/`.
+    private static func modelDirectory(for variant: WhisperModelVariant) -> URL {
+        let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documentsDir
             .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
             .appendingPathComponent(variant.rawValue)
-        return FileManager.default.fileExists(atPath: modelDir.path)
+    }
+
+    static func modelExistsOnDisk(_ variant: WhisperModelVariant) -> Bool {
+        FileManager.default.fileExists(atPath: modelDirectory(for: variant).path)
     }
 
     static func deleteModelFromDisk(_ variant: WhisperModelVariant) {
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let modelDir = cacheDir
-            .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
-            .appendingPathComponent(variant.rawValue)
-        try? FileManager.default.removeItem(at: modelDir)
+        try? FileManager.default.removeItem(at: modelDirectory(for: variant))
     }
 
     static func modelSizeOnDisk(_ variant: WhisperModelVariant) -> Int64 {
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let modelDir = cacheDir
-            .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
-            .appendingPathComponent(variant.rawValue)
+        let modelDir = modelDirectory(for: variant)
         guard let enumerator = FileManager.default.enumerator(
             at: modelDir,
             includingPropertiesForKeys: [.fileSizeKey]

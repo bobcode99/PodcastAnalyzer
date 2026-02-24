@@ -93,8 +93,11 @@ actor WhisperTranscriptService {
                     // WhisperKit streams segment-level results via a callback.
                     var allSegments: [TranscriptionSegment] = []
 
-                    // Estimate audio duration for progress reporting.
-                    let estimatedDuration = await estimateDuration(of: inputFile)
+                    // Estimate total windows for progress reporting.
+                    // WhisperKit processes audio in 30-second windows.
+                    let estimatedDuration = await Self.estimateDuration(of: inputFile)
+                    let windowDuration: Double = 30.0
+                    let totalWindows = max(ceil(estimatedDuration / windowDuration), 1.0)
 
                     var lastReportedProgress = 0.05
 
@@ -102,21 +105,20 @@ actor WhisperTranscriptService {
                         audioPath: inputFile.path,
                         decodeOptions: options,
                         callback: { progress in
-                            // `progress` is WhisperKit's TranscriptionProgress.
-                            // Map elapsed pipeline time to a fraction of total duration.
-                            let elapsed = progress.timings.fullPipeline
-                            if estimatedDuration > 0 {
-                                let fraction = min(elapsed / estimatedDuration, 0.95)
-                                if fraction > lastReportedProgress + 0.02 {
-                                    lastReportedProgress = fraction
-                                    continuation.yield(
-                                        TranscriptionProgressUpdate(
-                                            progress: fraction,
-                                            isComplete: false,
-                                            srtContent: nil
-                                        )
+                            // Use windowId to track how many 30s windows have been processed.
+                            let fraction = min(
+                                0.05 + 0.90 * (Double(progress.windowId + 1) / totalWindows),
+                                0.95
+                            )
+                            if fraction > lastReportedProgress + 0.02 {
+                                lastReportedProgress = fraction
+                                continuation.yield(
+                                    TranscriptionProgressUpdate(
+                                        progress: fraction,
+                                        isComplete: false,
+                                        srtContent: nil
                                     )
-                                }
+                                )
                             }
                             return nil  // continue transcription
                         }
@@ -150,11 +152,21 @@ actor WhisperTranscriptService {
 
     // MARK: - SRT Formatting
 
+    /// Strips Whisper special tokens like `<|startoftranscript|>`, `<|en|>`, `<|0.00|>`, etc.
+    private static func stripSpecialTokens(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: "<\\|[^|]*\\|>",
+            with: "",
+            options: .regularExpression
+        )
+    }
+
     /// Converts WhisperKit segments to an SRT string.
     private static func segmentsToSRT(_ segments: [TranscriptionSegment]) -> String {
         var lines: [String] = []
         for (index, segment) in segments.enumerated() {
-            let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = stripSpecialTokens(segment.text)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
 
             let start = formatSRTTime(TimeInterval(segment.start))
@@ -181,19 +193,18 @@ actor WhisperTranscriptService {
 
     // MARK: - Duration Estimation
 
-    private func estimateDuration(of url: URL) async -> Double {
-        await Task.detached {
-            let asset = AVURLAsset(url: url)
-            do {
-                let duration = try await asset.load(.duration)
-                return duration.seconds
-            } catch {
-                return 0
-            }
-        }.value
+    /// Estimates audio duration using AVURLAsset.
+    private nonisolated static func estimateDuration(of url: URL) async -> Double {
+        let asset = AVURLAsset(url: url)
+        do {
+            let duration = try await asset.load(.duration)
+            let seconds = CMTimeGetSeconds(duration)
+            return seconds.isFinite ? seconds : 0
+        } catch {
+            return 0
+        }
     }
 }
 
-// MARK: - AVFoundation import for duration
-
 import AVFoundation
+import CoreMedia
