@@ -25,6 +25,9 @@ struct EpisodeAIAnalysisView: View {
   }
   @Bindable var viewModel: EpisodeDetailViewModel
   var embedsOwnScroll: Bool = true  // When false, parent provides scrolling (for embedded mode)
+  @Binding var isHeaderVisible: Bool
+  @Binding var lastScrollOffset: CGFloat
+  @Binding var isUserScrolling: Bool
 
   @State private var selectedTab: CloudAnalysisTab = .summary
   @State private var questionInput: String = ""
@@ -55,6 +58,14 @@ struct EpisodeAIAnalysisView: View {
       if embedsOwnScroll {
         ScrollView {
           aiContentView
+        }
+        .trackScrollForHeaderCollapse(
+            isHeaderVisible: $isHeaderVisible,
+            lastOffset: $lastScrollOffset,
+            isUserScrolling: isUserScrolling
+        )
+        .onScrollPhaseChange { _, newPhase in
+            isUserScrolling = newPhase == .interacting || newPhase == .decelerating
         }
       } else {
         aiContentView

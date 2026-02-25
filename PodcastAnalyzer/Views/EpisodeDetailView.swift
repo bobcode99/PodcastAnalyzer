@@ -49,6 +49,11 @@ struct EpisodeDetailView: View {
     // Auto-scroll state
     @State private var autoScrollEnabled = true
 
+    // Header collapse state
+    @State private var isHeaderVisible: Bool = true
+    @State private var lastScrollOffset: CGFloat = 0
+    @State private var isUserScrolling: Bool = false
+
     // Transcript search focus
     @FocusState private var transcriptSearchFocused: Bool
 
@@ -84,7 +89,13 @@ struct EpisodeDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             EpisodeDetailHeaderView(viewModel: viewModel)
+                .frame(height: isHeaderVisible ? nil : 0)
+                .clipped()
+                .opacity(isHeaderVisible ? 1 : 0)
+                .animation(.easeInOut(duration: 0.25), value: isHeaderVisible)
             Divider()
+                .opacity(isHeaderVisible ? 1 : 0)
+                .animation(.easeInOut(duration: 0.25), value: isHeaderVisible)
             tabSelector
             Divider()
             tabContentView
@@ -176,6 +187,9 @@ struct EpisodeDetailView: View {
                 }
             )
         }
+        .onChange(of: selectedTab) { _, _ in
+            lastScrollOffset = 0
+        }
         .onAppear {
             viewModel.setModelContext(modelContext)
             viewModel.checkTranscriptStatus()
@@ -222,7 +236,7 @@ struct EpisodeDetailView: View {
         switch selectedTab {
         case 0: summaryTab
         case 1: transcriptContent
-        case 2: EpisodeAIAnalysisView(viewModel: viewModel, embedsOwnScroll: true)
+        case 2: EpisodeAIAnalysisView(viewModel: viewModel, embedsOwnScroll: true, isHeaderVisible: $isHeaderVisible, lastScrollOffset: $lastScrollOffset, isUserScrolling: $isUserScrolling)
         default: EmptyView()
         }
     }
@@ -306,6 +320,14 @@ struct EpisodeDetailView: View {
             summaryContent
         }
         .scrollIndicators(.hidden)
+        .trackScrollForHeaderCollapse(
+            isHeaderVisible: $isHeaderVisible,
+            lastOffset: $lastScrollOffset,
+            isUserScrolling: isUserScrolling
+        )
+        .onScrollPhaseChange { _, newPhase in
+            isUserScrolling = newPhase == .interacting || newPhase == .decelerating
+        }
     }
 
     // MARK: - Summary Content
@@ -381,8 +403,14 @@ struct EpisodeDetailView: View {
                         }
                     }
                     .scrollIndicators(.hidden)
+                    .trackScrollForHeaderCollapse(
+                        isHeaderVisible: $isHeaderVisible,
+                        lastOffset: $lastScrollOffset,
+                        isUserScrolling: isUserScrolling
+                    )
                     .onScrollPhaseChange { _, newPhase in
                         if newPhase == .interacting { autoScrollEnabled = false }
+                        isUserScrolling = newPhase == .interacting || newPhase == .decelerating
                     }
                     .onChange(of: currentSentenceId) { _, newId in
                         guard autoScrollEnabled,
@@ -629,6 +657,67 @@ struct EpisodeDetailView: View {
             .padding(.horizontal)
     }
 
+}
+
+// MARK: - Scroll Header Collapse Modifier
+
+/// Snapshot of scroll geometry values for change detection
+nonisolated struct ScrollGeometrySnapshot: Equatable {
+    let contentOffset: CGFloat
+    let contentHeight: CGFloat
+    let visibleHeight: CGFloat
+}
+
+extension View {
+    func trackScrollForHeaderCollapse(
+        isHeaderVisible: Binding<Bool>,
+        lastOffset: Binding<CGFloat>,
+        isUserScrolling: Bool
+    ) -> some View {
+        self
+            .onScrollGeometryChange(for: ScrollGeometrySnapshot.self) { geometry in
+                ScrollGeometrySnapshot(
+                    contentOffset: geometry.contentOffset.y,
+                    contentHeight: geometry.contentSize.height,
+                    visibleHeight: geometry.visibleRect.size.height
+                )
+            } action: { oldValue, newValue in
+                guard isUserScrolling else { return }
+
+                // Ignore layout-induced offset changes (e.g. header collapse/expand resizing content)
+                if abs(newValue.contentHeight - oldValue.contentHeight) > 1 {
+                    lastOffset.wrappedValue = newValue.contentOffset
+                    return
+                }
+
+                // At-top auto-expand
+                if newValue.contentOffset <= 0 {
+                    if !isHeaderVisible.wrappedValue {
+                        isHeaderVisible.wrappedValue = true
+                    }
+                    lastOffset.wrappedValue = newValue.contentOffset
+                    return
+                }
+
+                // Ignore rubber-band bounce at the bottom edge
+                let maxOffset = newValue.contentHeight - newValue.visibleHeight
+                if maxOffset > 0, newValue.contentOffset >= maxOffset - 5 {
+                    lastOffset.wrappedValue = newValue.contentOffset
+                    return
+                }
+
+                let delta = newValue.contentOffset - lastOffset.wrappedValue
+                // 5pt dead zone — but always update lastOffset to prevent drift
+                guard abs(delta) > 5 else { return }
+
+                if delta > 0 && isHeaderVisible.wrappedValue {
+                    isHeaderVisible.wrappedValue = false
+                } else if delta < 0 && !isHeaderVisible.wrappedValue {
+                    isHeaderVisible.wrappedValue = true
+                }
+                lastOffset.wrappedValue = newValue.contentOffset
+            }
+    }
 }
 
 // MARK: - Translation Progress Circle
