@@ -150,6 +150,7 @@ struct PodcastSearchView: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollDismissesKeyboard(.immediately)
             }
         }
     }
@@ -194,6 +195,7 @@ struct PodcastSearchView: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollDismissesKeyboard(.immediately)
             }
         }
     }
@@ -310,9 +312,6 @@ struct ApplePodcastRow: View {
                 .buttonStyle(.plain)
             }
 
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
