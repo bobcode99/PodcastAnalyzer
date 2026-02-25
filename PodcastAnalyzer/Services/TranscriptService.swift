@@ -528,12 +528,12 @@ public actor TranscriptService {
   }
 
   /// Converts audio file to SRT subtitle format with parallel chunk processing for long audio.
-  /// For audio shorter than 10 minutes, falls back to sequential processing.
-  /// For longer audio, splits into 5-minute chunks processed in parallel for ~3-4x speedup.
+  /// For audio shorter than 1 minute, falls back to sequential processing.
+  /// For longer audio, splits into 1-minute chunks processed in parallel for faster processing.
   public func audioToSRTChunkedWithProgress(
     inputFile: URL,
     maxLength: Int? = nil,
-    chunkDuration: TimeInterval = 300
+    chunkDuration: TimeInterval = 60
   ) -> AsyncThrowingStream<TranscriptionProgress, Error> {
     return AsyncThrowingStream { continuation in
       Task.detached(priority: .userInitiated) { [self] in
@@ -561,9 +561,9 @@ public actor TranscriptService {
           self.logger.info(
             "Audio duration: \(audioFileDuration)s — evaluating chunked vs sequential")
 
-          // Threshold: audio shorter than 10 minutes uses sequential processing
-          if audioFileDuration < 600 {
-            self.logger.info("Audio < 10 min, using sequential processing")
+          // Threshold: audio shorter than 1 minute uses sequential processing
+          if audioFileDuration < 60 {
+            self.logger.info("Audio < 1 min, using sequential processing")
             for try await progress in await self.audioToSRTWithProgress(
               inputFile: inputFile, maxLength: maxLength
             ) {
