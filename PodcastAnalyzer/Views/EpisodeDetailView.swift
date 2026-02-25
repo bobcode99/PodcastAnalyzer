@@ -319,7 +319,6 @@ struct EpisodeDetailView: View {
         ScrollView {
             summaryContent
         }
-        .scrollIndicators(.hidden)
         .trackScrollForHeaderCollapse(
             isHeaderVisible: $isHeaderVisible,
             lastOffset: $lastScrollOffset,
@@ -402,7 +401,6 @@ struct EpisodeDetailView: View {
                             .padding(.vertical, 16)
                         }
                     }
-                    .scrollIndicators(.hidden)
                     .trackScrollForHeaderCollapse(
                         isHeaderVisible: $isHeaderVisible,
                         lastOffset: $lastScrollOffset,
@@ -683,6 +681,12 @@ extension View {
                 )
             } action: { oldValue, newValue in
                 guard isUserScrolling else { return }
+
+                // Content fits without scrolling — never collapse header (avoids shaking loop)
+                guard newValue.contentHeight > newValue.visibleHeight else {
+                    if !isHeaderVisible.wrappedValue { isHeaderVisible.wrappedValue = true }
+                    return
+                }
 
                 // Ignore layout-induced offset changes (e.g. header collapse/expand resizing content)
                 if abs(newValue.contentHeight - oldValue.contentHeight) > 1 {
