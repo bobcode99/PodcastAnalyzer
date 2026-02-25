@@ -701,7 +701,30 @@ final class LibraryViewModel {
     }
 
     // 3. Discover downloaded files that aren't tracked
-    // Check episodes from subscribed podcasts for existing downloads
+    // Single directory scan — replaces N×7 per-episode file checks
+    let audioFileIndex = await Task.detached(priority: .background) { () -> [String: String] in
+      let fm = FileManager.default
+
+      #if os(macOS)
+      let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      let audioDir = appSupport.appendingPathComponent("PodcastAnalyzer/Audio", isDirectory: true)
+      #else
+      let libraryDir = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+      let audioDir = libraryDir.appendingPathComponent("Audio", isDirectory: true)
+      #endif
+
+      var index: [String: String] = [:]  // lowercased base filename -> full path
+      guard let contents = try? fm.contentsOfDirectory(
+        at: audioDir, includingPropertiesForKeys: nil
+      ) else { return index }
+
+      for url in contents {
+        let name = url.deletingPathExtension().lastPathComponent.lowercased()
+        index[name] = url.path
+      }
+      return index
+    }.value
+
     let delimiter = Self.episodeKeyDelimiter
     var discoveredCount = 0
 
@@ -717,8 +740,9 @@ final class LibraryViewModel {
           continue
         }
 
-        // Check if file exists on disk
-        if let localPath = await checkAudioFileExists(episodeTitle: episode.title, podcastTitle: podcastTitle) {
+        // O(1) dictionary lookup instead of 7× fileExists calls
+        let baseFileName = Self.sanitizeFileName("\(podcastTitle)_\(episode.title)").lowercased()
+        if let localPath = audioFileIndex[baseFileName] {
           if let existingModel = modelsById[episodeKey] {
             // Update existing model
             existingModel.localAudioPath = localPath
@@ -750,36 +774,15 @@ final class LibraryViewModel {
     }
   }
 
-  /// Check if audio file exists on disk for an episode
-  private func checkAudioFileExists(episodeTitle: String, podcastTitle: String) async -> String? {
-    // Detached to avoid blocking @MainActor with synchronous FileManager I/O
-    await Task.detached(priority: .background) {
-      let fm = FileManager.default
-
-      #if os(macOS)
-      let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      let audioDir = appSupport.appendingPathComponent("PodcastAnalyzer/Audio", isDirectory: true)
-      #else
-      let libraryDir = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-      let audioDir = libraryDir.appendingPathComponent("Audio", isDirectory: true)
-      #endif
-
-      let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
-      let baseFileName = "\(podcastTitle)_\(episodeTitle)"
-        .components(separatedBy: invalidCharacters)
-        .joined(separator: "_")
-        .trimmingCharacters(in: .whitespaces)
-
-      let possibleExtensions = ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"]
-
-      for ext in possibleExtensions {
-        let path = audioDir.appendingPathComponent("\(baseFileName).\(ext)")
-        if fm.fileExists(atPath: path.path) {
-          return path.path
-        }
-      }
-      return nil
-    }.value
+  /// Sanitize a filename by replacing invalid characters with underscores.
+  /// Matches the same logic as the former `checkAudioFileExists` and `FileStorageManager`.
+  /// Pure function — nonisolated so it can be called from any isolation context.
+  nonisolated private static func sanitizeFileName(_ name: String) -> String {
+    let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
+    return name
+      .components(separatedBy: invalidCharacters)
+      .joined(separator: "_")
+      .trimmingCharacters(in: .whitespaces)
   }
 
   // MARK: - Load Latest Episodes

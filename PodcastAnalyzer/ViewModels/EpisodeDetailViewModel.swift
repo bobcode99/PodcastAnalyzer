@@ -23,6 +23,12 @@ import AppKit
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "EpisodeDetailViewModel")
 
+/// Shared in-memory cache for parsed HTML descriptions.
+/// Keyed by "\(html.hashValue)_\(fontSize)" to distinguish styles.
+/// NSCache auto-evicts under memory pressure — no manual purging needed.
+/// @MainActor because both ViewModels that use it are @MainActor-isolated.
+@MainActor let descriptionCache = NSCache<NSString, NSAttributedString>()
+
 // MARK: - Transcript State
 
 enum TranscriptState: Equatable {
@@ -588,6 +594,12 @@ final class EpisodeDetailViewModel {
       return
     }
 
+    let cacheKey = NSString(string: "\(html.hashValue)_16")
+    if let cached = descriptionCache.object(forKey: cacheKey) {
+      descriptionContent = .parsed(cached)
+      return
+    }
+
     #if os(iOS)
     let labelColor = UIColor.label
     #else
@@ -605,6 +617,7 @@ final class EpisodeDetailViewModel {
 
     parseDescriptionTask = Task {
       let attributedString = parser.render(html)
+      descriptionCache.setObject(attributedString, forKey: cacheKey)
       self.descriptionContent = .parsed(attributedString)
     }
   }

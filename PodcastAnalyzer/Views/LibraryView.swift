@@ -88,10 +88,12 @@ struct LibraryView: View {
       }
     }
     .onChange(of: subscribedPodcasts) { _, newPodcasts in
-      viewModel.setPodcasts(newPodcasts)
-      // Update sorted cache with animation
-      withAnimation(.easeInOut(duration: 0.3)) {
-        updateSortedPodcasts()
+      // Only update if count or IDs actually changed to avoid re-evaluation loops
+      if newPodcasts.map(\.id) != sortedPodcasts.map(\.id) {
+        viewModel.setPodcasts(newPodcasts)
+        withAnimation(.easeInOut(duration: 0.3)) {
+          updateSortedPodcasts()
+        }
       }
     }
     .onDisappear {

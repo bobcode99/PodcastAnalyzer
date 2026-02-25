@@ -232,6 +232,12 @@ final class EpisodeListViewModel {
       return
     }
 
+    let cacheKey = NSString(string: "\(html.hashValue)_13")
+    if let cached = descriptionCache.object(forKey: cacheKey) {
+      descriptionContent = .parsed(cached)
+      return
+    }
+
     #if os(iOS)
     let labelColor = UIColor.secondaryLabel
     #else
@@ -249,10 +255,8 @@ final class EpisodeListViewModel {
 
     Task {
       let attributedString = parser.render(html)
-
-      await MainActor.run {
-        self.descriptionContent = .parsed(attributedString)
-      }
+      descriptionCache.setObject(attributedString, forKey: cacheKey)
+      self.descriptionContent = .parsed(attributedString)
     }
   }
 
