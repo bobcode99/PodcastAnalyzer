@@ -267,32 +267,7 @@ struct MacExpandedPlayerView: View {
       .padding(.horizontal, 40)
 
       // Playback controls
-      HStack(spacing: 40) {
-        Button(action: { audioManager.skipBackward(seconds: 15) }) {
-          Image(systemName: "gobackward.15")
-            .font(.title)
-        }
-        .buttonStyle(.plain)
-
-        Button(action: {
-          if audioManager.isPlaying {
-            audioManager.pause()
-          } else {
-            audioManager.resume()
-          }
-        }) {
-          Image(systemName: audioManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-            .font(.system(size: 64))
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut(.space, modifiers: [])
-
-        Button(action: { audioManager.skipForward(seconds: 30) }) {
-          Image(systemName: "goforward.30")
-            .font(.title)
-        }
-        .buttonStyle(.plain)
-      }
+      expandedPlaybackControls
 
       // Speed control
       HStack {
@@ -320,6 +295,49 @@ struct MacExpandedPlayerView: View {
           dismiss()
         }
         .keyboardShortcut(.escape, modifiers: [])
+      }
+    }
+  }
+
+  // MARK: - Playback Controls (Liquid Glass on macOS 26+)
+
+  @ViewBuilder
+  private var expandedPlaybackControls: some View {
+    let skipBack = Button(action: { audioManager.skipBackward(seconds: 15) }) {
+      Image(systemName: "gobackward.15")
+        .font(.title)
+    }
+
+    let playPause = Button(action: {
+      if audioManager.isPlaying {
+        audioManager.pause()
+      } else {
+        audioManager.resume()
+      }
+    }) {
+      Image(systemName: audioManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+        .font(.system(size: 64))
+    }
+    .keyboardShortcut(.space, modifiers: [])
+
+    let skipForward = Button(action: { audioManager.skipForward(seconds: 30) }) {
+      Image(systemName: "goforward.30")
+        .font(.title)
+    }
+
+    if #available(macOS 26, *) {
+      GlassEffectContainer(spacing: 20) {
+        HStack(spacing: 40) {
+          skipBack.buttonStyle(.glass)
+          playPause.buttonStyle(.glass)
+          skipForward.buttonStyle(.glass)
+        }
+      }
+    } else {
+      HStack(spacing: 40) {
+        skipBack.buttonStyle(.plain)
+        playPause.buttonStyle(.plain)
+        skipForward.buttonStyle(.plain)
       }
     }
   }

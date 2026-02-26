@@ -85,7 +85,6 @@ struct MacContentView: View {
   // importManager needs @State because $binding syntax is required for sheet
   @State private var importManager = PodcastImportManager.shared
   @Environment(\.modelContext) private var modelContext
-  @Environment(\.openSettings) private var openSettings
 
   @State private var selectedSidebarItem: MacSidebarItem? = .home
   @State private var selectedLibrarySubItem: LibrarySubItem? = .podcasts
@@ -116,7 +115,7 @@ struct MacContentView: View {
       NavigationSplitView(columnVisibility: $columnVisibility) {
         // Sidebar
         sidebarContent
-          .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+          .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 300)
       } detail: {
         // Main content area
         mainContent
@@ -125,14 +124,13 @@ struct MacContentView: View {
       .navigationSplitViewStyle(.balanced)
         // Removed .padding(.bottom) - let miniplayer overlay naturally
 
-      // Mini player at absolute bottom, now fixed-width and centered for floating feel
+      // Mini player at absolute bottom, fixed-width and centered for floating feel
         if hasCurrentEpisode {
           MacMiniPlayerBar()
-            .frame(width: 800) // Fixed width - adjust this value (e.g., 600-1000) to fit your app's typical window
-            .padding(.bottom, 20) // Lift from bottom edge
-            .background(.ultraThinMaterial) // Blurry glass effect
-            .clipShape(.rect(cornerRadius: 12)) // Rounded corners
-            .shadow(radius: 8) // Hover/lift shadow
+            .frame(width: 800)
+            .padding(.bottom, 20)
+            .modifier(MiniPlayerMaterialModifier())
+            .shadow(radius: 8)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
@@ -196,7 +194,7 @@ struct MacContentView: View {
         .tag(MacSidebarItem.libraryLatest)
       }
 
-      Section {
+      Section("Discover") {
         Label("Search", systemImage: "magnifyingglass")
           .tag(MacSidebarItem.search)
       }
@@ -211,13 +209,10 @@ struct MacContentView: View {
     }
     .toolbar {
       ToolbarItem(placement: .primaryAction) {
-        Button(action: {
-          openSettings()
-        }) {
+        SettingsLink {
           Image(systemName: "gearshape")
         }
         .help("Settings")
-        .keyboardShortcut(",", modifiers: .command)
       }
     }
   }
@@ -1070,6 +1065,20 @@ struct MacLibraryEpisodeRow: View {
       imageURL: episode.imageURL ?? podcastImageURL,
       useDefaultSpeed: true
     )
+  }
+}
+
+// MARK: - Mini Player Material (Liquid Glass on macOS 26+, ultraThinMaterial fallback)
+
+private struct MiniPlayerMaterialModifier: ViewModifier {
+  func body(content: Content) -> some View {
+    if #available(macOS 26, *) {
+      content
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+    } else {
+      content
+        .background(.ultraThinMaterial, in: .rect(cornerRadius: 12))
+    }
   }
 }
 
