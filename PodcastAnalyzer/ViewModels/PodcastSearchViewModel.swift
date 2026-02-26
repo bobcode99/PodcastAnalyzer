@@ -81,12 +81,6 @@ final class PodcastSearchViewModel {
     }
   }
 
-  deinit {
-    MainActor.assumeIsolated {
-      cleanup()
-    }
-  }
-
   func cleanup() {
     searchTask?.cancel()
     searchTask = nil

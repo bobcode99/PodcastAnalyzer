@@ -618,7 +618,7 @@ struct StorageSettingsTab: View {
     clearingMessage = "cache"
 
     Task {
-      ImageCacheManager.shared.clearAllCache()
+      await ImageCacheManager.shared.clearAllCache()
       isClearingData = false
       clearingMessage = ""
       imageCacheSize = "0 bytes"

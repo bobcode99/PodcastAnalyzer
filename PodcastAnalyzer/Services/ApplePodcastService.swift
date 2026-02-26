@@ -77,7 +77,14 @@ struct AppleRSSFeed: Decodable {
     let results: [AppleRSSPodcast]
 }
 
-struct AppleRSSPodcast: Decodable, Identifiable {
+struct AppleRSSPodcast: Decodable, Identifiable, Hashable {
+    static func == (lhs: AppleRSSPodcast, rhs: AppleRSSPodcast) -> Bool {
+        lhs.id == rhs.id
+    }
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
     let id: String
     let artistName: String
     let name: String

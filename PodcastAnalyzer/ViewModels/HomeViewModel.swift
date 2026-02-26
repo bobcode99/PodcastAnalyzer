@@ -598,12 +598,6 @@ final class HomeViewModel {
     recommendedEpisodes = resolved
   }
 
-  deinit {
-    MainActor.assumeIsolated {
-      cleanup()
-    }
-  }
-
   func cleanup() {
     regionObserverTask?.cancel()
     regionObserverTask = nil

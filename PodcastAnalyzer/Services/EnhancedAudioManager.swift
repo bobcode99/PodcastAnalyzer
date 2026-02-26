@@ -1095,8 +1095,7 @@ private func handleAudioInterruption(_ notification: Notification) {
     let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
     timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) {
       [weak self] time in
-      // Since we're on .main queue, we can safely assume MainActor isolation
-      MainActor.assumeIsolated {
+      Task { @MainActor in
         guard let self = self else { return }
 
         // Throttle currentTime writes — only update when changed by >0.2s

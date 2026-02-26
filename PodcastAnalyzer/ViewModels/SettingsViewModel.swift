@@ -108,13 +108,8 @@ final class SettingsViewModel {
     loadTranscriptEngine()
   }
 
-  deinit {
-    MainActor.assumeIsolated {
-      successMessageTask?.cancel()
-      transcriptDownloadTask?.cancel()
-      transcriptModelStatusTask?.cancel()
-    }
-  }
+  // Tasks are cancelled via cleanup() from onDisappear; deinit removed
+  // because accessing @MainActor properties from nonisolated deinit is invalid.
 
   // MARK: - Region Settings
 

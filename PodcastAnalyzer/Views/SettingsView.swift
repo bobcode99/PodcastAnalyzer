@@ -425,7 +425,9 @@ struct SettingsView: View {
         .font(.caption2)
         .foregroundStyle(.orange)
     default:
-      EmptyView()
+      Text("Unknown")
+        .font(.caption2)
+        .foregroundStyle(.secondary)
     }
   }
 

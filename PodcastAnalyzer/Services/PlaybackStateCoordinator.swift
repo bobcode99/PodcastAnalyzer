@@ -37,20 +37,14 @@ class PlaybackStateCoordinator {
     notificationTask = Task { [weak self] in
       for await notification in NotificationCenter.default.notifications(named: .playbackPositionDidUpdate) {
         guard let update = notification.userInfo?["update"] as? PlaybackPositionUpdate else { continue }
-        await MainActor.run {
-          self?.savePlaybackPosition(update: update)
-        }
+        self?.savePlaybackPosition(update: update)
       }
     }
 
     logger.info("Playback state coordinator initialized")
   }
 
-  deinit {
-    MainActor.assumeIsolated {
-      notificationTask?.cancel()
-    }
-  }
+  // No deinit — singleton lives for app lifetime. Task cancelled via notification observer lifecycle.
 
   /// Look up the saved playback position for an episode from SwiftData.
   /// Returns 0 if no saved position or if the episode is already completed.

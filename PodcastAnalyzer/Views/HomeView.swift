@@ -21,6 +21,9 @@ struct HomeView: View {
   @State private var podcastToSubscribe: AppleRSSPodcast?
   @State private var showSubscribeSheet = false
 
+  // Deferred navigation state (avoids eager destination creation)
+  @State private var selectedEpisode: LibraryEpisode?
+
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 24) {
@@ -36,6 +39,23 @@ struct HomeView: View {
         popularShowsSection
       }
       .padding(.vertical)
+    }
+    .navigationDestination(item: $selectedEpisode) { episode in
+      EpisodeDetailView(
+        episode: episode.episodeInfo,
+        podcastTitle: episode.podcastTitle,
+        fallbackImageURL: episode.imageURL,
+        podcastLanguage: episode.language
+      )
+    }
+    .navigationDestination(for: AppleRSSPodcast.self) { podcast in
+      EpisodeListView(
+        podcastName: podcast.name,
+        podcastArtwork: podcast.safeArtworkUrl,
+        artistName: podcast.artistName,
+        collectionId: podcast.id,
+        applePodcastUrl: podcast.url
+      )
     }
     .navigationTitle(Constants.homeString)
     .platformToolbarTitleDisplayMode()
@@ -115,14 +135,9 @@ struct HomeView: View {
         ScrollView(.horizontal) {
           HStack(spacing: 12) {
             ForEach(viewModel.upNextEpisodes.prefix(10)) { episode in
-              NavigationLink(
-                destination: EpisodeDetailView(
-                  episode: episode.episodeInfo,
-                  podcastTitle: episode.podcastTitle,
-                  fallbackImageURL: episode.imageURL,
-                  podcastLanguage: episode.language
-                )
-              ) {
+              Button {
+                selectedEpisode = episode
+              } label: {
                 UpNextCard(episode: episode)
               }
               .buttonStyle(.plain)
@@ -190,14 +205,9 @@ struct HomeView: View {
           ScrollView(.horizontal) {
             HStack(spacing: 12) {
               ForEach(Array(viewModel.recommendedEpisodes.enumerated()), id: \.element.id) { index, episode in
-                NavigationLink(
-                  destination: EpisodeDetailView(
-                    episode: episode.episodeInfo,
-                    podcastTitle: episode.podcastTitle,
-                    fallbackImageURL: episode.imageURL,
-                    podcastLanguage: episode.language
-                  )
-                ) {
+                Button {
+                  selectedEpisode = episode
+                } label: {
                   ForYouCard(
                     episode: episode
                   )
@@ -580,13 +590,7 @@ struct TopPodcastRow: View {
   var viewModel: HomeViewModel
 
   var body: some View {
-    NavigationLink(destination: EpisodeListView(
-      podcastName: podcast.name,
-      podcastArtwork: podcast.safeArtworkUrl,
-      artistName: podcast.artistName,
-      collectionId: podcast.id,
-      applePodcastUrl: podcast.url
-    )) {
+    NavigationLink(value: podcast) {
       HStack(spacing: 12) {
         // Rank
         Text("\(rank)")
@@ -628,13 +632,7 @@ struct TopPodcastRow: View {
     .buttonStyle(.plain)
     .contextMenu {
       // View episodes
-      NavigationLink(destination: EpisodeListView(
-        podcastName: podcast.name,
-        podcastArtwork: podcast.safeArtworkUrl,
-        artistName: podcast.artistName,
-        collectionId: podcast.id,
-        applePodcastUrl: podcast.url
-      )) {
+      NavigationLink(value: podcast) {
         Label("View Episodes", systemImage: "list.bullet")
       }
 
@@ -849,6 +847,7 @@ struct UpNextListView: View {
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
   @State private var episodeModels: [String: EpisodeDownloadModel] = [:]
+  @State private var lastEpisodeIDs: [String] = []
 
   var body: some View {
     List(episodes) { episode in
@@ -867,7 +866,13 @@ struct UpNextListView: View {
     }
     .listStyle(.plain)
     .onAppear { batchFetchEpisodeModels() }
-    .onChange(of: episodes.map(\.id)) { _, _ in batchFetchEpisodeModels() }
+    .onChange(of: episodes.count) { _, _ in
+      let currentIDs = episodes.map(\.id)
+      if currentIDs != lastEpisodeIDs {
+        lastEpisodeIDs = currentIDs
+        batchFetchEpisodeModels()
+      }
+    }
     .navigationTitle("Up Next")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)

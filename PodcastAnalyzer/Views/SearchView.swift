@@ -31,6 +31,10 @@ struct PodcastSearchView: View {
     @State private var searchText = ""
     @FocusState private var isSearchFocused: Bool
 
+    // Cached library filter results (updated only when searchText changes)
+    @State private var filteredPodcasts: [PodcastInfoModel] = []
+    @State private var filteredEpisodes: [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
+
     var body: some View {
         VStack(spacing: 0) {
             // Tab selector
@@ -63,6 +67,7 @@ struct PodcastSearchView: View {
             if selectedTab == .applePodcasts && !newValue.isEmpty {
                 viewModel.performSearch()
             }
+            updateLibraryFilters()
         }
         .onChange(of: selectedTab) { _, newTab in
             if newTab == .applePodcasts && !searchText.isEmpty {
@@ -158,10 +163,7 @@ struct PodcastSearchView: View {
     // MARK: - Library Results
 
     private var libraryResultsView: some View {
-        let filteredPodcasts = filterLibraryPodcasts()
-        let filteredEpisodes = filterLibraryEpisodes()
-
-        return Group {
+        Group {
             if filteredPodcasts.isEmpty && filteredEpisodes.isEmpty {
                 VStack {
                     Spacer()
@@ -225,25 +227,26 @@ struct PodcastSearchView: View {
         }
     }
 
-    private func filterLibraryPodcasts() -> [PodcastInfoModel] {
+    private func updateLibraryFilters() {
         let query = searchText
-        return subscribedPodcasts.filter { podcast in
+        guard !query.isEmpty else {
+            filteredPodcasts = []
+            filteredEpisodes = []
+            return
+        }
+
+        filteredPodcasts = subscribedPodcasts.filter { podcast in
             podcast.podcastInfo.title.localizedStandardContains(query)
         }
-    }
 
-    private func filterLibraryEpisodes() -> [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] {
-        let query = searchText
-        var results: [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
-
+        var episodeResults: [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
         for podcast in subscribedPodcasts {
             let matchingEpisodes = podcast.podcastInfo.episodes.filter { episode in
                 episode.title.localizedStandardContains(query) ||
                 (episode.podcastEpisodeDescription?.localizedStandardContains(query) ?? false)
             }
-
             for episode in matchingEpisodes {
-                results.append((
+                episodeResults.append((
                     episode: episode,
                     podcastTitle: podcast.podcastInfo.title,
                     podcastImageURL: podcast.podcastInfo.imageURL,
@@ -251,8 +254,7 @@ struct PodcastSearchView: View {
                 ))
             }
         }
-
-        return results
+        filteredEpisodes = episodeResults
     }
 }
 

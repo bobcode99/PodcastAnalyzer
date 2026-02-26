@@ -373,12 +373,6 @@ final class EpisodeListViewModel {
 
   // MARK: - Cleanup
 
-  deinit {
-    MainActor.assumeIsolated {
-      cleanup()
-    }
-  }
-
   /// Clean up all resources to prevent memory leaks
   func cleanup() {
     #if DEBUG

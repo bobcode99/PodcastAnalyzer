@@ -12,7 +12,7 @@ import SwiftUI
 
 // MARK: - Episode Key Utilities
 
-enum EpisodeKeyUtils {
+nonisolated enum EpisodeKeyUtils {
   /// Unit Separator (U+001F) used as delimiter between podcast title and episode title
   static let delimiter = "\u{1F}"
 

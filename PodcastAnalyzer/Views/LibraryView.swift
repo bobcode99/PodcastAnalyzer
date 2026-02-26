@@ -615,6 +615,9 @@ struct DownloadedPodcastsGridView: View {
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif
+    .refreshable {
+      await viewModel.refreshDownloadedEpisodes()
+    }
     .onAppear {
       viewModel.setModelContext(modelContext)
       Task { await viewModel.refreshDownloadedEpisodes() }
