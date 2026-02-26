@@ -10,55 +10,58 @@ import SwiftData
 import SwiftUI
 
 struct MacSettingsView: View {
-  private enum Tabs: Hashable {
+  private enum SettingsTab: Hashable, CaseIterable {
     case general, appearance, sync, playback, transcript, ai, storage
+
+    var title: String {
+      switch self {
+      case .general: "General"
+      case .appearance: "Appearance"
+      case .sync: "Sync"
+      case .playback: "Playback"
+      case .transcript: "Transcript"
+      case .ai: "AI"
+      case .storage: "Storage"
+      }
+    }
+
+    var systemImage: String {
+      switch self {
+      case .general: "gearshape"
+      case .appearance: "paintbrush"
+      case .sync: "arrow.triangle.2.circlepath"
+      case .playback: "play.circle"
+      case .transcript: "text.bubble"
+      case .ai: "sparkles"
+      case .storage: "internaldrive"
+      }
+    }
   }
 
+  @State private var selection: SettingsTab = .general
+
   var body: some View {
-    TabView {
-      GeneralSettingsTab()
-        .tabItem {
-          Label("General", systemImage: "gearshape")
+    TabView(selection: $selection) {
+      ForEach(SettingsTab.allCases, id: \.self) { tab in
+        Tab(tab.title, systemImage: tab.systemImage, value: tab) {
+          tabContent(for: tab)
         }
-        .tag(Tabs.general)
-
-      AppearanceSettingsTab()
-        .tabItem {
-          Label("Appearance", systemImage: "paintbrush")
-        }
-        .tag(Tabs.appearance)
-
-      SyncSettingsTab()
-        .tabItem {
-          Label("Sync", systemImage: "arrow.triangle.2.circlepath")
-        }
-        .tag(Tabs.sync)
-
-      PlaybackSettingsTab()
-        .tabItem {
-          Label("Playback", systemImage: "play.circle")
-        }
-        .tag(Tabs.playback)
-
-      TranscriptSettingsTab()
-        .tabItem {
-          Label("Transcript", systemImage: "text.bubble")
-        }
-        .tag(Tabs.transcript)
-
-      AISettingsTab()
-        .tabItem {
-          Label("AI", systemImage: "sparkles")
-        }
-        .tag(Tabs.ai)
-
-      StorageSettingsTab()
-        .tabItem {
-          Label("Storage", systemImage: "internaldrive")
-        }
-        .tag(Tabs.storage)
+      }
     }
-    .frame(width: 500, height: 400)
+    .frame(width: 560, height: 500)
+  }
+
+  @ViewBuilder
+  private func tabContent(for tab: SettingsTab) -> some View {
+    switch tab {
+    case .general: GeneralSettingsTab()
+    case .appearance: AppearanceSettingsTab()
+    case .sync: SyncSettingsTab()
+    case .playback: PlaybackSettingsTab()
+    case .transcript: TranscriptSettingsTab()
+    case .ai: AISettingsTab()
+    case .storage: StorageSettingsTab()
+    }
   }
 }
 
@@ -72,7 +75,7 @@ struct GeneralSettingsTab: View {
           Text("Version")
           Spacer()
           Text("1.0.0")
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
         }
       }
     }
@@ -107,7 +110,7 @@ struct AppearanceSettingsTab: View {
 // MARK: - Sync Settings Tab
 
 struct SyncSettingsTab: View {
-  @State private var syncManager = BackgroundSyncManager.shared
+  private var syncManager: BackgroundSyncManager { .shared }
 
   var body: some View {
     Form {
@@ -122,7 +125,7 @@ struct SyncSettingsTab: View {
               Text("Last Sync")
               Spacer()
               Text(lastSync.formatted(date: .abbreviated, time: .shortened))
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             }
           }
 
@@ -191,10 +194,21 @@ struct PlaybackSettingsTab: View {
 
 struct TranscriptSettingsTab: View {
   @State private var viewModel = SettingsViewModel()
+  private var whisperManager: WhisperModelManager { .shared }
 
   var body: some View {
     Form {
+      // MARK: Engine selection
       Section {
+        Picker("Engine", selection: Binding(
+          get: { viewModel.selectedTranscriptEngine },
+          set: { viewModel.setTranscriptEngine($0) }
+        )) {
+          ForEach(TranscriptEngine.allCases) { engine in
+            Text(engine.displayName).tag(engine)
+          }
+        }
+
         Picker("Language", selection: $viewModel.selectedTranscriptLocale) {
           ForEach(SettingsViewModel.availableTranscriptLocales) { locale in
             Text(locale.name).tag(locale.id)
@@ -204,78 +218,165 @@ struct TranscriptSettingsTab: View {
           viewModel.setSelectedTranscriptLocale(newValue)
         }
 
-        HStack {
-          Text("Speech Model Status")
-          Spacer()
-          transcriptStatusView
+        // Apple Speech model status row
+        if viewModel.selectedTranscriptEngine == .appleSpeech {
+          HStack {
+            Text("Speech Model Status")
+            Spacer()
+            appleSpeechStatusView
+          }
         }
       } header: {
         Text("Transcript Settings")
       } footer: {
-        Text("Download speech models for transcript generation. Each podcast uses its own language from the RSS feed.")
+        Text(viewModel.selectedTranscriptEngine == .whisper
+          ? "\(viewModel.selectedTranscriptEngine.description)"
+          : "Download the Apple Speech model for your preferred language. Each podcast uses its own language from the RSS feed."
+        )
+      }
+
+      // MARK: Whisper models list
+      if viewModel.selectedTranscriptEngine == .whisper {
+        Section {
+          ForEach(WhisperModelVariant.allCases) { variant in
+            MacWhisperModelRow(variant: variant)
+          }
+        } header: {
+          Text("Whisper Models")
+        } footer: {
+          Text("On macOS, Medium and Large v3 Turbo offer the best accuracy. Models are stored in ~/Library/Caches.")
+        }
       }
     }
     .formStyle(.grouped)
     .padding()
+    .frame(minHeight: viewModel.selectedTranscriptEngine == .whisper ? 500 : 300)
     .onAppear {
       viewModel.checkTranscriptModelStatus()
+      WhisperModelManager.shared.checkAllModelStatuses()
     }
   }
 
   @ViewBuilder
-  private var transcriptStatusView: some View {
+  private var appleSpeechStatusView: some View {
     switch viewModel.transcriptModelStatus {
     case .checking:
       HStack(spacing: 8) {
-        ProgressView()
-          .scaleEffect(0.7)
-        Text("Checking...")
-          .foregroundColor(.secondary)
+        ProgressView().scaleEffect(0.7)
+        Text("Checking...").foregroundStyle(.secondary)
       }
     case .notDownloaded:
       HStack(spacing: 8) {
-        Text("Not installed")
-          .foregroundColor(.orange)
-        Button("Download") {
-          viewModel.downloadTranscriptModel()
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
+        Text("Not installed").foregroundStyle(.orange)
+        Button("Download") { viewModel.downloadTranscriptModel() }
+          .buttonStyle(.borderedProminent).controlSize(.small)
       }
     case .downloading(let progress):
       HStack(spacing: 8) {
-        ProgressView(value: progress)
-          .frame(width: 80)
-        Text("\(Int(progress * 100))%")
-          .foregroundColor(.secondary)
-        Button {
-          viewModel.cancelTranscriptDownload()
-        } label: {
+        ProgressView(value: progress).frame(width: 80)
+        Text("\(Int(progress * 100))%").foregroundStyle(.secondary)
+        Button { viewModel.cancelTranscriptDownload() } label: {
           Image(systemName: "xmark.circle.fill")
         }
         .buttonStyle(.plain)
       }
     case .ready:
       HStack(spacing: 4) {
-        Image(systemName: "checkmark.circle.fill")
-          .foregroundColor(.green)
-        Text("Ready")
-          .foregroundColor(.green)
+        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        Text("Ready").foregroundStyle(.green)
       }
     case .error(let message):
       HStack(spacing: 8) {
-        Text(message)
-          .foregroundColor(.red)
-          .lineLimit(1)
-        Button("Retry") {
-          viewModel.downloadTranscriptModel()
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
+        Text(message).foregroundStyle(.red).lineLimit(1)
+        Button("Retry") { viewModel.downloadTranscriptModel() }
+          .buttonStyle(.borderedProminent).controlSize(.small)
       }
     case .simulatorNotSupported:
-      Text("Requires physical device")
-        .foregroundColor(.secondary)
+      Text("Requires physical device").foregroundStyle(.secondary)
+    }
+  }
+}
+
+// MARK: - macOS Whisper Model Row
+
+struct MacWhisperModelRow: View {
+  let variant: WhisperModelVariant
+  private var manager: WhisperModelManager { .shared }
+
+  var body: some View {
+    let status = manager.status(for: variant)
+    let isSelected = manager.selectedModel == variant
+
+    HStack(spacing: 10) {
+      Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+        .foregroundStyle(isSelected ? .blue : .secondary)
+        .onTapGesture {
+          if status.isReady { manager.setSelectedModel(variant) }
+        }
+
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 6) {
+          Text(variant.displayName)
+            .fontWeight(isSelected ? .semibold : .regular)
+          Text(variant.approximateSize)
+            .font(.caption).foregroundStyle(.secondary)
+          if variant == .platformDefault {
+            Text("Recommended")
+              .font(.caption2)
+              .padding(.horizontal, 5).padding(.vertical, 2)
+              .background(Color.blue.opacity(0.15))
+              .foregroundStyle(.blue)
+              .clipShape(Capsule())
+          }
+        }
+        Text(variant.accuracyNote)
+          .font(.caption2).foregroundStyle(.secondary)
+      }
+
+      Spacer()
+
+      macWhisperAction(for: variant, status: status)
+    }
+    .contentShape(Rectangle())
+    .onTapGesture {
+      if status.isReady { manager.setSelectedModel(variant) }
+    }
+  }
+
+  @ViewBuilder
+  private func macWhisperAction(
+    for variant: WhisperModelVariant,
+    status: WhisperModelStatus
+  ) -> some View {
+    switch status {
+    case .notDownloaded:
+      Button("Download") { manager.downloadModel(variant) }
+        .buttonStyle(.borderedProminent).controlSize(.small)
+    case .downloading(let progress):
+      HStack(spacing: 8) {
+        ProgressView(value: progress).frame(width: 80)
+        Text("\(Int(progress * 100))%").font(.caption).foregroundStyle(.secondary)
+        Button { manager.cancelDownload(variant) } label: {
+          Image(systemName: "xmark.circle.fill")
+        }
+        .buttonStyle(.plain)
+      }
+    case .ready:
+      HStack(spacing: 8) {
+        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        Button { manager.deleteModel(variant) } label: {
+          Image(systemName: "trash").foregroundStyle(.red).font(.caption)
+        }
+        .buttonStyle(.plain)
+        .help("Delete model from disk")
+      }
+    case .error(let message):
+      HStack(spacing: 4) {
+        Text("Error").foregroundStyle(.red).font(.caption)
+        Button("Retry") { manager.downloadModel(variant) }
+          .buttonStyle(.borderedProminent).controlSize(.small)
+      }
+      .help(message)
     }
   }
 }
@@ -294,10 +395,10 @@ struct AISettingsTab: View {
             Spacer()
             if AISettingsManager.shared.hasConfiguredProvider {
               Text(AISettingsManager.shared.selectedProvider.displayName)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             } else {
               Text("Not configured")
-                .foregroundColor(.orange)
+                .foregroundStyle(.orange)
             }
           }
         }
@@ -424,14 +525,14 @@ struct StorageSettingsTab: View {
   ) -> some View {
     HStack {
       Image(systemName: icon)
-        .foregroundColor(iconColor)
+        .foregroundStyle(iconColor)
         .frame(width: 20)
 
       VStack(alignment: .leading, spacing: 2) {
         Text(title)
         Text(size)
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
 
       Spacer()
@@ -443,7 +544,7 @@ struct StorageSettingsTab: View {
         Button(isDestructive ? "Remove All" : "Clear") {
           action()
         }
-        .foregroundColor(isDestructive ? .red : .blue)
+        .foregroundStyle(isDestructive ? .red : .blue)
       }
     }
     .buttonStyle(.plain)
@@ -468,9 +569,7 @@ struct StorageSettingsTab: View {
   }
 
   private func calculateImageCacheSize() async -> Int64 {
-    // FileManager enumeration must be done synchronously in Swift 6
-    // Use nonisolated helper to avoid async context restrictions
-    Self.enumerateDirectorySize(at: "ImageCache", in: .cachesDirectory)
+    ImageCacheUtility.dataCacheTotalSize()
   }
 
   private nonisolated static func enumerateDirectorySize(at subpath: String, in searchPath: FileManager.SearchPathDirectory) -> Int64 {
@@ -517,7 +616,7 @@ struct StorageSettingsTab: View {
     clearingMessage = "cache"
 
     Task {
-      ImageCacheManager.shared.clearAllCache()
+      ImageCacheUtility.clearAllCache()
       isClearingData = false
       clearingMessage = ""
       imageCacheSize = "0 bytes"

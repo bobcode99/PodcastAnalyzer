@@ -1,6 +1,6 @@
 import Foundation
 import SwiftData
-import os.log
+import OSLog
 import Observation // Required for @Observable
 
 @Observable

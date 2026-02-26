@@ -32,6 +32,34 @@ struct EpisodeQuickTags {
     var difficulty: String
 }
 
+/// Listening history summary generated on-device from episode metadata
+/// Used by Apple Foundation Models - fits within 4096 token limit
+@Generable
+struct ListeningHistorySummary {
+    @Guide(description: "2-3 sentence overview of listening habits")
+    var summary: String
+
+    @Guide(description: "Top 3 topics or themes")
+    var topTopics: [String]
+
+    @Guide(description: "Total listening time described naturally, e.g. '~12 hours'")
+    var totalListeningTime: String
+
+    @Guide(description: "An interesting pattern or insight")
+    var insight: String
+}
+
+/// Episode recommendations generated on-device based on listening history
+/// Used by Apple Foundation Models - fits within 4096 token limit
+@Generable
+struct EpisodeRecommendations {
+    @Guide(description: "List of 3-5 recommended episode titles from the available episodes, ordered by relevance")
+    var recommendedTitles: [String]
+
+    @Guide(description: "Brief reason for each recommendation")
+    var reasons: [String]
+}
+
 // MARK: - Analysis State
 
 /// Represents the state of AI analysis (works for both on-device and cloud)

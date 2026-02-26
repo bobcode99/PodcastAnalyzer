@@ -8,6 +8,104 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Transcript Format for AI Analysis
+
+enum TranscriptFormatForAI: String, CaseIterable, Codable {
+    case segmentBased = "Segment-Based"
+    case sentenceBased = "Sentence-Based"
+
+    var displayName: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .segmentBased: return "list.bullet.rectangle"
+        case .sentenceBased: return "text.alignleft"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .segmentBased: return "Include timestamps with each segment, e.g. [00:01:23] text (useful for time references)"
+        case .sentenceBased: return "Merge segments into natural sentences (better for AI comprehension, lower token cost)"
+        }
+    }
+
+    /// Format transcript content based on the selected format
+    /// - Parameter transcript: Raw SRT transcript content
+    /// - Returns: Formatted transcript suitable for AI analysis
+    func formatTranscript(_ transcript: String) -> String {
+        switch self {
+        case .segmentBased:
+            // Convert SRT to clean "[HH:MM:SS] text" format for AI
+            if transcript.contains("-->") {
+                return formatSegmentBased(transcript)
+            }
+            // Already plain text — return as-is (no timestamps available)
+            return transcript
+        case .sentenceBased:
+            // Check if content looks like SRT/VTT format (has timestamps)
+            if transcript.contains("-->") {
+                // Use SRTParser to extract plain text, then merge into sentences
+                let plainText = SRTParser.extractPlainText(from: transcript)
+                return mergeSentences(plainText)
+            } else {
+                // Already plain text, just merge sentences
+                return mergeSentences(transcript)
+            }
+        }
+    }
+
+    /// Convert SRT content to clean "[HH:MM:SS] text" lines for AI
+    private func formatSegmentBased(_ srtContent: String) -> String {
+        let segments = SRTParser.parseSegments(from: srtContent)
+        return segments.map { segment in
+            let totalSeconds = Int(segment.startTime)
+            let h = totalSeconds / 3600
+            let m = (totalSeconds % 3600) / 60
+            let s = totalSeconds % 60
+            let timestamp = h > 0
+                ? String(format: "[%d:%02d:%02d]", h, m, s)
+                : String(format: "[%02d:%02d]", m, s)
+            return "\(timestamp) \(segment.text)"
+        }.joined(separator: "\n")
+    }
+
+    /// Merge text segments into proper sentences for better AI comprehension
+    /// Handles sentence-ending punctuation for multiple languages
+    private func mergeSentences(_ text: String) -> String {
+        // Sentence endings for multiple languages
+        let sentenceEndings = CharacterSet(charactersIn: ".!?。！？")
+
+        // Split by whitespace and recombine intelligently
+        let words = text.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+
+        var sentences: [String] = []
+        var currentSentence: [String] = []
+
+        for word in words {
+            currentSentence.append(word)
+
+            // Check if this word ends with sentence-ending punctuation
+            let trimmedWord = word.trimmingCharacters(in: .whitespaces)
+            if let lastChar = trimmedWord.unicodeScalars.last,
+               sentenceEndings.contains(lastChar) {
+                // End of sentence - join and add to sentences
+                sentences.append(currentSentence.joined(separator: " "))
+                currentSentence = []
+            }
+        }
+
+        // Handle remaining words that didn't end with punctuation
+        if !currentSentence.isEmpty {
+            sentences.append(currentSentence.joined(separator: " "))
+        }
+
+        // Join sentences with newlines for better readability
+        return sentences.joined(separator: "\n")
+    }
+}
+
 // MARK: - Analysis Language Setting
 
 enum AnalysisLanguage: String, CaseIterable, Codable {
@@ -64,14 +162,14 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
 
     var displayName: String {
         switch self {
-        case .applePCC: return "Apple Intelligence"
+        case .applePCC: return "Shortcuts"
         default: return rawValue
         }
     }
 
     var iconName: String {
         switch self {
-        case .applePCC: return "apple.intelligence"
+        case .applePCC: return "arrow.triangle.branch"
         case .openai: return "brain.head.profile"
         case .claude: return "sparkles"
         case .gemini: return "diamond"
@@ -97,7 +195,7 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
 
     var defaultModel: String {
         switch self {
-        case .applePCC: return "Apple Intelligence"
+        case .applePCC: return "Shortcuts"
         case .openai: return "gpt-4o-mini"
         case .claude: return "claude-sonnet-4-5-20250929"
         case .gemini: return "gemini-2.0-flash"
@@ -108,8 +206,8 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
 
     var availableModels: [String] {
         switch self {
-        // Apple Intelligence via Shortcuts
-        case .applePCC: return ["Apple Intelligence"]
+        // Shortcuts - depends on AI provider used in shortcut
+        case .applePCC: return ["Shortcuts"]
         // OpenAI models (Dec 2025)
         case .openai: return [
             "gpt-4o-mini",           // Fast, cheap
@@ -150,7 +248,7 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
 
     var contextWindowSize: Int {
         switch self {
-        case .applePCC: return 128_000  // Apple PCC via Shortcuts - large context
+        case .applePCC: return 128_000  // Shortcuts - depends on AI provider used
         case .openai: return 128_000
         case .claude: return 200_000
         case .gemini: return 1_000_000
@@ -161,7 +259,7 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
 
     var pricingNote: String {
         switch self {
-        case .applePCC: return "Free! Uses Apple Intelligence via Shortcuts"
+        case .applePCC: return "Free! Runs AI via iOS/macOS Shortcuts app"
         case .openai: return "gpt-4o-mini: $0.15/1M input tokens"
         case .claude: return "Haiku: $0.25/1M input tokens"
         case .gemini: return "Flash: Free tier available!"
@@ -232,6 +330,14 @@ final class AISettingsManager {
         didSet { saveSettings() }
     }
 
+    var transcriptFormat: TranscriptFormatForAI {
+        didSet { saveSettings() }
+    }
+
+    var shortcutsTimeout: TimeInterval {
+        didSet { UserDefaults.standard.set(shortcutsTimeout, forKey: "ai_shortcuts_timeout") }
+    }
+
     // MARK: - Initialization
 
     private init() {
@@ -257,6 +363,17 @@ final class AISettingsManager {
         } else {
             self.analysisLanguage = .deviceLanguage // Default
         }
+
+        // Load transcript format setting
+        if let formatString = UserDefaults.standard.string(forKey: "ai_transcript_format"),
+           let format = TranscriptFormatForAI(rawValue: formatString) {
+            self.transcriptFormat = format
+        } else {
+            self.transcriptFormat = .sentenceBased // Default to sentence-based for better AI comprehension
+        }
+
+        // Load shortcuts timeout setting
+        self.shortcutsTimeout = UserDefaults.standard.object(forKey: "ai_shortcuts_timeout") as? TimeInterval ?? 120
 
         // Load API keys from Keychain (use static method to avoid 'self' issue)
         self.openAIKey = Self.loadKeyFromKeychain(for: .openai)
@@ -289,7 +406,7 @@ final class AISettingsManager {
 
     var currentModel: String {
         switch selectedProvider {
-        case .applePCC: return "Apple Intelligence"
+        case .applePCC: return "Shortcuts"
         case .openai: return selectedOpenAIModel
         case .claude: return selectedClaudeModel
         case .gemini: return selectedGeminiModel
@@ -330,6 +447,7 @@ final class AISettingsManager {
         UserDefaults.standard.set(selectedGrokModel, forKey: "ai_grok_model")
         UserDefaults.standard.set(selectedGroqModel, forKey: "ai_groq_model")
         UserDefaults.standard.set(analysisLanguage.rawValue, forKey: "ai_analysis_language")
+        UserDefaults.standard.set(transcriptFormat.rawValue, forKey: "ai_transcript_format")
     }
 
     // MARK: - Keychain Helpers

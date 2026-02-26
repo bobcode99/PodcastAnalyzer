@@ -161,7 +161,7 @@ extension PlatformImage {
 // MARK: - Platform Title Display Mode
 
 /// Platform-independent navigation bar title display mode
-enum PlatformTitleDisplayMode {
+nonisolated enum PlatformTitleDisplayMode {
   case automatic
   case inline
   case large
@@ -200,7 +200,7 @@ extension View {
 
 // MARK: - Platform Detection
 
-struct Platform {
+nonisolated struct Platform {
   static var isIOS: Bool {
     #if os(iOS)
     return true

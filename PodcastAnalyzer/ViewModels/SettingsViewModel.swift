@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 import SwiftUI
-import os.log
+import OSLog
 
 // MARK: - Transcript Model Status
 enum TranscriptModelStatus: Equatable {
@@ -47,6 +47,7 @@ final class SettingsViewModel {
 
   private var successMessageTask: Task<Void, Never>?
   private var transcriptDownloadTask: Task<Void, Never>?
+  private var transcriptModelStatusTask: Task<Void, Never>?
   private let service = PodcastRssService()
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "SettingsViewModel")
 
@@ -59,12 +60,42 @@ final class SettingsViewModel {
   // Playback settings
   var autoPlayNextEpisode: Bool = false
 
+  // For You recommendations
+  var showForYouRecommendations: Bool = true
+
   private enum Keys {
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
     static let selectedTranscriptLocale = "selectedTranscriptLocale"
     static let selectedPodcastRegion = "selectedPodcastRegion"
     static let showEpisodeArtwork = "showEpisodeArtwork"
     static let autoPlayNextEpisode = "autoPlayNextEpisode"
+    static let showForYouRecommendations = "showForYouRecommendations"
+    static let transcriptEngine = "transcriptEngine"
+  }
+
+  // MARK: - Transcript Engine
+
+  var selectedTranscriptEngine: TranscriptEngine = .appleSpeech
+
+  func setTranscriptEngine(_ engine: TranscriptEngine) {
+    selectedTranscriptEngine = engine
+    UserDefaults.standard.set(engine.rawValue, forKey: Keys.transcriptEngine)
+    logger.info("Transcript engine set to \(engine.rawValue)")
+    // Refresh Apple Speech model status whenever switching back
+    if engine == .appleSpeech {
+      checkTranscriptModelStatus()
+    } else {
+      WhisperModelManager.shared.checkAllModelStatuses()
+    }
+  }
+
+  private func loadTranscriptEngine() {
+    if let raw = UserDefaults.standard.string(forKey: Keys.transcriptEngine),
+       let engine = TranscriptEngine(rawValue: raw) {
+      selectedTranscriptEngine = engine
+    } else {
+      selectedTranscriptEngine = .appleSpeech
+    }
   }
 
   init() {
@@ -73,7 +104,12 @@ final class SettingsViewModel {
     loadSelectedRegion()
     loadShowEpisodeArtwork()
     loadAutoPlayNextEpisode()
+    loadShowForYouRecommendations()
+    loadTranscriptEngine()
   }
+
+  // Tasks are cancelled via cleanup() from onDisappear; deinit removed
+  // because accessing @MainActor properties from nonisolated deinit is invalid.
 
   // MARK: - Region Settings
 
@@ -121,6 +157,23 @@ final class SettingsViewModel {
   private func loadAutoPlayNextEpisode() {
     // Default to false if not set
     autoPlayNextEpisode = UserDefaults.standard.bool(forKey: Keys.autoPlayNextEpisode)
+  }
+
+  // MARK: - For You Recommendations Settings
+
+  func setShowForYouRecommendations(_ show: Bool) {
+    showForYouRecommendations = show
+    UserDefaults.standard.set(show, forKey: Keys.showForYouRecommendations)
+    logger.info("Show For You recommendations set to \(show)")
+  }
+
+  private func loadShowForYouRecommendations() {
+    // Default to true if not set
+    if UserDefaults.standard.object(forKey: Keys.showForYouRecommendations) == nil {
+      showForYouRecommendations = true
+    } else {
+      showForYouRecommendations = UserDefaults.standard.bool(forKey: Keys.showForYouRecommendations)
+    }
   }
 
   // MARK: - Transcript Locale Settings
@@ -295,7 +348,8 @@ final class SettingsViewModel {
     #else
       transcriptModelStatus = .checking
 
-      Task {
+      transcriptModelStatusTask?.cancel()
+      transcriptModelStatusTask = Task {
         let transcriptService = TranscriptService(language: selectedTranscriptLocale)
         let isReady = await transcriptService.isModelReady()
 

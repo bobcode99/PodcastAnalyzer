@@ -7,7 +7,7 @@
 
 import Foundation
 import SwiftData
-import os.log
+import OSLog
 
 /// Tracks the status of a transcript generation job
 enum TranscriptJobStatus: Equatable {
@@ -28,8 +28,14 @@ struct TranscriptJob: Identifiable {
   var status: TranscriptJobStatus = .queued
 }
 
-/// Manages background transcript generation with parallel processing
+/// Manages background transcript generation with parallel processing.
+///
+/// Explicit `@MainActor` because all state (`activeJobs`, `pendingJobs`, etc.) drives
+/// UI observation via `@Observable`.  Heavy work is delegated to `TranscriptService`
+/// and `WhisperTranscriptService` (both actors), so `await`-ing their methods
+/// automatically suspends the caller and runs on the actor's executor.
 @available(iOS 17.0, *)
+@MainActor
 @Observable
 class TranscriptManager {
   static let shared = TranscriptManager()
@@ -39,7 +45,7 @@ class TranscriptManager {
 
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "TranscriptManager")
   private let fileStorage = FileStorageManager.shared
-  
+
   // Helper to create job ID matching episode key format
   private func makeJobId(podcastTitle: String, episodeTitle: String) -> String {
     return "\(podcastTitle)\(Self.episodeKeyDelimiter)\(episodeTitle)"
@@ -49,21 +55,10 @@ class TranscriptManager {
   var isProcessing: Bool = false
 
   // Maximum concurrent transcript jobs
-  // Increased for better performance on modern devices
-  // Speech framework can handle multiple concurrent transcriptions efficiently
   private let maxConcurrentJobs: Int = {
-    // Use more concurrent jobs on devices with more CPU cores
     let processorCount = ProcessInfo.processInfo.processorCount
-    // Cap at 4 to avoid overwhelming the system
     return min(max(processorCount / 2, 2), 4)
   }()
-  
-  // Dedicated background queue for CPU-intensive transcription work
-  private let transcriptionQueue = DispatchQueue(
-    label: "com.podcast.analyzer.transcription",
-    qos: .userInitiated,
-    attributes: .concurrent
-  )
 
   // Queue for pending jobs
   private var pendingJobs: [TranscriptJob] = []
@@ -72,20 +67,17 @@ class TranscriptManager {
 
   private init() {}
 
+  // No deinit needed — TranscriptManager is a singleton (static let shared)
+  // that lives for the app's lifetime. Tasks are cancelled via cancelAll().
+
   // MARK: - Public API
 
   /// Queues a transcript generation job
-  /// - Parameters:
-  ///   - episodeTitle: Title of the episode
-  ///   - podcastTitle: Title of the podcast
-  ///   - audioPath: Local path to the audio file
-  ///   - language: Language code for transcription
   func queueTranscript(
     episodeTitle: String, podcastTitle: String, audioPath: String, language: String
   ) {
     let jobId = makeJobId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
 
-    // Check if already queued or processing
     if activeJobs[jobId] != nil {
       logger.info("Transcript job already exists for: \(episodeTitle)")
       return
@@ -101,10 +93,7 @@ class TranscriptManager {
 
     pendingJobs.append(job)
     activeJobs[jobId] = job
-
     logger.info("Queued transcript job for: \(episodeTitle)")
-
-    // Start processing if not already running
     startProcessingIfNeeded()
   }
 
@@ -112,12 +101,10 @@ class TranscriptManager {
   func isGenerating(episodeTitle: String, podcastTitle: String) -> Bool {
     let jobId = makeJobId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
 
-    // Check if in pending queue or actively running
     if pendingJobs.contains(where: { $0.id == jobId }) || runningJobIds.contains(jobId) {
       return true
     }
 
-    // Also check active jobs status
     if let job = activeJobs[jobId] {
       switch job.status {
       case .queued, .downloadingModel, .transcribing:
@@ -139,18 +126,15 @@ class TranscriptManager {
   func cancelJob(episodeTitle: String, podcastTitle: String) {
     let jobId = makeJobId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
 
-    // Remove from pending
     pendingJobs.removeAll { $0.id == jobId }
     activeJobs.removeValue(forKey: jobId)
 
-    // If this job is currently running, cancel the task
     if runningJobIds.contains(jobId) {
       processingTasks[jobId]?.cancel()
       processingTasks.removeValue(forKey: jobId)
       runningJobIds.remove(jobId)
       logger.info("Cancelled running transcript job for: \(episodeTitle)")
 
-      // Update isProcessing flag
       if runningJobIds.isEmpty && pendingJobs.isEmpty {
         isProcessing = false
       }
@@ -160,14 +144,13 @@ class TranscriptManager {
   // MARK: - Processing
 
   private func startProcessingIfNeeded() {
-    // Start as many jobs as we can up to the concurrent limit
     while runningJobIds.count < maxConcurrentJobs && !pendingJobs.isEmpty {
       let job = pendingJobs.removeFirst()
       runningJobIds.insert(job.id)
       isProcessing = true
 
       let task = Task { [weak self] in
-        guard let self = self else { return }
+        guard let self else { return }
         await self.processJob(job)
       }
       processingTasks[job.id] = task
@@ -175,66 +158,52 @@ class TranscriptManager {
   }
 
   private func processJob(_ job: TranscriptJob) async {
-    await MainActor.run {
-      var updatedJob = job
-      updatedJob.status = .downloadingModel(progress: 0)
-      activeJobs[job.id] = updatedJob
-    }
+    var updatedJob = job
+    updatedJob.status = .downloadingModel(progress: 0)
+    activeJobs[job.id] = updatedJob
 
-    // Use Task.detached to ensure CPU-intensive work runs on a background thread
-    // This prevents blocking the main actor and allows better parallelization
-    await Task.detached(priority: .userInitiated) { [weak self] in
-      guard let self = self else { return }
-      
-      do {
-        let audioURL = URL(fileURLWithPath: job.audioPath)
+    let engine = TranscriptEngine(
+      rawValue: UserDefaults.standard.string(forKey: "transcriptEngine") ?? ""
+    ) ?? .appleSpeech
+
+    do {
+      let audioURL = URL(fileURLWithPath: job.audioPath)
+      guard FileManager.default.fileExists(atPath: job.audioPath) else {
+        throw NSError(
+          domain: "TranscriptManager", code: 3,
+          userInfo: [NSLocalizedDescriptionKey: "Audio file not found: \(job.audioPath)"]
+        )
+      }
+
+      switch engine {
+
+      // MARK: Apple Speech path
+      case .appleSpeech:
         let transcriptService = TranscriptService(language: job.language)
 
-        // Check if model is ready
         let modelReady = await transcriptService.isModelReady()
-
         if !modelReady {
           for await progress in await transcriptService.setupAndInstallAssets() {
-            await MainActor.run {
-              var updatedJob = job
-              updatedJob.status = .downloadingModel(progress: progress)
-              self.activeJobs[job.id] = updatedJob
-            }
+            activeJobs[job.id]?.status = .downloadingModel(progress: progress)
           }
         } else {
-          // Still need to call setup to initialize
-          for await _ in await transcriptService.setupAndInstallAssets() {
-            // Consume progress
-          }
+          for await _ in await transcriptService.setupAndInstallAssets() {}
         }
 
         guard await transcriptService.isInitialized() else {
           throw NSError(
             domain: "TranscriptManager", code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "Failed to initialize transcription service"]
+            userInfo: [NSLocalizedDescriptionKey: "Failed to initialize Apple Speech service"]
           )
         }
 
-        // Start transcription
-        await MainActor.run {
-          var updatedJob = job
-          updatedJob.status = .transcribing(progress: 0)
-          self.activeJobs[job.id] = updatedJob
-        }
+        activeJobs[job.id]?.status = .transcribing(progress: 0)
 
         var finalSRTContent: String?
-
-        // CPU-intensive transcription work happens here
-        // Task.detached ensures this runs on a background thread
-        for try await progressUpdate in await transcriptService.audioToSRTWithProgress(
+        for try await progressUpdate in await transcriptService.audioToSRTChunkedWithProgress(
           inputFile: audioURL)
         {
-          await MainActor.run {
-            var updatedJob = job
-            updatedJob.status = .transcribing(progress: progressUpdate.progress)
-            self.activeJobs[job.id] = updatedJob
-          }
-
+          activeJobs[job.id]?.status = .transcribing(progress: progressUpdate.progress)
           if progressUpdate.isComplete {
             finalSRTContent = progressUpdate.srtContent
           }
@@ -243,55 +212,87 @@ class TranscriptManager {
         guard let srtContent = finalSRTContent else {
           throw NSError(
             domain: "TranscriptManager", code: 2,
-            userInfo: [
-              NSLocalizedDescriptionKey: "Transcription completed but no content was generated"
-            ]
+            userInfo: [NSLocalizedDescriptionKey: "Transcription produced no content"]
           )
         }
 
-        // Save the transcript (file I/O can also benefit from background thread)
         _ = try await fileStorage.saveCaptionFile(
           content: srtContent,
           episodeTitle: job.episodeTitle,
           podcastTitle: job.podcastTitle
         )
 
-        await MainActor.run {
-          var updatedJob = job
-          updatedJob.status = .completed
-          self.activeJobs[job.id] = updatedJob
-          self.logger.info("Transcript completed for: \(job.episodeTitle)")
+      // MARK: Whisper path (WhisperKit)
+      case .whisper:
+        let modelVariant = WhisperModelManager.shared.selectedModel
+
+        if !WhisperModelManager.modelExistsOnDisk(modelVariant) {
+          do {
+            try await WhisperTranscriptService.downloadModel(
+              variant: modelVariant,
+              onProgress: { [weak self] progress in
+                Task { @MainActor in
+                  self?.activeJobs[job.id]?.status = .downloadingModel(progress: progress)
+                }
+              }
+            )
+          } catch {
+            throw NSError(
+              domain: "TranscriptManager", code: 4,
+              userInfo: [
+                NSLocalizedDescriptionKey:
+                  "Whisper model download failed: \(error.localizedDescription)"
+              ]
+            )
+          }
         }
 
-        // Remove from active jobs after a short delay
-        try? await Task.sleep(for: .seconds(3))
-        _ = await MainActor.run {
-          self.activeJobs.removeValue(forKey: job.id)
+        activeJobs[job.id]?.status = .transcribing(progress: 0)
+
+        let whisperService = WhisperTranscriptService()
+        var finalSRTContent: String?
+
+        for try await progressUpdate in await whisperService.audioToSRTWithProgress(
+          inputFile: audioURL,
+          modelVariant: modelVariant)
+        {
+          activeJobs[job.id]?.status = .transcribing(progress: progressUpdate.progress)
+          if progressUpdate.isComplete {
+            finalSRTContent = progressUpdate.srtContent
+          }
         }
 
-      } catch {
-        await MainActor.run {
-          var updatedJob = job
-          updatedJob.status = .failed(error: error.localizedDescription)
-          self.activeJobs[job.id] = updatedJob
-          self.logger.error(
-            "Transcript failed for \(job.episodeTitle): \(error.localizedDescription)")
+        guard let srtContent = finalSRTContent else {
+          throw NSError(
+            domain: "TranscriptManager", code: 2,
+            userInfo: [NSLocalizedDescriptionKey: "Whisper transcription produced no content"]
+          )
         }
+
+        _ = try await fileStorage.saveCaptionFile(
+          content: srtContent,
+          episodeTitle: job.episodeTitle,
+          podcastTitle: job.podcastTitle
+        )
       }
 
-      // Job completed - clean up and check for more pending jobs
-      await MainActor.run {
-        self.runningJobIds.remove(job.id)
-        self.processingTasks.removeValue(forKey: job.id)
+      // MARK: Completion (shared)
+      activeJobs[job.id]?.status = .completed
+      logger.info("Transcript completed for: \(job.episodeTitle)")
 
-        // Update isProcessing flag
-        if self.runningJobIds.isEmpty && self.pendingJobs.isEmpty {
-          self.isProcessing = false
-        }
+      try? await Task.sleep(for: .seconds(3))
+      activeJobs.removeValue(forKey: job.id)
 
-        // Start next job if there are pending ones
-        self.startProcessingIfNeeded()
-      }
-    }.value
+    } catch {
+      activeJobs[job.id]?.status = .failed(error: error.localizedDescription)
+      logger.error("Transcript failed for \(job.episodeTitle): \(error.localizedDescription)")
+    }
+
+    runningJobIds.remove(job.id)
+    processingTasks.removeValue(forKey: job.id)
+    if runningJobIds.isEmpty && pendingJobs.isEmpty {
+      isProcessing = false
+    }
+    startProcessingIfNeeded()
   }
 }

@@ -9,6 +9,7 @@ import Foundation
 import SwiftUI
 
 /// Reusable view for displaying episode status icons
+/// Use isCompact: true for overlays on artwork (smaller icons with background)
 struct EpisodeStatusIcons: View {
   let isStarred: Bool
   let isDownloaded: Bool
@@ -19,6 +20,7 @@ struct EpisodeStatusIcons: View {
   let isDownloading: Bool
   let downloadProgress: Double
   let isTranscribing: Bool
+  let isCompact: Bool
 
   init(
     isStarred: Bool = false,
@@ -29,7 +31,8 @@ struct EpisodeStatusIcons: View {
     showCompleted: Bool = true,
     isDownloading: Bool = false,
     downloadProgress: Double = 0,
-    isTranscribing: Bool = false
+    isTranscribing: Bool = false,
+    isCompact: Bool = false
   ) {
     self.isStarred = isStarred
     self.isDownloaded = isDownloaded
@@ -40,10 +43,30 @@ struct EpisodeStatusIcons: View {
     self.isDownloading = isDownloading
     self.downloadProgress = downloadProgress
     self.isTranscribing = isTranscribing
+    self.isCompact = isCompact
   }
 
+  private var hasAnyStatus: Bool {
+    isStarred || isDownloaded || hasTranscript || hasAIAnalysis || isDownloading || isTranscribing || (showCompleted && isCompleted)
+  }
+
+  // Icon sizes based on compact mode
+  private var iconSize: CGFloat { isCompact ? 9 : 10 }
+  private var spacing: CGFloat { isCompact ? 3 : 4 }
+  private var downloadIconSize: CGFloat { 6 }
+  private var progressFrameSize: CGFloat { 14 }
+  private var transcriptIconSize: CGFloat { isCompact ? 7 : 8 }
+
   var body: some View {
-    HStack(spacing: 4) {
+    if isCompact {
+      compactBody
+    } else {
+      standardBody
+    }
+  }
+
+  private var standardBody: some View {
+    HStack(spacing: spacing) {
       if isStarred {
         statusIcon("star.fill", color: .yellow)
       }
@@ -72,10 +95,43 @@ struct EpisodeStatusIcons: View {
     }
   }
 
+  @ViewBuilder
+  private var compactBody: some View {
+    if hasAnyStatus {
+      HStack(spacing: spacing) {
+        if isStarred {
+          statusIcon("star.fill", color: .yellow)
+        }
+
+        // Download status: show progress if downloading, checkmark if downloaded
+        if isDownloading {
+          downloadProgressView
+        } else if isDownloaded {
+          statusIcon("arrow.down.circle.fill", color: .green)
+        }
+
+        // Transcript status: show progress if transcribing, icon if has transcript
+        if isTranscribing {
+          transcriptProgressView
+        } else if hasTranscript {
+          statusIcon("captions.bubble.fill", color: .purple)
+        }
+
+        if hasAIAnalysis {
+          statusIcon("sparkles", color: .orange)
+        }
+      }
+      .padding(4)
+      .background(.ultraThinMaterial)
+      .clipShape(.rect(cornerRadius: 6))
+      .padding(4)
+    }
+  }
+
   private func statusIcon(_ name: String, color: Color) -> some View {
     Image(systemName: name)
-      .font(.system(size: 10))
-      .foregroundColor(color)
+      .font(.system(size: iconSize, weight: isCompact ? .bold : .regular))
+      .foregroundStyle(color)
   }
 
   private var downloadProgressView: some View {
@@ -87,10 +143,10 @@ struct EpisodeStatusIcons: View {
         .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, lineCap: .round))
         .rotationEffect(.degrees(-90))
       Image(systemName: "arrow.down")
-        .font(.system(size: 6, weight: .bold))
-        .foregroundColor(.blue)
+        .font(.system(size: downloadIconSize, weight: .bold))
+        .foregroundStyle(.blue)
     }
-    .frame(width: 14, height: 14)
+    .frame(width: progressFrameSize, height: progressFrameSize)
   }
 
   private var transcriptProgressView: some View {
@@ -99,8 +155,9 @@ struct EpisodeStatusIcons: View {
         .scaleEffect(0.4)
         .frame(width: 10, height: 10)
       Image(systemName: "text.bubble")
-        .font(.system(size: 8, weight: .bold))
-        .foregroundColor(.purple)
+        .font(.system(size: transcriptIconSize, weight: .bold))
+        .foregroundStyle(.purple)
     }
   }
 }
+
