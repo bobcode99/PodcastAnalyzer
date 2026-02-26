@@ -569,9 +569,7 @@ struct StorageSettingsTab: View {
   }
 
   private func calculateImageCacheSize() async -> Int64 {
-    // FileManager enumeration must be done synchronously in Swift 6
-    // Use nonisolated helper to avoid async context restrictions
-    Self.enumerateDirectorySize(at: "ImageCache", in: .cachesDirectory)
+    ImageCacheUtility.dataCacheTotalSize()
   }
 
   private nonisolated static func enumerateDirectorySize(at subpath: String, in searchPath: FileManager.SearchPathDirectory) -> Int64 {
@@ -618,7 +616,7 @@ struct StorageSettingsTab: View {
     clearingMessage = "cache"
 
     Task {
-      await ImageCacheManager.shared.clearAllCache()
+      ImageCacheUtility.clearAllCache()
       isClearingData = false
       clearingMessage = ""
       imageCacheSize = "0 bytes"

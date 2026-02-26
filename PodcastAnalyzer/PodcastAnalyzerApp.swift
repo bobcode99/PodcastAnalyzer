@@ -57,6 +57,9 @@ struct PodcastAnalyzerApp: App {
   }()
 
   init() {
+    // Configure Nuke image pipeline with persistent data cache
+    configureImagePipeline()
+
     // Register background task for episode sync
     BackgroundSyncManager.registerBackgroundTask()
 
@@ -94,7 +97,7 @@ struct PodcastAnalyzerApp: App {
             queue: .main
           ) { _ in
             Task { @MainActor in
-              ImageCacheManager.shared.clearMemoryCache()
+              ImageCacheUtility.clearMemoryCache()
               await RSSCacheService.shared.clearAllCache()
               logger.warning("Low memory warning: cleared image and RSS caches")
             }
