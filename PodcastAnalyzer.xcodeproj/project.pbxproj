@@ -227,6 +227,8 @@
 				158240922ED303EC000ABA90 /* XMLKit */,
 				155164752ED374440015567A /* ZMarkupParser */,
 				AA0000022ED303EC000ABAA0 /* WhisperKit */,
+				BB0000022F4F0001000NUKE0 /* Nuke */,
+				BB0000032F4F0001000NUKE0 /* NukeUI */,
 			);
 			productName = PodcastAnalyzer;
 			productReference = 15ED5EED2EC44BC6001B6CD7 /* PodcastAnalyzer.app */;
@@ -317,6 +319,7 @@
 				1582408F2ED303EC000ABA90 /* XCRemoteSwiftPackageReference "FeedKit" */,
 				155164712ED371680015567A /* XCRemoteSwiftPackageReference "ZMarkupParser" */,
 				AA0000012ED303EC000ABAA0 /* XCRemoteSwiftPackageReference "WhisperKit" */,
+				BB0000012F4F0001000NUKE0 /* XCRemoteSwiftPackageReference "Nuke" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 15ED5EEE2EC44BC6001B6CD7 /* Products */;
@@ -913,6 +916,14 @@
 				minimumVersion = 0.9.0;
 			};
 		};
+		BB0000012F4F0001000NUKE0 /* XCRemoteSwiftPackageReference "Nuke" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/kean/Nuke.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -935,6 +946,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA0000012ED303EC000ABAA0 /* XCRemoteSwiftPackageReference "WhisperKit" */;
 			productName = WhisperKit;
+		};
+		BB0000022F4F0001000NUKE0 /* Nuke */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BB0000012F4F0001000NUKE0 /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = Nuke;
+		};
+		BB0000032F4F0001000NUKE0 /* NukeUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BB0000012F4F0001000NUKE0 /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = NukeUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

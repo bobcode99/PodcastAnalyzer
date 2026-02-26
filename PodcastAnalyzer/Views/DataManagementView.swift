@@ -279,24 +279,7 @@ struct DataManagementView: View {
   }
 
   private func calculateImageCacheSize() async -> Int64 {
-    await Task.detached(priority: .utility) {
-      let fileManager = FileManager.default
-      let cachesDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-      let cacheDir = cachesDir.appendingPathComponent("ImageCache")
-
-      guard let enumerator = fileManager.enumerator(
-        at: cacheDir,
-        includingPropertiesForKeys: [.fileSizeKey]
-      ) else { return Int64(0) }
-
-      var totalSize: Int64 = 0
-      while let fileURL = enumerator.nextObject() as? URL {
-        if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-          totalSize += Int64(size)
-        }
-      }
-      return totalSize
-    }.value
+    ImageCacheUtility.dataCacheTotalSize()
   }
 
   private func calculateDownloadedAudioSize() async -> Int64 {
@@ -361,21 +344,10 @@ struct DataManagementView: View {
     isClearingData = true
     clearingMessage = "cache"
 
-    Task {
-      await Task.detached(priority: .utility) {
-        let fileManager = FileManager.default
-        let cachesDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let cacheDir = cachesDir.appendingPathComponent("ImageCache")
-        try? fileManager.removeItem(at: cacheDir)
-        try? fileManager.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-      }.value
-
-      await MainActor.run {
-        imageCacheSize = "0 KB"
-        isClearingData = false
-        clearingMessage = ""
-      }
-    }
+    ImageCacheUtility.clearAllCache()
+    imageCacheSize = "0 KB"
+    isClearingData = false
+    clearingMessage = ""
   }
 
   private func clearAllDownloads() {
