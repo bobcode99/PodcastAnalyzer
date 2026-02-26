@@ -16,7 +16,14 @@ private let signpostLog = OSLog(subsystem: "com.podcast.analyzer", category: "Po
 
 // MARK: - Library Episode Model
 
-struct LibraryEpisode: Identifiable {
+struct LibraryEpisode: Identifiable, Hashable {
+  static func == (lhs: LibraryEpisode, rhs: LibraryEpisode) -> Bool {
+    lhs.id == rhs.id
+  }
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(id)
+  }
+
   let id: String
   let podcastTitle: String
   let imageURL: String?
@@ -217,12 +224,6 @@ final class LibraryViewModel {
     }
     setupDownloadCompletionObserver()
     setupSyncCompletionObserver()
-  }
-
-  deinit {
-    MainActor.assumeIsolated {
-      cleanup()
-    }
   }
 
   /// Clean up resources. Call this from onDisappear.

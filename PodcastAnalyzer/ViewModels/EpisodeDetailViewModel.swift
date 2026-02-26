@@ -2442,22 +2442,6 @@ final class EpisodeDetailViewModel {
     cloudQuestionTask = nil
   }
 
-  deinit {
-    // Ensure cleanup even if cleanup() wasn't called (defensive programming)
-    playbackObserverTask?.cancel()
-    translationTask?.cancel()
-    shareTask?.cancel()
-    parseDescriptionTask?.cancel()
-    checkTranscriptTask?.cancel()
-    availableTranslationsTask?.cancel()
-    loadTranscriptDateTask?.cancel()
-    rssTranscriptCheckTask?.cancel()
-    loadExistingTranscriptTask?.cancel()
-    seekTask?.cancel()
-    onDeviceAICheckTask?.cancel()
-    quickTagsTask?.cancel()
-    briefSummaryTask?.cancel()
-    cloudAnalysisTask?.cancel()
-    cloudQuestionTask?.cancel()
-  }
+  // Tasks are cancelled via cleanup() from onDisappear; deinit removed
+  // because accessing @MainActor properties from nonisolated deinit is invalid in Swift 6.
 }

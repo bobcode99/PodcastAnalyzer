@@ -67,11 +67,8 @@ class TranscriptManager {
 
   private init() {}
 
-  deinit {
-    MainActor.assumeIsolated {
-      for task in processingTasks.values { task.cancel() }
-    }
-  }
+  // No deinit needed — TranscriptManager is a singleton (static let shared)
+  // that lives for the app's lifetime. Tasks are cancelled via cancelAll().
 
   // MARK: - Public API
 

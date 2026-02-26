@@ -73,11 +73,7 @@ class BackgroundSyncManager {
     static let lastSyncDate = "lastSyncDate"
   }
 
-  deinit {
-    MainActor.assumeIsolated {
-      foregroundSyncTask?.cancel()
-    }
-  }
+  // No deinit — singleton lives for app lifetime.
 
   private init() {
     // Check if user has explicitly set the preference

@@ -150,16 +150,14 @@ struct EpisodeListView: View {
         ProgressView("Loading...")
       }
     }
-    .onAppear {
+    .task {
+      // Initialize ViewModel and refresh in a single task to prevent race conditions
       self.podcastModel = podcastModel
       if viewModel == nil {
         let vm = EpisodeListViewModel(podcastModel: podcastModel, initialFilter: initialFilter)
         vm.setModelContext(modelContext)
         viewModel = vm
       }
-    }
-    .task {
-      // Auto-refresh episodes in background when navigating to the podcast
       await viewModel?.refreshPodcast()
       await lookupApplePodcastURL(title: podcastModel.podcastInfo.title)
     }
@@ -486,7 +484,8 @@ struct EpisodeListView: View {
   private func descriptionView(for viewModel: EpisodeListViewModel) -> some View {
     switch viewModel.descriptionContent {
     case .loading:
-      EmptyView()
+      ProgressView()
+        .frame(maxWidth: .infinity, alignment: .center)
     case .empty:
       Text("No description available.")
         .foregroundStyle(.secondary)

@@ -40,31 +40,49 @@ private actor DownloadCoordinator {
   }
 }
 
+// MARK: - Thread-Safe Memory Cache
+
+/// Sendable wrapper around NSCache for cross-isolation synchronous access.
+/// Safety invariant: NSCache is documented as thread-safe by Apple (all methods are atomic).
+/// This wrapper only exposes NSCache's own thread-safe operations.
+private nonisolated final class ThreadSafeImageCache: @unchecked Sendable {
+  private let cache = NSCache<NSString, CachedPlatformImage>()
+
+  init(countLimit: Int, totalCostLimit: Int) {
+    cache.countLimit = countLimit
+    cache.totalCostLimit = totalCostLimit
+  }
+
+  func object(forKey key: NSString) -> CachedPlatformImage? {
+    cache.object(forKey: key)
+  }
+
+  func setObject(_ obj: CachedPlatformImage, forKey key: NSString, cost: Int) {
+    cache.setObject(obj, forKey: key, cost: cost)
+  }
+
+  func removeAllObjects() {
+    cache.removeAllObjects()
+  }
+}
+
 // MARK: - Image Cache Manager
 
-// SAFETY: @unchecked Sendable is safe because:
-// - NSCache is internally thread-safe
-// - DownloadCoordinator (actor) handles async download coordination
-// - All mutable state is accessed through synchronized paths
-// TODO: Migrate to Mutex<NSCache> when minimum deployment target is iOS 18+
-final class ImageCacheManager: @unchecked Sendable {
+/// Actor-isolated image cache manager.
+/// Memory cache uses a Sendable wrapper for safe nonisolated synchronous reads.
+/// Disk cache and downloads are actor-isolated.
+actor ImageCacheManager {
   static let shared = ImageCacheManager()
 
-  private let memoryCache = NSCache<NSString, CachedPlatformImage>()
+  // Sendable `let` property — accessible from nonisolated context in Swift 6.
+  private let memoryCache = ThreadSafeImageCache(countLimit: 100, totalCostLimit: 50 * 1024 * 1024)
   private let fileManager = FileManager.default
   private let cacheDirectory: URL
 
-  // Actor for coordinating downloads (replaces NSLock for async contexts)
+  // Actor for coordinating downloads to prevent duplicate requests
   private let downloadCoordinator = DownloadCoordinator()
 
-  // Serial queue for synchronous memory cache access (safer than NSLock)
-  private let memoryCacheQueue = DispatchQueue(label: "com.podcastanalyzer.imagecache.memory")
-
   private init() {
-    // Set up memory cache limits
-    memoryCache.countLimit = 100  // Max 100 images
-    memoryCache.totalCostLimit = 50 * 1024 * 1024  // 50 MB
-
     // Set up disk cache directory
     let cachesDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
     cacheDirectory = cachesDir.appendingPathComponent("ImageCache", isDirectory: true)
@@ -75,8 +93,7 @@ final class ImageCacheManager: @unchecked Sendable {
 
   // MARK: - Cache Key Generation
 
-  private func cacheKey(for url: URL) -> String {
-    // Use a stable hash - SHA256-like approach using Data
+  private nonisolated func cacheKey(for url: URL) -> String {
     let urlString = url.absoluteString
     var hash: UInt64 = 5381
     for char in urlString.utf8 {
@@ -87,22 +104,19 @@ final class ImageCacheManager: @unchecked Sendable {
 
   // MARK: - Synchronous Memory Cache (for immediate UI response)
 
-  /// Synchronous cache lookup - safe to call from any context
-  func getCachedSync(for url: URL) -> CachedPlatformImage? {
+  /// Synchronous cache lookup - safe to call from any context.
+  /// NSCache is internally thread-safe, so nonisolated access is safe.
+  nonisolated func getCachedSync(for url: URL) -> CachedPlatformImage? {
     let key = cacheKey(for: url) as NSString
-    // NSCache is thread-safe, but we use queue for consistency
-    return memoryCacheQueue.sync {
-      memoryCache.object(forKey: key)
-    }
+    return memoryCache.object(forKey: key)
   }
 
   private func cacheInMemory(_ image: CachedPlatformImage, for url: URL) {
     let key = cacheKey(for: url) as NSString
-    let cost = Int(image.size.width * image.size.height * 4)  // Approximate byte size
-    memoryCacheQueue.sync {
-      memoryCache.setObject(image, forKey: key, cost: cost)
-    }
+    let cost = Int(image.size.width * image.size.height * 4)
+    memoryCache.setObject(image, forKey: key, cost: cost)
   }
+
 
   // MARK: - Disk Cache
 
@@ -117,7 +131,6 @@ final class ImageCacheManager: @unchecked Sendable {
           let image = CachedPlatformImage(data: data) else {
       return nil
     }
-    // Also cache in memory for faster access next time
     cacheInMemory(image, for: url)
     return image
   }
@@ -137,37 +150,35 @@ final class ImageCacheManager: @unchecked Sendable {
     #endif
   }
 
-  // MARK: - Download and Cache (with deduplication via actor)
+  // MARK: - Download and Cache (with deduplication)
 
   func downloadAndCache(from url: URL) async -> CachedPlatformImage? {
     let key = cacheKey(for: url)
 
-    // Check memory cache first (synchronous)
+    // Check memory cache first
     if let cached = getCachedSync(for: url) {
       return cached
     }
 
-    // Check disk cache (synchronous but I/O bound)
+    // Check disk cache
     if let diskCached = getDiskCached(for: url) {
       return diskCached
     }
 
-    // Check if already downloading (actor-isolated, safe across await)
+    // Check if already downloading
     if let existingTask = await downloadCoordinator.getExistingTask(for: key) {
       return await existingTask.value
     }
 
     // Create download task
-    let task = Task<CachedPlatformImage?, Never> { [weak self] in
-      guard let self else { return nil }
-
+    let task = Task<CachedPlatformImage?, Never> {
       do {
         let (data, _) = try await URLSession.shared.data(from: url)
         guard let image = CachedPlatformImage(data: data) else { return nil }
 
         // Cache in memory and disk
-        self.cacheInMemory(image, for: url)
-        self.cacheToDisk(image, for: url)
+        await self.cacheInMemory(image, for: url)
+        await self.cacheToDisk(image, for: url)
 
         return image
       } catch {
@@ -188,11 +199,10 @@ final class ImageCacheManager: @unchecked Sendable {
 
   // MARK: - Cache Cleanup
 
-  func clearMemoryCache() {
-    memoryCacheQueue.sync {
-      memoryCache.removeAllObjects()
-    }
+  nonisolated func clearMemoryCache() {
+    memoryCache.removeAllObjects()
   }
+
 
   func clearDiskCache() {
     try? fileManager.removeItem(at: cacheDirectory)

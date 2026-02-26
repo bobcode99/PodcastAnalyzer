@@ -576,12 +576,6 @@ final class ExpandedPlayerViewModel {
     }
   }
 
-  deinit {
-    MainActor.assumeIsolated {
-      cleanup()
-    }
-  }
-
   /// Clean up resources. Call this from onDisappear.
   func cleanup() {
     shareTask?.cancel()

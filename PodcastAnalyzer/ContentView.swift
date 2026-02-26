@@ -23,7 +23,8 @@ struct ContentView: View {
 struct iOSContentView: View {
   // Access singletons directly without @State to avoid unnecessary observation overhead
   private var audioManager: EnhancedAudioManager { .shared }
-  private var importManager: PodcastImportManager { .shared }
+  // importManager needs @State because $binding syntax is required for sheet
+  @State private var importManager = PodcastImportManager.shared
   private var notificationManager: NotificationNavigationManager { .shared }
   @Environment(\.modelContext) private var modelContext
 
@@ -132,8 +133,7 @@ struct iOSContentView: View {
       // Restore last played episode on app launch
       audioManager.restoreLastEpisode()
     }
-// Using @Bindable locally for the sheet binding
-        .sheet(isPresented: Binding(get: { importManager.showImportSheet }, set: { importManager.showImportSheet = $0 })) {
+        .sheet(isPresented: $importManager.showImportSheet) {
             PodcastImportSheet()
         }
         .onChange(of: notificationManager.shouldNavigate) { _, shouldNavigate in

@@ -7,7 +7,14 @@
 
 import Foundation
 
-public struct PodcastEpisodeInfo: Sendable, Identifiable {
+public struct PodcastEpisodeInfo: Sendable, Identifiable, Hashable {
+  public static func == (lhs: PodcastEpisodeInfo, rhs: PodcastEpisodeInfo) -> Bool {
+    lhs.id == rhs.id
+  }
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(id)
+  }
+
   public let title: String
   public let podcastEpisodeDescription: String?
   public let pubDate: Date?

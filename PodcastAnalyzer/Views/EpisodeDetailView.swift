@@ -237,7 +237,8 @@ struct EpisodeDetailView: View {
         case 0: summaryTab
         case 1: transcriptContent
         case 2: EpisodeAIAnalysisView(viewModel: viewModel, embedsOwnScroll: true, isHeaderVisible: $isHeaderVisible, lastScrollOffset: $lastScrollOffset, isUserScrolling: $isUserScrolling)
-        default: EmptyView()
+        default: Text("Unknown tab: \(selectedTab)")
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -438,7 +439,7 @@ struct EpisodeDetailView: View {
             // Task-based timer for playback updates - automatically cancelled when view disappears
             guard playbackTimerActive else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(100))
+                try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { break }
                 if viewModel.isCurrentEpisode && viewModel.audioManager.isPlaying {
                     let newTime = viewModel.audioManager.currentTime

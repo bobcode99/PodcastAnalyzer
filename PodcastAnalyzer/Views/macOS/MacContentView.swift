@@ -79,10 +79,11 @@ enum LibrarySubItem: String, CaseIterable, Identifiable {
 // MARK: - macOS Content View
 
 struct MacContentView: View {
-  // Use @State for @Observable to ensure SwiftUI properly tracks changes
-  @State private var audioManager = EnhancedAudioManager.shared
+  // @Observable singletons: use computed properties for read-only access
+  private var audioManager: EnhancedAudioManager { .shared }
+  private var notificationManager: NotificationNavigationManager { .shared }
+  // importManager needs @State because $binding syntax is required for sheet
   @State private var importManager = PodcastImportManager.shared
-  @State private var notificationManager = NotificationNavigationManager.shared
   @Environment(\.modelContext) private var modelContext
   @Environment(\.openSettings) private var openSettings
 
