@@ -17,6 +17,55 @@ import UIKit
 struct TrendingEpisodesDestination: Hashable {}
 struct PopularShowsDestination: Hashable {}
 
+/// Destination for navigating to a trending episode's detail view
+struct TrendingEpisodeDetailDestination: Hashable {
+  let episodeTitle: String
+  let episodeDescription: String?
+  let releaseDate: String?
+  let audioURL: String?
+  let durationMillis: Int?
+  let artworkUrl: String?
+  let podcastName: String
+  let podcastArtworkUrl: String?
+  let podcastId: String
+
+  init(from trending: ApplePodcastService.TrendingEpisode) {
+    self.episodeTitle = trending.episode.trackName
+    self.episodeDescription = trending.episode.description ?? trending.episode.shortDescription
+    self.releaseDate = trending.episode.releaseDate
+    self.audioURL = trending.episode.episodeUrl ?? trending.episode.previewUrl
+    self.durationMillis = trending.episode.trackTimeMillis
+    self.artworkUrl = trending.episode.artworkUrl600 ?? trending.episode.artworkUrl160
+    self.podcastName = trending.podcastName
+    self.podcastArtworkUrl = trending.podcastArtworkUrl
+    self.podcastId = trending.podcastId
+  }
+
+  /// Convert to PodcastEpisodeInfo for EpisodeDetailView
+  var asPodcastEpisodeInfo: PodcastEpisodeInfo {
+    // Parse ISO 8601 date
+    var pubDate: Date?
+    if let dateStr = releaseDate {
+      let formatter = ISO8601DateFormatter()
+      formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      pubDate = formatter.date(from: dateStr)
+      if pubDate == nil {
+        formatter.formatOptions = [.withInternetDateTime]
+        pubDate = formatter.date(from: dateStr)
+      }
+    }
+
+    return PodcastEpisodeInfo(
+      title: episodeTitle,
+      podcastEpisodeDescription: episodeDescription,
+      pubDate: pubDate,
+      audioURL: audioURL,
+      imageURL: artworkUrl ?? podcastArtworkUrl,
+      duration: durationMillis.map { $0 / 1000 }
+    )
+  }
+}
+
 struct HomeView: View {
   @State private var viewModel = HomeViewModel()
   @Environment(\.modelContext) private var modelContext
@@ -63,6 +112,13 @@ struct HomeView: View {
         artistName: podcast.artistName,
         collectionId: podcast.id,
         applePodcastUrl: podcast.url
+      )
+    }
+    .navigationDestination(for: TrendingEpisodeDetailDestination.self) { dest in
+      EpisodeDetailView(
+        episode: dest.asPodcastEpisodeInfo,
+        podcastTitle: dest.podcastName,
+        fallbackImageURL: dest.podcastArtworkUrl
       )
     }
     .navigationDestination(for: TrendingEpisodesDestination.self) { _ in
@@ -253,7 +309,7 @@ struct HomeView: View {
     if showTrending && (!viewModel.trendingEpisodes.isEmpty || viewModel.isLoadingTrendingEpisodes) {
       VStack(alignment: .leading, spacing: 12) {
         HStack {
-          Text("Trending Episodes")
+          Text("Top Episodes")
             .font(.title2)
             .fontWeight(.bold)
 
@@ -266,9 +322,13 @@ struct HomeView: View {
 
           if !viewModel.trendingEpisodes.isEmpty {
             NavigationLink(value: TrendingEpisodesDestination()) {
-              Text("See All")
-                .font(.subheadline)
-                .foregroundStyle(.blue)
+              HStack(spacing: 2) {
+                Text("See All")
+                  .font(.subheadline)
+                Image(systemName: "chevron.right")
+                  .font(.caption)
+              }
+              .foregroundStyle(.blue)
             }
           }
         }
@@ -1036,8 +1096,8 @@ struct UpNextListView: View {
 
 // MARK: - Trending Episodes Paged View
 
-/// Horizontal paged scroll: each page shows 3 episodes in a row.
-/// Swipe left/right to see more pages (up to 4 pages = 12 episodes).
+/// Horizontal paged scroll: each page shows 3 episode rows stacked vertically.
+/// Apple Podcasts "Top Episodes" style with artwork, rank, title, and metadata.
 struct TrendingEpisodesPagedView: View {
   let episodes: [ApplePodcastService.TrendingEpisode]
 
@@ -1048,19 +1108,21 @@ struct TrendingEpisodesPagedView: View {
     }
   }
 
-  private let columns = [
-    GridItem(.flexible(), spacing: 12),
-    GridItem(.flexible(), spacing: 12),
-    GridItem(.flexible(), spacing: 12),
-  ]
-
   var body: some View {
     ScrollView(.horizontal) {
       LazyHStack(spacing: 0) {
-        ForEach(Array(pages.enumerated()), id: \.offset) { _, page in
-          LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(page) { episode in
-              TrendingEpisodeCard(episode: episode)
+        ForEach(Array(pages.enumerated()), id: \.offset) { pageIndex, page in
+          VStack(spacing: 0) {
+            ForEach(Array(page.enumerated()), id: \.element.id) { rowIndex, episode in
+              let rank = pageIndex * 3 + rowIndex + 1
+              NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
+                TrendingEpisodeRow(episode: episode, rank: rank, showEllipsis: true)
+              }
+              .buttonStyle(.plain)
+              if rowIndex < page.count - 1 {
+                Divider()
+                  .padding(.leading, 108)
+              }
             }
           }
           .containerRelativeFrame(.horizontal)
@@ -1069,74 +1131,20 @@ struct TrendingEpisodesPagedView: View {
       }
       .scrollTargetLayout()
     }
-    .scrollTargetBehavior(.paging)
+    .scrollTargetBehavior(.viewAligned)
     .scrollIndicators(.hidden)
   }
 }
 
-// MARK: - Trending Episode Card
-
-struct TrendingEpisodeCard: View {
-  let episode: ApplePodcastService.TrendingEpisode
-
-  private var formattedDuration: String? {
-    guard let millis = episode.episode.trackTimeMillis else { return nil }
-    let totalSeconds = millis / 1000
-    let hours = totalSeconds / 3600
-    let minutes = (totalSeconds % 3600) / 60
-    if hours > 0 {
-      return "\(hours)h \(minutes)m"
-    }
-    return "\(minutes) min"
-  }
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      // Use LazyImage for flexible-width artwork in grid
-      LazyImage(url: URL(string: episode.podcastArtworkUrl ?? "")) { state in
-        if let image = state.image {
-          image.resizable().aspectRatio(contentMode: .fill)
-        } else {
-          Color.gray.opacity(0.2)
-            .overlay {
-              Image(systemName: "waveform")
-                .foregroundStyle(.secondary)
-            }
-        }
-      }
-      .aspectRatio(1, contentMode: .fit)
-      .clipShape(.rect(cornerRadius: 10))
-
-      Text(episode.episode.trackName)
-        .font(.caption)
-        .fontWeight(.medium)
-        .lineLimit(2)
-        .multilineTextAlignment(.leading)
-
-      VStack(alignment: .leading, spacing: 2) {
-        Text(episode.podcastName)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-
-        if let duration = formattedDuration {
-          Text(duration)
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-        }
-      }
-    }
-  }
-}
-
-// MARK: - Trending Episode Row (for list view)
+// MARK: - Trending Episode Row
 
 struct TrendingEpisodeRow: View {
   let episode: ApplePodcastService.TrendingEpisode
   let rank: Int
+  var showEllipsis: Bool = false
 
-  private var formattedDuration: String? {
-    guard let millis = episode.episode.trackTimeMillis else { return nil }
+  private var formattedDuration: String {
+    guard let millis = episode.episode.trackTimeMillis else { return "" }
     let totalSeconds = millis / 1000
     let hours = totalSeconds / 3600
     let minutes = (totalSeconds % 3600) / 60
@@ -1146,36 +1154,101 @@ struct TrendingEpisodeRow: View {
     return "\(minutes) min"
   }
 
+  private var relativeDate: String {
+    guard let dateStr = episode.episode.releaseDate else { return "" }
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    // Try with fractional seconds first, then without
+    guard let date = formatter.date(from: dateStr) ?? {
+      formatter.formatOptions = [.withInternetDateTime]
+      return formatter.date(from: dateStr)
+    }() else { return "" }
+    let relative = RelativeDateTimeFormatter()
+    relative.unitsStyle = .abbreviated
+    return relative.localizedString(for: date, relativeTo: Date())
+  }
+
+  private var metadataText: String {
+    let parts = [relativeDate, formattedDuration].filter { !$0.isEmpty }
+    return parts.joined(separator: " · ")
+  }
+
   var body: some View {
     HStack(spacing: 12) {
+      CachedArtworkImage(urlString: episode.podcastArtworkUrl, size: 80, cornerRadius: 12)
+
       Text("\(rank)")
-        .font(.headline)
+        .font(.title2)
+        .fontWeight(.bold)
         .foregroundStyle(.secondary)
         .frame(width: 28)
 
-      CachedArtworkImage(urlString: episode.podcastArtworkUrl, size: 56, cornerRadius: 8)
-
-      VStack(alignment: .leading, spacing: 3) {
+      VStack(alignment: .leading, spacing: 4) {
         Text(episode.episode.trackName)
           .font(.subheadline)
           .fontWeight(.medium)
           .lineLimit(2)
+          .foregroundStyle(.primary)
 
-        Text(episode.podcastName)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-
-        if let duration = formattedDuration {
-          Text(duration)
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
+        if !metadataText.isEmpty {
+          Text(metadataText)
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
       }
 
       Spacer(minLength: 0)
+
+      if showEllipsis {
+        Menu {
+          TrendingEpisodeContextMenu(episode: episode)
+        } label: {
+          Image(systemName: "ellipsis")
+            .font(.body)
+            .foregroundStyle(.secondary)
+            .frame(width: 32, height: 32)
+            .contentShape(Rectangle())
+        }
+      }
     }
-    .padding(.vertical, 6)
+    .padding(.vertical, 10)
+  }
+}
+
+// MARK: - Trending Episode Context Menu
+
+struct TrendingEpisodeContextMenu: View {
+  let episode: ApplePodcastService.TrendingEpisode
+
+  var body: some View {
+    // Go to Show
+    NavigationLink(value: episode.asAppleRSSPodcast) {
+      Label("Go to Show", systemImage: "square.stack")
+    }
+
+    Divider()
+
+    // Copy episode name
+    Button {
+      PlatformClipboard.string = episode.episode.trackName
+    } label: {
+      Label("Copy Episode Name", systemImage: "doc.on.doc")
+    }
+
+    // Share
+    if let urlString = episode.episode.trackViewUrl, let url = URL(string: urlString) {
+      Button {
+        PlatformShareSheet.share(url: url)
+      } label: {
+        Label("Share Episode", systemImage: "square.and.arrow.up")
+      }
+    } else if let urlString = episode.episode.episodeUrl, let url = URL(string: urlString) {
+      Button {
+        PlatformShareSheet.share(url: url)
+      } label: {
+        Label("Share Episode", systemImage: "square.and.arrow.up")
+      }
+    }
   }
 }
 
@@ -1187,12 +1260,14 @@ struct TrendingEpisodesListView: View {
   var body: some View {
     List {
       ForEach(Array(episodes.prefix(200).enumerated()), id: \.element.id) { index, episode in
-        TrendingEpisodeRow(episode: episode, rank: index + 1)
-          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
+          TrendingEpisodeRow(episode: episode, rank: index + 1, showEllipsis: true)
+        }
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
       }
     }
     .listStyle(.plain)
-    .navigationTitle("Trending Episodes")
+    .navigationTitle("Top Episodes")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
     #endif

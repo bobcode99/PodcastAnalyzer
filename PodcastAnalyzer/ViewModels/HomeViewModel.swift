@@ -143,11 +143,12 @@ final class HomeViewModel {
   private func loadAll(forceRefresh: Bool = false) async {
     // Load feeds first, then episodes (episodes depend on feeds)
     await loadPodcastFeeds()
-    // Load up next, top podcasts, and trending episodes in parallel
+    // Load up next and top podcasts in parallel
     async let upNextTask: () = loadUpNextEpisodes()
     async let topPodcastsTask: () = loadTopPodcasts(forceRefresh: forceRefresh)
-    async let trendingTask: () = loadTrendingEpisodes(forceRefresh: forceRefresh)
-    _ = await (upNextTask, topPodcastsTask, trendingTask)
+    _ = await (upNextTask, topPodcastsTask)
+    // Trending depends on topPodcasts being loaded
+    await loadTrendingEpisodes(forceRefresh: forceRefresh)
 
     // Load recommendations after feeds are loaded
     if #available(iOS 26.0, macOS 26.0, *) {
@@ -627,10 +628,16 @@ final class HomeViewModel {
 
     isLoadingTrendingEpisodes = true
     do {
-      let episodes = try await applePodcastService.fetchTrendingEpisodes(
-        region: regionToLoad,
-        podcastLimit: 50,
-        episodesPerPodcast: 4
+      // Use first 10 from already-loaded topPodcasts (lightweight iTunes Lookup API)
+      let podcastsToSample = Array(topPodcasts.prefix(10))
+      guard !podcastsToSample.isEmpty else {
+        logger.warning("No top podcasts available for trending episodes")
+        isLoadingTrendingEpisodes = false
+        return
+      }
+      let episodes = try await applePodcastService.fetchTrendingEpisodesFromLookup(
+        topPodcasts: podcastsToSample,
+        episodesPerPodcast: 2
       )
       Self.cachedTrendingEpisodes = episodes
       Self.cachedTrendingRegion = regionToLoad

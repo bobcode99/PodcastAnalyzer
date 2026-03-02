@@ -234,33 +234,43 @@ class ApplePodcastService: Sendable {
         let podcastArtworkUrl: String?
         let podcastId: String
         let episode: Episode
+
+        /// Convert to AppleRSSPodcast for navigation reuse
+        var asAppleRSSPodcast: AppleRSSPodcast {
+            AppleRSSPodcast(
+                id: podcastId,
+                artistName: podcastName,
+                name: podcastName,
+                artworkUrl100: podcastArtworkUrl,
+                url: episode.trackViewUrl ?? "",
+                genres: nil,
+                contentAdvisoryRating: nil,
+                releaseDate: nil,
+                kind: nil
+            )
+        }
     }
 
-    /// Fetches trending episodes by getting latest episodes from top podcasts in the region.
+    /// Lightweight trending episodes fetch using iTunes Lookup API (no RSS parsing).
+    /// Much faster than the old RSS approach — single JSON call per podcast.
     /// - Parameters:
-    ///   - region: Country code (e.g., "us", "tw")
-    ///   - podcastLimit: Number of top podcasts to sample (default 10)
+    ///   - topPodcasts: Already-fetched top podcasts to reuse
     ///   - episodesPerPodcast: Number of latest episodes per podcast (default 2)
     /// - Returns: Array of trending episodes sorted by release date
-    func fetchTrendingEpisodes(
-        region: String = "us",
-        podcastLimit: Int = 10,
+    func fetchTrendingEpisodesFromLookup(
+        topPodcasts: [AppleRSSPodcast],
         episodesPerPodcast: Int = 2
     ) async throws -> [TrendingEpisode] {
-        // Step 1: Get top podcasts
-        let topPodcasts = try await fetchTopPodcasts(region: region, limit: podcastLimit)
-
-        // Step 2: For each, lookup RSS feed URL and fetch latest episodes
         var allTrending: [TrendingEpisode] = []
 
         await withTaskGroup(of: [TrendingEpisode].self) { group in
             for podcast in topPodcasts {
                 group.addTask {
                     do {
-                        guard let result = try await self.lookupPodcast(collectionId: podcast.id),
-                              let feedUrl = result.feedUrl else { return [] }
-
-                        let episodes = try await self.fetchEpisodesFromRSS(feedUrl: feedUrl, limit: episodesPerPodcast)
+                        let episodes = try await self.fetchEpisodes(
+                            for: Int(podcast.id) ?? 0,
+                            limit: episodesPerPodcast
+                        )
                         return episodes.map { episode in
                             TrendingEpisode(
                                 id: "\(podcast.id)_\(episode.trackName)",
@@ -271,7 +281,6 @@ class ApplePodcastService: Sendable {
                             )
                         }
                     } catch {
-                        // Silently skip failures for individual podcasts
                         return []
                     }
                 }
