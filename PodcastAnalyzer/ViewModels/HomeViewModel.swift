@@ -28,13 +28,20 @@ final class HomeViewModel {
   var topPodcasts: [AppleRSSPodcast] = []
   var isLoadingTopPodcasts = false
 
+  // Trending episodes from top podcasts
+  var trendingEpisodes: [ApplePodcastService.TrendingEpisode] = []
+  var isLoadingTrendingEpisodes = false
+
   // Region selection - synced with Settings
   var selectedRegion: String = "us" {
     didSet {
       if oldValue != selectedRegion {
         // Save to UserDefaults for consistency
         UserDefaults.standard.set(selectedRegion, forKey: "selectedPodcastRegion")
-        Task { await loadTopPodcasts(forceRefresh: true) }
+        Task {
+          await loadTopPodcasts(forceRefresh: true)
+          await loadTrendingEpisodes(forceRefresh: true)
+        }
       }
     }
   }
@@ -46,6 +53,9 @@ final class HomeViewModel {
 
   @ObservationIgnored
   private var recommendationsTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var trendingTask: Task<Void, Never>?
 
   @ObservationIgnored
   private var loadTask: Task<Void, Never>?
@@ -133,10 +143,11 @@ final class HomeViewModel {
   private func loadAll(forceRefresh: Bool = false) async {
     // Load feeds first, then episodes (episodes depend on feeds)
     await loadPodcastFeeds()
-    // Load up next and top podcasts can run in parallel via async let
+    // Load up next, top podcasts, and trending episodes in parallel
     async let upNextTask: () = loadUpNextEpisodes()
     async let topPodcastsTask: () = loadTopPodcasts(forceRefresh: forceRefresh)
-    _ = await (upNextTask, topPodcastsTask)
+    async let trendingTask: () = loadTrendingEpisodes(forceRefresh: forceRefresh)
+    _ = await (upNextTask, topPodcastsTask, trendingTask)
 
     // Load recommendations after feeds are loaded
     if #available(iOS 26.0, macOS 26.0, *) {
@@ -343,21 +354,21 @@ final class HomeViewModel {
       Self.cachedRegion = ""
     }
 
-    // Create shared task with retry logic for transient API failures
+    // Create shared task with retry logic and limit fallback for API failures
     let task = Task { () -> [AppleRSSPodcast] in
+      // Try with limit 200 first; some regions return 500 for high limits
+      let limits = [200, 100, 50]
       var lastError: Error?
-      for attempt in 1...3 {
+      for limit in limits {
         do {
-          return try await applePodcastService.fetchTopPodcasts(region: regionToLoad, limit: 25)
+          return try await applePodcastService.fetchTopPodcasts(region: regionToLoad, limit: limit)
         } catch {
           lastError = error
-          // Only retry on server errors (5xx) or network errors
-          let nsError = error as NSError
-          let isServerError = nsError.domain == NSURLErrorDomain ||
+          let isServerError = (error as NSError).domain == NSURLErrorDomain ||
                               (error as? URLError)?.code == .badServerResponse
-          if isServerError && attempt < 3 {
-            logger.warning("Retry \(attempt)/3 for region \(regionToLoad) after error: \(error.localizedDescription)")
-            try? await Task.sleep(for: .milliseconds(500 * attempt))  // Exponential backoff
+          if isServerError {
+            logger.warning("Region \(regionToLoad) failed with limit \(limit), trying smaller: \(error.localizedDescription)")
+            try? await Task.sleep(for: .milliseconds(300))
             continue
           }
           throw error
@@ -598,11 +609,48 @@ final class HomeViewModel {
     recommendedEpisodes = resolved
   }
 
+  // MARK: - Trending Episodes
+
+  private static var cachedTrendingEpisodes: [ApplePodcastService.TrendingEpisode] = []
+  private static var cachedTrendingRegion: String = ""
+
+  private func loadTrendingEpisodes(forceRefresh: Bool = false) async {
+    let regionToLoad = selectedRegion
+
+    // Use cache if available
+    if !forceRefresh && !Self.cachedTrendingEpisodes.isEmpty && Self.cachedTrendingRegion == regionToLoad {
+      if trendingEpisodes.isEmpty {
+        trendingEpisodes = Self.cachedTrendingEpisodes
+      }
+      return
+    }
+
+    isLoadingTrendingEpisodes = true
+    do {
+      let episodes = try await applePodcastService.fetchTrendingEpisodes(
+        region: regionToLoad,
+        podcastLimit: 50,
+        episodesPerPodcast: 4
+      )
+      Self.cachedTrendingEpisodes = episodes
+      Self.cachedTrendingRegion = regionToLoad
+      if selectedRegion == regionToLoad {
+        trendingEpisodes = episodes
+      }
+      logger.info("Loaded \(episodes.count) trending episodes for \(regionToLoad)")
+    } catch {
+      logger.error("Failed to load trending episodes: \(error.localizedDescription)")
+    }
+    isLoadingTrendingEpisodes = false
+  }
+
   func cleanup() {
     regionObserverTask?.cancel()
     regionObserverTask = nil
     recommendationsTask?.cancel()
     recommendationsTask = nil
+    trendingTask?.cancel()
+    trendingTask = nil
     loadTask?.cancel()
     loadTask = nil
     subscribeTask?.cancel()

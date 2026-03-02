@@ -63,6 +63,12 @@ final class SettingsViewModel {
   // For You recommendations
   var showForYouRecommendations: Bool = true
 
+  // Auto-download
+  var autoDownloadNewEpisodes: Bool = false
+
+  // Trending episodes
+  var showTrendingEpisodes: Bool = true
+
   private enum Keys {
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
     static let selectedTranscriptLocale = "selectedTranscriptLocale"
@@ -71,6 +77,8 @@ final class SettingsViewModel {
     static let autoPlayNextEpisode = "autoPlayNextEpisode"
     static let showForYouRecommendations = "showForYouRecommendations"
     static let transcriptEngine = "transcriptEngine"
+    static let autoDownloadNewEpisodes = "autoDownloadNewEpisodes"
+    static let showTrendingEpisodes = "showTrendingEpisodes"
   }
 
   // MARK: - Transcript Engine
@@ -106,6 +114,8 @@ final class SettingsViewModel {
     loadAutoPlayNextEpisode()
     loadShowForYouRecommendations()
     loadTranscriptEngine()
+    loadAutoDownloadNewEpisodes()
+    loadShowTrendingEpisodes()
   }
 
   // Tasks are cancelled via cleanup() from onDisappear; deinit removed
@@ -176,6 +186,34 @@ final class SettingsViewModel {
     }
   }
 
+  // MARK: - Auto-Download Settings
+
+  func setAutoDownloadNewEpisodes(_ enabled: Bool) {
+    autoDownloadNewEpisodes = enabled
+    UserDefaults.standard.set(enabled, forKey: Keys.autoDownloadNewEpisodes)
+    logger.info("Auto-download new episodes set to \(enabled)")
+  }
+
+  private func loadAutoDownloadNewEpisodes() {
+    autoDownloadNewEpisodes = UserDefaults.standard.bool(forKey: Keys.autoDownloadNewEpisodes)
+  }
+
+  // MARK: - Trending Episodes Settings
+
+  func setShowTrendingEpisodes(_ show: Bool) {
+    showTrendingEpisodes = show
+    UserDefaults.standard.set(show, forKey: Keys.showTrendingEpisodes)
+    logger.info("Show trending episodes set to \(show)")
+  }
+
+  private func loadShowTrendingEpisodes() {
+    if UserDefaults.standard.object(forKey: Keys.showTrendingEpisodes) == nil {
+      showTrendingEpisodes = true
+    } else {
+      showTrendingEpisodes = UserDefaults.standard.bool(forKey: Keys.showTrendingEpisodes)
+    }
+  }
+
   // MARK: - Transcript Locale Settings
 
   struct TranscriptLocaleOption: Identifiable, Hashable {
@@ -183,7 +221,9 @@ final class SettingsViewModel {
     let name: String  // display name like "繁體中文 (台灣)"
   }
 
-  static let availableTranscriptLocales: [TranscriptLocaleOption] = [
+  /// Locales supported by Apple Speech (iOS 17+ on-device).
+  /// This is a subset — Apple Speech requires exact locale matches and model downloads.
+  static let appleSpeechLocales: [TranscriptLocaleOption] = [
     TranscriptLocaleOption(id: "zh-tw", name: "繁體中文 (台灣)"),
     TranscriptLocaleOption(id: "zh-cn", name: "简体中文 (中国)"),
     TranscriptLocaleOption(id: "en-us", name: "English (US)"),
@@ -195,6 +235,77 @@ final class SettingsViewModel {
     TranscriptLocaleOption(id: "es-es", name: "Español"),
     TranscriptLocaleOption(id: "it-it", name: "Italiano"),
     TranscriptLocaleOption(id: "pt-br", name: "Português (Brasil)"),
+    TranscriptLocaleOption(id: "ru", name: "Русский"),
+    TranscriptLocaleOption(id: "ar", name: "العربية"),
+    TranscriptLocaleOption(id: "hi", name: "हिन्दी"),
+    TranscriptLocaleOption(id: "th", name: "ไทย"),
+    TranscriptLocaleOption(id: "tr", name: "Türkçe"),
+  ]
+
+  /// Returns locales appropriate for the given engine
+  static func locales(for engine: TranscriptEngine) -> [TranscriptLocaleOption] {
+    switch engine {
+    case .appleSpeech: return appleSpeechLocales
+    case .whisper: return availableTranscriptLocales
+    }
+  }
+
+  /// All locales for Whisper (supports 50+ languages)
+
+  static let availableTranscriptLocales: [TranscriptLocaleOption] = [
+    // East Asian
+    TranscriptLocaleOption(id: "zh-tw", name: "繁體中文 (台灣)"),
+    TranscriptLocaleOption(id: "zh-cn", name: "简体中文 (中国)"),
+    TranscriptLocaleOption(id: "ja-jp", name: "日本語"),
+    TranscriptLocaleOption(id: "ko-kr", name: "한국어"),
+    // English
+    TranscriptLocaleOption(id: "en-us", name: "English (US)"),
+    TranscriptLocaleOption(id: "en-gb", name: "English (UK)"),
+    // Southeast Asian
+    TranscriptLocaleOption(id: "ms", name: "Bahasa Melayu"),
+    TranscriptLocaleOption(id: "id", name: "Bahasa Indonesia"),
+    TranscriptLocaleOption(id: "th", name: "ไทย"),
+    TranscriptLocaleOption(id: "vi", name: "Tiếng Việt"),
+    TranscriptLocaleOption(id: "tl", name: "Filipino"),
+    // South Asian
+    TranscriptLocaleOption(id: "hi", name: "हिन्दी"),
+    TranscriptLocaleOption(id: "ta", name: "தமிழ்"),
+    TranscriptLocaleOption(id: "bn", name: "বাংলা"),
+    TranscriptLocaleOption(id: "ur", name: "اردو"),
+    // Middle East
+    TranscriptLocaleOption(id: "ar", name: "العربية"),
+    TranscriptLocaleOption(id: "he", name: "עברית"),
+    TranscriptLocaleOption(id: "fa", name: "فارسی"),
+    TranscriptLocaleOption(id: "tr", name: "Türkçe"),
+    // Western European
+    TranscriptLocaleOption(id: "fr-fr", name: "Français"),
+    TranscriptLocaleOption(id: "de-de", name: "Deutsch"),
+    TranscriptLocaleOption(id: "es-es", name: "Español"),
+    TranscriptLocaleOption(id: "it-it", name: "Italiano"),
+    TranscriptLocaleOption(id: "pt-br", name: "Português (Brasil)"),
+    TranscriptLocaleOption(id: "pt-pt", name: "Português (Portugal)"),
+    TranscriptLocaleOption(id: "nl", name: "Nederlands"),
+    TranscriptLocaleOption(id: "ca", name: "Català"),
+    // Northern European
+    TranscriptLocaleOption(id: "sv", name: "Svenska"),
+    TranscriptLocaleOption(id: "no", name: "Norsk"),
+    TranscriptLocaleOption(id: "da", name: "Dansk"),
+    TranscriptLocaleOption(id: "fi", name: "Suomi"),
+    // Eastern European
+    TranscriptLocaleOption(id: "pl", name: "Polski"),
+    TranscriptLocaleOption(id: "ru", name: "Русский"),
+    TranscriptLocaleOption(id: "uk", name: "Українська"),
+    TranscriptLocaleOption(id: "cs", name: "Čeština"),
+    TranscriptLocaleOption(id: "sk", name: "Slovenčina"),
+    TranscriptLocaleOption(id: "ro", name: "Română"),
+    TranscriptLocaleOption(id: "hu", name: "Magyar"),
+    TranscriptLocaleOption(id: "hr", name: "Hrvatski"),
+    TranscriptLocaleOption(id: "bg", name: "Български"),
+    TranscriptLocaleOption(id: "sr", name: "Srpski"),
+    TranscriptLocaleOption(id: "el", name: "Ελληνικά"),
+    // Other
+    TranscriptLocaleOption(id: "af", name: "Afrikaans"),
+    TranscriptLocaleOption(id: "sw", name: "Kiswahili"),
   ]
 
   func setSelectedTranscriptLocale(_ locale: String) {

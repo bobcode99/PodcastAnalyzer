@@ -47,6 +47,21 @@ struct SettingsView: View {
           }
           .disabled(!syncManager.isBackgroundSyncEnabled)
 
+          Toggle(isOn: Binding(get: { viewModel.autoDownloadNewEpisodes }, set: { viewModel.setAutoDownloadNewEpisodes($0) })) {
+            HStack {
+              Image(systemName: "arrow.down.circle")
+                .foregroundStyle(.purple)
+                .frame(width: 24)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Auto-Download New Episodes")
+                Text("Automatically download new episodes from subscribed podcasts")
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+              }
+            }
+          }
+          .disabled(!syncManager.isBackgroundSyncEnabled)
+
           if syncManager.isBackgroundSyncEnabled {
             Button(action: {
               Task {
@@ -97,6 +112,23 @@ struct SettingsView: View {
               VStack(alignment: .leading, spacing: 2) {
                 Text("For You Recommendations")
                 Text("AI-powered episode suggestions on Home")
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+              }
+            }
+          }
+
+          Toggle(isOn: Binding(
+            get: { viewModel.showTrendingEpisodes },
+            set: { viewModel.setShowTrendingEpisodes($0) }
+          )) {
+            HStack {
+              Image(systemName: "chart.line.uptrend.xyaxis")
+                .foregroundStyle(.orange)
+                .frame(width: 24)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Trending Episodes")
+                Text("Show trending episodes from top podcasts on Home")
                   .font(.caption2)
                   .foregroundStyle(.secondary)
               }

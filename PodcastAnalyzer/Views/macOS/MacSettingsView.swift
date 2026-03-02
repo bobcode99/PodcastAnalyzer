@@ -161,10 +161,15 @@ struct AppearanceSettingsTab: View {
           get: { viewModel.showForYouRecommendations },
           set: { viewModel.setShowForYouRecommendations($0) }
         ))
+
+        Toggle("Trending Episodes", isOn: Binding(
+          get: { viewModel.showTrendingEpisodes },
+          set: { viewModel.setShowTrendingEpisodes($0) }
+        ))
       } header: {
         Text("Episode Lists")
       } footer: {
-        Text("Show AI-powered episode suggestions on Home. Hide artwork to reduce memory usage.")
+        Text("Show AI-powered episode suggestions and trending episodes on Home. Hide artwork to reduce memory usage.")
       }
     }
     .formStyle(.grouped)
@@ -176,6 +181,7 @@ struct AppearanceSettingsTab: View {
 
 struct SyncSettingsTab: View {
   private var syncManager: BackgroundSyncManager { .shared }
+  @State private var viewModel = SettingsViewModel()
 
   var body: some View {
     Form {
@@ -184,6 +190,8 @@ struct SyncSettingsTab: View {
 
         if syncManager.isBackgroundSyncEnabled {
           Toggle("New Episode Notifications", isOn: Binding(get: { syncManager.isNotificationsEnabled }, set: { syncManager.isNotificationsEnabled = $0 }))
+
+          Toggle("Auto-Download New Episodes", isOn: Binding(get: { viewModel.autoDownloadNewEpisodes }, set: { viewModel.setAutoDownloadNewEpisodes($0) }))
 
           if let lastSync = syncManager.lastSyncDate {
             LabeledContent("Last Sync") {

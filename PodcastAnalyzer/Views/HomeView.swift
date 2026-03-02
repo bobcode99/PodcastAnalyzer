@@ -5,12 +5,17 @@
 //  Home tab - shows Up Next (unplayed episodes) and Popular Shows from Apple Podcasts
 //
 
+import NukeUI
 import SwiftData
 import SwiftUI
 
 #if os(iOS)
 import UIKit
 #endif
+
+// Navigation destination types for See All pages
+struct TrendingEpisodesDestination: Hashable {}
+struct PopularShowsDestination: Hashable {}
 
 struct HomeView: View {
   @State private var viewModel = HomeViewModel()
@@ -35,6 +40,9 @@ struct HomeView: View {
           forYouSection
         }
 
+        // Trending Episodes Section
+        trendingEpisodesSection
+
         // Popular Shows Section
         popularShowsSection
       }
@@ -56,6 +64,12 @@ struct HomeView: View {
         collectionId: podcast.id,
         applePodcastUrl: podcast.url
       )
+    }
+    .navigationDestination(for: TrendingEpisodesDestination.self) { _ in
+      TrendingEpisodesListView(episodes: viewModel.trendingEpisodes)
+    }
+    .navigationDestination(for: PopularShowsDestination.self) { _ in
+      PopularShowsListView(podcasts: viewModel.topPodcasts, viewModel: viewModel)
     }
     .navigationTitle(Constants.homeString)
     .platformToolbarTitleDisplayMode()
@@ -229,6 +243,53 @@ struct HomeView: View {
     }
   }
 
+  // MARK: - Trending Episodes Section
+
+  @ViewBuilder
+  private var trendingEpisodesSection: some View {
+    let showTrending = UserDefaults.standard.object(forKey: "showTrendingEpisodes") == nil ||
+                       UserDefaults.standard.bool(forKey: "showTrendingEpisodes")
+
+    if showTrending && (!viewModel.trendingEpisodes.isEmpty || viewModel.isLoadingTrendingEpisodes) {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack {
+          Text("Trending Episodes")
+            .font(.title2)
+            .fontWeight(.bold)
+
+          Spacer()
+
+          if viewModel.isLoadingTrendingEpisodes {
+            ProgressView()
+              .scaleEffect(0.8)
+          }
+
+          if !viewModel.trendingEpisodes.isEmpty {
+            NavigationLink(value: TrendingEpisodesDestination()) {
+              Text("See All")
+                .font(.subheadline)
+                .foregroundStyle(.blue)
+            }
+          }
+        }
+        .padding(.horizontal)
+
+        if viewModel.trendingEpisodes.isEmpty && viewModel.isLoadingTrendingEpisodes {
+          HStack {
+            Spacer()
+            ProgressView()
+            Spacer()
+          }
+          .frame(height: 120)
+        } else {
+          TrendingEpisodesPagedView(
+            episodes: Array(viewModel.trendingEpisodes.prefix(12))
+          )
+        }
+      }
+    }
+  }
+
   // MARK: - Popular Shows Section
 
   @ViewBuilder
@@ -244,6 +305,14 @@ struct HomeView: View {
         if viewModel.isLoadingTopPodcasts {
           ProgressView()
             .scaleEffect(0.8)
+        }
+
+        if !viewModel.topPodcasts.isEmpty {
+          NavigationLink(value: PopularShowsDestination()) {
+            Text("See All")
+              .font(.subheadline)
+              .foregroundStyle(.blue)
+          }
         }
       }
       .padding(.horizontal)
@@ -261,7 +330,7 @@ struct HomeView: View {
         .padding(.vertical, 32)
       } else {
         LazyVStack(spacing: 0) {
-          ForEach(Array(viewModel.topPodcasts.enumerated()), id: \.element.id) { index, podcast in
+          ForEach(Array(viewModel.topPodcasts.prefix(25).enumerated()), id: \.element.id) { index, podcast in
             TopPodcastRow(podcast: podcast, rank: index + 1, viewModel: viewModel)
           }
         }
@@ -962,6 +1031,192 @@ struct UpNextListView: View {
       episodeTitle: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle
     )
+  }
+}
+
+// MARK: - Trending Episodes Paged View
+
+/// Horizontal paged scroll: each page shows 3 episodes in a row.
+/// Swipe left/right to see more pages (up to 4 pages = 12 episodes).
+struct TrendingEpisodesPagedView: View {
+  let episodes: [ApplePodcastService.TrendingEpisode]
+
+  /// Split episodes into pages of 3
+  private var pages: [[ApplePodcastService.TrendingEpisode]] {
+    stride(from: 0, to: episodes.count, by: 3).map { start in
+      Array(episodes[start..<min(start + 3, episodes.count)])
+    }
+  }
+
+  private let columns = [
+    GridItem(.flexible(), spacing: 12),
+    GridItem(.flexible(), spacing: 12),
+    GridItem(.flexible(), spacing: 12),
+  ]
+
+  var body: some View {
+    ScrollView(.horizontal) {
+      LazyHStack(spacing: 0) {
+        ForEach(Array(pages.enumerated()), id: \.offset) { _, page in
+          LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(page) { episode in
+              TrendingEpisodeCard(episode: episode)
+            }
+          }
+          .containerRelativeFrame(.horizontal)
+          .padding(.horizontal)
+        }
+      }
+      .scrollTargetLayout()
+    }
+    .scrollTargetBehavior(.paging)
+    .scrollIndicators(.hidden)
+  }
+}
+
+// MARK: - Trending Episode Card
+
+struct TrendingEpisodeCard: View {
+  let episode: ApplePodcastService.TrendingEpisode
+
+  private var formattedDuration: String? {
+    guard let millis = episode.episode.trackTimeMillis else { return nil }
+    let totalSeconds = millis / 1000
+    let hours = totalSeconds / 3600
+    let minutes = (totalSeconds % 3600) / 60
+    if hours > 0 {
+      return "\(hours)h \(minutes)m"
+    }
+    return "\(minutes) min"
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      // Use LazyImage for flexible-width artwork in grid
+      LazyImage(url: URL(string: episode.podcastArtworkUrl ?? "")) { state in
+        if let image = state.image {
+          image.resizable().aspectRatio(contentMode: .fill)
+        } else {
+          Color.gray.opacity(0.2)
+            .overlay {
+              Image(systemName: "waveform")
+                .foregroundStyle(.secondary)
+            }
+        }
+      }
+      .aspectRatio(1, contentMode: .fit)
+      .clipShape(.rect(cornerRadius: 10))
+
+      Text(episode.episode.trackName)
+        .font(.caption)
+        .fontWeight(.medium)
+        .lineLimit(2)
+        .multilineTextAlignment(.leading)
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text(episode.podcastName)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+
+        if let duration = formattedDuration {
+          Text(duration)
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+        }
+      }
+    }
+  }
+}
+
+// MARK: - Trending Episode Row (for list view)
+
+struct TrendingEpisodeRow: View {
+  let episode: ApplePodcastService.TrendingEpisode
+  let rank: Int
+
+  private var formattedDuration: String? {
+    guard let millis = episode.episode.trackTimeMillis else { return nil }
+    let totalSeconds = millis / 1000
+    let hours = totalSeconds / 3600
+    let minutes = (totalSeconds % 3600) / 60
+    if hours > 0 {
+      return "\(hours)h \(minutes)m"
+    }
+    return "\(minutes) min"
+  }
+
+  var body: some View {
+    HStack(spacing: 12) {
+      Text("\(rank)")
+        .font(.headline)
+        .foregroundStyle(.secondary)
+        .frame(width: 28)
+
+      CachedArtworkImage(urlString: episode.podcastArtworkUrl, size: 56, cornerRadius: 8)
+
+      VStack(alignment: .leading, spacing: 3) {
+        Text(episode.episode.trackName)
+          .font(.subheadline)
+          .fontWeight(.medium)
+          .lineLimit(2)
+
+        Text(episode.podcastName)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+
+        if let duration = formattedDuration {
+          Text(duration)
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+        }
+      }
+
+      Spacer(minLength: 0)
+    }
+    .padding(.vertical, 6)
+  }
+}
+
+// MARK: - Trending Episodes List View (See All)
+
+struct TrendingEpisodesListView: View {
+  let episodes: [ApplePodcastService.TrendingEpisode]
+
+  var body: some View {
+    List {
+      ForEach(Array(episodes.prefix(200).enumerated()), id: \.element.id) { index, episode in
+        TrendingEpisodeRow(episode: episode, rank: index + 1)
+          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+      }
+    }
+    .listStyle(.plain)
+    .navigationTitle("Trending Episodes")
+    #if os(iOS)
+    .navigationBarTitleDisplayMode(.inline)
+    #endif
+  }
+}
+
+// MARK: - Popular Shows List View (See All)
+
+struct PopularShowsListView: View {
+  let podcasts: [AppleRSSPodcast]
+  var viewModel: HomeViewModel
+
+  var body: some View {
+    List {
+      ForEach(Array(podcasts.prefix(200).enumerated()), id: \.element.id) { index, podcast in
+        TopPodcastRow(podcast: podcast, rank: index + 1, viewModel: viewModel)
+          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+      }
+    }
+    .listStyle(.plain)
+    .navigationTitle("Popular Shows")
+    #if os(iOS)
+    .navigationBarTitleDisplayMode(.inline)
+    #endif
   }
 }
 

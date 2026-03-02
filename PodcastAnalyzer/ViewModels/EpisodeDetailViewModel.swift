@@ -140,6 +140,8 @@ final class EpisodeDetailViewModel {
   var isModelReady: Bool = false
   /// Language override for transcript generation (nil = use podcast RSS language)
   var selectedTranscriptLanguage: String?
+  /// Engine override for transcript generation (nil = use global Settings default)
+  var selectedTranscriptEngine: TranscriptEngine?
 
   @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
@@ -1200,7 +1202,8 @@ final class EpisodeDetailViewModel {
       episodeTitle: episode.title,
       podcastTitle: podcastTitle,
       audioPath: audioPath,
-      language: language
+      language: language,
+      engine: selectedTranscriptEngine
     )
 
     // Start observing TranscriptManager state
@@ -1284,6 +1287,9 @@ final class EpisodeDetailViewModel {
       }
     } catch {
       logger.error("Failed to load transcript: \(error.localizedDescription)")
+      await MainActor.run {
+        transcriptState = .error("Failed to load transcript: \(error.localizedDescription)")
+      }
     }
   }
 

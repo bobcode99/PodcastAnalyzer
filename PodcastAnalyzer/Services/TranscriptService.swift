@@ -103,6 +103,7 @@ public actor TranscriptService {
   // 1. Store the transcriber instance
   private var transcriber: SpeechTranscriber?
   private var analyzer: SpeechAnalyzer?
+  private var assetSetupError: Error?
   // Store the locale used for installation
 
   /// Convenience initializer that accepts a podcast language string (e.g., "zh-tw", "en-us")
@@ -143,7 +144,12 @@ public actor TranscriptService {
     self.transcriber = newTranscriber
 
     // Release and reserve locales
-    await releaseAndReserveLocales()
+    do {
+      try await releaseAndReserveLocales()
+    } catch {
+      logger.error("Failed to reserve locale: \(error.localizedDescription)")
+      self.assetSetupError = error
+    }
 
       let modules: [any SpeechModule] = [newTranscriber]
     let installed = await Set(SpeechTranscriber.installedLocales)
@@ -186,6 +192,8 @@ public actor TranscriptService {
       }
     } catch {
       logger.error("Asset setup failed: \(error.localizedDescription)")
+      // Still create analyzer, but store the error for callers to check
+      self.assetSetupError = error
     }
 
     // Always create analyzer after setup (even if installation failed, we still need it)
@@ -212,8 +220,13 @@ public actor TranscriptService {
     return transcriber != nil && analyzer != nil
   }
 
+  /// Returns the error from asset setup, if any.
+  public func getSetupError() -> Error? {
+    return assetSetupError
+  }
+
   // Helper function for the locale logic (no longer needs 'locale' parameter)
-  private func releaseAndReserveLocales() async {
+  private func releaseAndReserveLocales() async throws {
     // Release existing reserved locales
     for existingLocale in await AssetInventory.reservedLocales {
       await AssetInventory.release(reservedLocale: existingLocale)
@@ -224,6 +237,7 @@ public actor TranscriptService {
       try await AssetInventory.reserve(locale: targetLocale)
     } catch {
       logger.error("Failed to reserve locale: \(error.localizedDescription)")
+      throw error
     }
   }
 

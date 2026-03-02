@@ -58,7 +58,8 @@ actor WhisperTranscriptService {
     ///            The last emission has `isComplete == true` and carries the full SRT content.
     func audioToSRTWithProgress(
         inputFile: URL,
-        modelVariant: WhisperModelVariant
+        modelVariant: WhisperModelVariant,
+        language: String? = nil
     ) -> AsyncThrowingStream<TranscriptionProgressUpdate, Error> {
         AsyncThrowingStream { continuation in
             Task {
@@ -80,9 +81,15 @@ actor WhisperTranscriptService {
                     }
 
                     // Decoding options tuned for podcast audio.
+                    // Extract the base language code (e.g. "zh-tw" → "zh", "en-us" → "en")
+                    let whisperLanguage: String? = language.flatMap { code in
+                        let base = code.lowercased().split(separator: "-").first.map(String.init)
+                        return base
+                    }
                     let options = DecodingOptions(
                         verbose: false,
                         task: .transcribe,
+                        language: whisperLanguage,
                         usePrefillPrompt: true,
                         wordTimestamps: true,
                         compressionRatioThreshold: 2.4,

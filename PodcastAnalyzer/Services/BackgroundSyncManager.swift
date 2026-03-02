@@ -250,6 +250,27 @@ class BackgroundSyncManager {
       lastSyncDate = Date()
       UserDefaults.standard.set(lastSyncDate, forKey: Keys.lastSyncDate)
 
+      // Auto-download new episodes if enabled (cap at 5 per sync)
+      if totalNewEpisodes > 0 && UserDefaults.standard.bool(forKey: "autoDownloadNewEpisodes") {
+        let maxAutoDownload = 5
+        var downloadCount = 0
+        for detail in newEpisodeDetails.prefix(maxAutoDownload) {
+          // Find the episode in the updated podcast data
+          if let podcast = podcasts.first(where: { $0.podcastInfo.title == detail.podcastTitle }),
+             let episode = podcast.podcastInfo.episodes.first(where: { $0.title == detail.episodeTitle }),
+             let audioURL = episode.audioURL, !audioURL.isEmpty {
+            DownloadManager.shared.downloadEpisode(
+              episode: episode,
+              podcastTitle: detail.podcastTitle,
+              language: detail.language
+            )
+            downloadCount += 1
+            logger.info("Auto-downloading: \(episode.title)")
+          }
+        }
+        logger.info("Auto-downloaded \(downloadCount) episodes")
+      }
+
       // Send push notification if there are new episodes and enabled
       if totalNewEpisodes > 0 && isNotificationsEnabled {
         await sendNewEpisodesNotification(

@@ -4,23 +4,50 @@ import SwiftUI
 struct EpisodeTranscriptStatusView: View {
     @Bindable var viewModel: EpisodeDetailViewModel
 
+    /// The effective engine: per-episode override or global Settings default.
+    private var effectiveEngine: TranscriptEngine {
+        viewModel.selectedTranscriptEngine ?? TranscriptEngine(
+            rawValue: UserDefaults.standard.string(forKey: "transcriptEngine") ?? ""
+        ) ?? .appleSpeech
+    }
+
     /// Maps a bare language code (e.g. "en") to the first matching locale ID (e.g. "en-us")
     /// so the Picker always has a valid tagged selection.
     private func resolvedLanguage(_ code: String) -> String {
-        let locales = SettingsViewModel.availableTranscriptLocales
+        let locales = SettingsViewModel.locales(for: effectiveEngine)
+        let lower = code.lowercased()
         // Exact match first
-        if locales.contains(where: { $0.id == code }) { return code }
+        if locales.contains(where: { $0.id == lower }) { return lower }
         // Prefix match: "en" → "en-us" (first match)
-        if let match = locales.first(where: { $0.id.hasPrefix(code.lowercased() + "-") }) {
+        if let match = locales.first(where: { $0.id.hasPrefix(lower + "-") }) {
             return match.id
         }
-        return code
+        // Reverse prefix: "en-us" base "en" matches "en-us" in list
+        let base = lower.split(separator: "-").first.map(String.init) ?? lower
+        if let match = locales.first(where: { $0.id == base || $0.id.hasPrefix(base + "-") }) {
+            return match.id
+        }
+        return lower
+    }
+
+    /// Builds the picker options based on the effective engine,
+    /// dynamically adding the podcast language if not in the list.
+    private var pickerLocales: [SettingsViewModel.TranscriptLocaleOption] {
+        let standard = SettingsViewModel.locales(for: effectiveEngine)
+        let podcastLang = viewModel.podcastLanguage.lowercased()
+        let resolved = resolvedLanguage(podcastLang)
+        if standard.contains(where: { $0.id == resolved }) {
+            return standard
+        }
+        let displayName = Locale.current.localizedString(forLanguageCode: podcastLang) ?? podcastLang
+        let dynamic = SettingsViewModel.TranscriptLocaleOption(id: podcastLang, name: "\(displayName) (podcast)")
+        return [dynamic] + standard
     }
 
     private var transcriptLanguageName: String {
         let code = viewModel.selectedTranscriptLanguage ?? viewModel.podcastLanguage
         let resolved = resolvedLanguage(code)
-        return SettingsViewModel.availableTranscriptLocales.first { $0.id == resolved }?.name ?? code
+        return pickerLocales.first { $0.id == resolved }?.name ?? code
     }
 
     var body: some View {
@@ -67,7 +94,20 @@ struct EpisodeTranscriptStatusView: View {
                             )
                         }
 
-                        // Language picker for transcript generation
+                        // Engine picker
+                        Picker("Engine", selection: Binding(
+                            get: { effectiveEngine },
+                            set: { viewModel.selectedTranscriptEngine = $0 }
+                        )) {
+                            ForEach(TranscriptEngine.allCases) { engine in
+                                Label(engine.displayName, systemImage: engine.systemImage)
+                                    .tag(engine)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .font(.subheadline)
+
+                        // Language picker (filtered by engine)
                         Picker("Language", selection: Binding(
                             get: { resolvedLanguage(viewModel.selectedTranscriptLanguage ?? viewModel.podcastLanguage) },
                             set: { newValue in
@@ -75,17 +115,24 @@ struct EpisodeTranscriptStatusView: View {
                                 viewModel.selectedTranscriptLanguage = (newValue == defaultLocale) ? nil : newValue
                             }
                         )) {
-                            ForEach(SettingsViewModel.availableTranscriptLocales) { locale in
+                            ForEach(pickerLocales) { locale in
                                 Text(locale.name).tag(locale.id)
                             }
                         }
                         .pickerStyle(.menu)
                         .font(.subheadline)
 
-                        Text("Mixed-language episodes may not transcribe accurately")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
+                        if effectiveEngine == .whisper {
+                            Text("Whisper supports 50+ languages with auto-detection")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        } else {
+                            Text("Apple Speech requires a model download per language")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
 
                         Button(action: { viewModel.generateTranscript() }) {
                             Label(

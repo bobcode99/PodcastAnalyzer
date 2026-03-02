@@ -225,6 +225,69 @@ class ApplePodcastService: Sendable {
         return response.results.first?.trackViewUrl
     }
 
+    // MARK: - Trending Episodes
+
+    /// A trending episode with podcast context
+    struct TrendingEpisode: Identifiable, Sendable {
+        let id: String  // collectionId + episodeTitle
+        let podcastName: String
+        let podcastArtworkUrl: String?
+        let podcastId: String
+        let episode: Episode
+    }
+
+    /// Fetches trending episodes by getting latest episodes from top podcasts in the region.
+    /// - Parameters:
+    ///   - region: Country code (e.g., "us", "tw")
+    ///   - podcastLimit: Number of top podcasts to sample (default 10)
+    ///   - episodesPerPodcast: Number of latest episodes per podcast (default 2)
+    /// - Returns: Array of trending episodes sorted by release date
+    func fetchTrendingEpisodes(
+        region: String = "us",
+        podcastLimit: Int = 10,
+        episodesPerPodcast: Int = 2
+    ) async throws -> [TrendingEpisode] {
+        // Step 1: Get top podcasts
+        let topPodcasts = try await fetchTopPodcasts(region: region, limit: podcastLimit)
+
+        // Step 2: For each, lookup RSS feed URL and fetch latest episodes
+        var allTrending: [TrendingEpisode] = []
+
+        await withTaskGroup(of: [TrendingEpisode].self) { group in
+            for podcast in topPodcasts {
+                group.addTask {
+                    do {
+                        guard let result = try await self.lookupPodcast(collectionId: podcast.id),
+                              let feedUrl = result.feedUrl else { return [] }
+
+                        let episodes = try await self.fetchEpisodesFromRSS(feedUrl: feedUrl, limit: episodesPerPodcast)
+                        return episodes.map { episode in
+                            TrendingEpisode(
+                                id: "\(podcast.id)_\(episode.trackName)",
+                                podcastName: podcast.name,
+                                podcastArtworkUrl: podcast.artworkUrl100,
+                                podcastId: podcast.id,
+                                episode: episode
+                            )
+                        }
+                    } catch {
+                        // Silently skip failures for individual podcasts
+                        return []
+                    }
+                }
+            }
+
+            for await episodes in group {
+                allTrending.append(contentsOf: episodes)
+            }
+        }
+
+        // Sort by release date (newest first)
+        return allTrending.sorted { e1, e2 in
+            (e1.episode.releaseDate ?? "") > (e2.episode.releaseDate ?? "")
+        }
+    }
+
     // Search podcasts
     func searchPodcasts(term: String, limit: Int = 20) async throws -> [Podcast] {
         let encoded = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
