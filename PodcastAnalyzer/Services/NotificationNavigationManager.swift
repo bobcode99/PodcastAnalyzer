@@ -30,6 +30,7 @@ class NotificationNavigationManager {
     
     var shouldNavigate = false
     var navigationTarget: NotificationNavigationTarget?
+    var shouldExpandPlayer = false
 
     @ObservationIgnored
     private var modelContext: ModelContext?
@@ -92,6 +93,11 @@ class NotificationNavigationManager {
             language: result.language
         )
         shouldNavigate = true
+    }
+
+    /// Request expanding the player (from widget tap)
+    func requestExpandPlayer() {
+        shouldExpandPlayer = true
     }
 
     /// Navigate to currently playing episode

@@ -28,6 +28,7 @@ struct EpisodeAIAnalysisView: View {
   @Binding var isHeaderVisible: Bool
   @Binding var lastScrollOffset: CGFloat
   @Binding var isUserScrolling: Bool
+  @Binding var scrollToTopTrigger: Bool
 
   @State private var selectedTab: CloudAnalysisTab = .summary
   @State private var questionInput: String = ""
@@ -56,16 +57,25 @@ struct EpisodeAIAnalysisView: View {
 
       // Content area - conditionally wrap in ScrollView based on embedsOwnScroll
       if embedsOwnScroll {
-        ScrollView {
-          aiContentView
-        }
-        .trackScrollForHeaderCollapse(
-            isHeaderVisible: $isHeaderVisible,
-            lastOffset: $lastScrollOffset,
-            isUserScrolling: isUserScrolling
-        )
-        .onScrollPhaseChange { _, newPhase in
-            isUserScrolling = newPhase == .interacting || newPhase == .decelerating
+        ScrollViewReader { proxy in
+          ScrollView {
+            Color.clear.frame(height: 0).id("aiTop")
+            aiContentView
+          }
+          .trackScrollForHeaderCollapse(
+              isHeaderVisible: $isHeaderVisible,
+              lastOffset: $lastScrollOffset,
+              isUserScrolling: isUserScrolling
+          )
+          .onScrollPhaseChange { _, newPhase in
+              isUserScrolling = newPhase == .interacting || newPhase == .decelerating
+          }
+          .onChange(of: scrollToTopTrigger) { _, _ in
+              withAnimation(.easeInOut(duration: 0.3)) {
+                  proxy.scrollTo("aiTop", anchor: .top)
+              }
+              isHeaderVisible = true
+          }
         }
       } else {
         aiContentView

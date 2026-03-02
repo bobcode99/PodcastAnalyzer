@@ -123,6 +123,14 @@ struct MiniPlayerBar: View {
         }
       )
     }
+    .onChange(of: NotificationNavigationManager.shared.shouldExpandPlayer) { _, shouldExpand in
+      if shouldExpand {
+        NotificationNavigationManager.shared.shouldExpandPlayer = false
+        if audioManager.currentEpisode != nil {
+          showExpandedPlayer = true
+        }
+      }
+    }
   }
 
   // MARK: - Play/Pause Action

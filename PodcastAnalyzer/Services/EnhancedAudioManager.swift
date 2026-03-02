@@ -986,10 +986,38 @@ private func handleAudioInterruption(_ notification: Notification) {
     WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
   }
 
-  /// Clear widget data when playback stops
+  /// Update widget to show paused state (preserves last episode info)
   private func clearWidgetData() {
-    WidgetDataManager.clearPlaybackData()
+    guard let episode = currentEpisode else {
+      WidgetDataManager.clearPlaybackData()
+      WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+      return
+    }
+
+    let data = WidgetPlaybackData(
+      episodeTitle: episode.title,
+      podcastTitle: episode.podcastTitle,
+      imageURL: episode.imageURL,
+      audioURL: episode.audioURL,
+      currentTime: currentTime,
+      duration: duration,
+      isPlaying: false,
+      lastUpdated: Date()
+    )
+    WidgetDataManager.writePlaybackData(data)
     WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+  }
+
+  /// Check if the widget requested a playback toggle
+  private func checkWidgetTogglePlayback() {
+    guard let defaults = WidgetDataManager.sharedDefaults,
+          defaults.bool(forKey: "widgetTogglePlayback") else { return }
+    defaults.set(false, forKey: "widgetTogglePlayback")
+    if isPlaying {
+      pause()
+    } else {
+      resume()
+    }
   }
 
   // MARK: - State Persistence
@@ -1137,6 +1165,9 @@ private func handleAudioInterruption(_ notification: Notification) {
           self.postPlaybackPositionUpdate()
           self.updateWidgetPlaybackData()
         }
+
+        // Check for widget toggle playback request
+        self.checkWidgetTogglePlayback()
       }
     }
   }

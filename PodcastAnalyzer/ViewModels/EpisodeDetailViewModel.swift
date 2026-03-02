@@ -263,7 +263,28 @@ final class EpisodeDetailViewModel {
   /// Checks if there's an active transcript job and starts observing
   private func checkAndObserveTranscriptJob() {
     if TranscriptManager.shared.activeJobs[episodeKey] != nil {
+      syncTranscriptState()
       observeTranscriptManager()
+    }
+  }
+
+  /// Immediately syncs transcriptState from current job status to avoid flash of 0%
+  private func syncTranscriptState() {
+    guard let job = TranscriptManager.shared.activeJobs[episodeKey] else { return }
+    switch job.status {
+    case .queued:
+      transcriptState = .transcribing(progress: 0)
+    case .downloadingModel(let progress):
+      transcriptState = .downloadingModel(progress: progress)
+    case .transcribing(let progress):
+      transcriptState = .transcribing(progress: progress)
+    case .completed:
+      loadExistingTranscriptTask?.cancel()
+      loadExistingTranscriptTask = Task {
+        await loadExistingTranscript()
+      }
+    case .failed(let error):
+      transcriptState = .error(error)
     }
   }
 
@@ -1220,29 +1241,7 @@ final class EpisodeDetailViewModel {
   }
 
   private func handleTranscriptJobUpdate() {
-    // Use Unit Separator (U+001F) as delimiter - same as TranscriptManager
-    let delimiter = "\u{1F}"
-    let jobId = "\(podcastTitle)\(delimiter)\(episode.title)"
-
-    if let job = TranscriptManager.shared.activeJobs[jobId] {
-      // Update local state based on job status
-      switch job.status {
-      case .queued:
-        transcriptState = .transcribing(progress: 0)
-      case .downloadingModel(let progress):
-        transcriptState = .downloadingModel(progress: progress)
-      case .transcribing(let progress):
-        transcriptState = .transcribing(progress: progress)
-      case .completed:
-        // Load the transcript from disk
-        loadExistingTranscriptTask?.cancel()
-        loadExistingTranscriptTask = Task {
-          await loadExistingTranscript()
-        }
-      case .failed(let error):
-        transcriptState = .error(error)
-      }
-    }
+    syncTranscriptState()
   }
 
   func copyTranscriptToClipboard() {
@@ -1894,7 +1893,9 @@ final class EpisodeDetailViewModel {
           analysisType: type,
           podcastLanguage: podcastLanguage,
           onChunk: { [weak self] text in
-            self?.streamingText = text
+            Task { @MainActor in
+              self?.streamingText = text
+            }
           },
           progressCallback: { [weak self] message, progress in
             Task { @MainActor in

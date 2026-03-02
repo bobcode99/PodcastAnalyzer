@@ -26,6 +26,10 @@ struct AISettingsView: View {
     // On-device AI availability
     @State private var onDeviceAvailability: FoundationModelsAvailability = .unavailable(reason: "Checking...")
 
+    // Local server URL editing
+    @State private var lmstudioURLText: String = ""
+    @State private var ollamaURLText: String = ""
+
     var body: some View {
         #if os(macOS)
         macOSBody
@@ -82,10 +86,17 @@ struct AISettingsView: View {
                     }
                 }
                 .onChange(of: settings.selectedProvider) { _, newProvider in
-                    // Auto-fetch models when provider changes if API key exists
-                    let apiKey = settings.apiKey(for: newProvider)
-                    if !apiKey.isEmpty && fetchedModels[newProvider] == nil {
-                        fetchModels(for: newProvider)
+                    // Auto-fetch models when provider changes
+                    if newProvider.usesLocalServer {
+                        // Local providers: always try to fetch
+                        if fetchedModels[newProvider] == nil {
+                            fetchModels(for: newProvider)
+                        }
+                    } else {
+                        let apiKey = settings.apiKey(for: newProvider)
+                        if !apiKey.isEmpty && fetchedModels[newProvider] == nil {
+                            fetchModels(for: newProvider)
+                        }
                     }
                 }
 
@@ -130,50 +141,77 @@ struct AISettingsView: View {
                         .buttonStyle(.borderless)
                     }
 
-                    // Model fetch status
-                    if isFetchingModels {
-                        HStack {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                            Text("Fetching available models...")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else if let error = modelFetchError {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    } else if let models = fetchedModels[settings.selectedProvider], !models.isEmpty {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("\(models.count) models available")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    modelFetchStatusView
 
                     // Test connection button
-                    Button(action: testConnection) {
-                        HStack {
-                            if isTesting {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "checkmark.circle")
-                            }
-                            Text("Test Connection")
-                        }
-                    }
-                    .disabled(settings.currentAPIKey.isEmpty || isTesting)
+                    testConnectionButton
                 } header: {
                     Text("\(settings.selectedProvider.displayName) Configuration")
                 } footer: {
                     Text("Tap the refresh button to fetch the latest available models from the API.")
+                }
+            }
+
+            // MARK: - Local Server Configuration (LMStudio / Ollama)
+            if settings.selectedProvider.usesLocalServer {
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("No API key needed!")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                        }
+
+                        Text("Runs locally on your machine. Make sure \(settings.selectedProvider.displayName) is running before connecting.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    // Base URL configuration
+                    HStack {
+                        Text("Server URL")
+                        Spacer()
+                        TextField("http://localhost:1234", text: localURLBinding)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 220)
+                            .multilineTextAlignment(.trailing)
+                            .autocorrectionDisabled()
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+                            #endif
+                    }
+
+                    // Model selection with refresh button
+                    HStack {
+                        modelPicker(for: settings.selectedProvider)
+
+                        Button(action: { fetchModels(for: settings.selectedProvider) }) {
+                            if isFetchingModels {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                        }
+                        .disabled(isFetchingModels)
+                        .buttonStyle(.borderless)
+                    }
+
+                    modelFetchStatusView
+
+                    // Test connection button
+                    testConnectionButton
+                } header: {
+                    Text("\(settings.selectedProvider.displayName) Configuration")
+                } footer: {
+                    if settings.selectedProvider == .lmstudio {
+                        Text("Default: http://localhost:1234 — Load a model in LM Studio first, then tap refresh.")
+                    } else {
+                        Text("Default: http://localhost:11434 — Run 'ollama serve' and pull a model first.")
+                    }
                 }
             }
 
@@ -463,14 +501,101 @@ struct AISettingsView: View {
             }
     }
 
+    // MARK: - Reusable Subviews
+
+    @ViewBuilder
+    private var modelFetchStatusView: some View {
+        if isFetchingModels {
+            HStack {
+                ProgressView()
+                    .scaleEffect(0.7)
+                Text("Fetching available models...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else if let error = modelFetchError {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        } else if let models = fetchedModels[settings.selectedProvider], !models.isEmpty {
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text("\(models.count) models available")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var testConnectionButton: some View {
+        Button(action: testConnection) {
+            HStack {
+                if isTesting {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: "checkmark.circle")
+                }
+                Text("Test Connection")
+            }
+        }
+        .disabled(
+            (settings.selectedProvider.requiresAPIKey && settings.currentAPIKey.isEmpty)
+            || isTesting
+        )
+    }
+
+    /// Binding for the local server URL text field (LMStudio or Ollama)
+    private var localURLBinding: Binding<String> {
+        switch settings.selectedProvider {
+        case .lmstudio:
+            return Binding(
+                get: { lmstudioURLText },
+                set: { newValue in
+                    lmstudioURLText = newValue
+                    if let url = URL(string: newValue), !newValue.isEmpty {
+                        settings.lmstudioBaseURL = url
+                    }
+                }
+            )
+        case .ollama:
+            return Binding(
+                get: { ollamaURLText },
+                set: { newValue in
+                    ollamaURLText = newValue
+                    if let url = URL(string: newValue), !newValue.isEmpty {
+                        settings.ollamaBaseURL = url
+                    }
+                }
+            )
+        default:
+            return .constant("")
+        }
+    }
+
     // MARK: - Actions
 
     private func onAppearActions() {
-        // Auto-fetch models if API key exists
+        // Initialize local URL text fields
+        lmstudioURLText = settings.lmstudioBaseURL.absoluteString
+        ollamaURLText = settings.ollamaBaseURL.absoluteString
+
+        // Auto-fetch models
         let provider = settings.selectedProvider
-        let apiKey = settings.apiKey(for: provider)
-        if !apiKey.isEmpty && fetchedModels[provider] == nil {
-            fetchModels(for: provider)
+        if provider.usesLocalServer {
+            if fetchedModels[provider] == nil {
+                fetchModels(for: provider)
+            }
+        } else {
+            let apiKey = settings.apiKey(for: provider)
+            if !apiKey.isEmpty && fetchedModels[provider] == nil {
+                fetchModels(for: provider)
+            }
         }
 
         // Check on-device AI availability
@@ -516,15 +641,29 @@ struct AISettingsView: View {
                 return $settings.selectedGroqModel
             case .grok:
                 return $settings.selectedGrokModel
+            case .lmstudio:
+                return $settings.selectedLMStudioModel
+            case .ollama:
+                return $settings.selectedOllamaModel
             }
         }()
 
         // Use fetched models if available, otherwise use hardcoded defaults
         let models = fetchedModels[provider] ?? provider.availableModels
 
-        Picker("Model", selection: binding) {
-            ForEach(models, id: \.self) { model in
-                Text(model).tag(model)
+        if models.isEmpty {
+            HStack {
+                Text("Model")
+                Spacer()
+                Text("No models loaded")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+        } else {
+            Picker("Model", selection: binding) {
+                ForEach(models, id: \.self) { model in
+                    Text(model).tag(model)
+                }
             }
         }
     }
@@ -533,7 +672,11 @@ struct AISettingsView: View {
 
     private func fetchModels(for provider: CloudAIProvider) {
         let apiKey = settings.apiKey(for: provider)
-        guard !apiKey.isEmpty else { return }
+
+        // For local providers, don't require API key
+        if provider.requiresAPIKey && apiKey.isEmpty {
+            return
+        }
 
         isFetchingModels = true
         modelFetchError = nil
@@ -556,25 +699,34 @@ struct AISettingsView: View {
                     case .gemini: currentModel = settings.selectedGeminiModel
                     case .groq: currentModel = settings.selectedGroqModel
                     case .grok: currentModel = settings.selectedGrokModel
+                    case .lmstudio: currentModel = settings.selectedLMStudioModel
+                    case .ollama: currentModel = settings.selectedOllamaModel
                     }
 
                     if !models.contains(currentModel), let firstModel = models.first {
                         switch provider {
-                        case .applePCC: break  // No model selection for Apple PCC
+                        case .applePCC: break
                         case .openai: settings.selectedOpenAIModel = firstModel
                         case .claude: settings.selectedClaudeModel = firstModel
                         case .gemini: settings.selectedGeminiModel = firstModel
                         case .groq: settings.selectedGroqModel = firstModel
                         case .grok: settings.selectedGrokModel = firstModel
+                        case .lmstudio: settings.selectedLMStudioModel = firstModel
+                        case .ollama: settings.selectedOllamaModel = firstModel
                         }
                     }
                 }
             } catch {
                 await MainActor.run {
-                    modelFetchError = "Could not fetch models. Using defaults."
+                    let fallback = provider.availableModels
+                    if provider.usesLocalServer {
+                        modelFetchError = "Cannot connect to \(provider.displayName). Is it running?"
+                        fetchedModels[provider] = nil
+                    } else {
+                        modelFetchError = "Could not fetch models. Using defaults."
+                        fetchedModels[provider] = fallback
+                    }
                     isFetchingModels = false
-                    // Keep using hardcoded models
-                    fetchedModels[provider] = provider.availableModels
                 }
             }
         }

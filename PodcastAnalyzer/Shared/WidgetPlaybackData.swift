@@ -27,13 +27,9 @@ struct WidgetPlaybackData: Codable {
     return min(currentTime / duration, 1.0)
   }
 
-  /// Deep link URL to open the episode in the app
+  /// Deep link URL to open the expanded player in the app
   var deepLinkURL: URL? {
-    guard let audioURL = audioURL,
-          let encoded = audioURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
-      return URL(string: "podcastanalyzer://nowplaying")
-    }
-    return URL(string: "podcastanalyzer://episode?audio=\(encoded)")
+    URL(string: "podcastanalyzer://expandplayer")
   }
 
   /// Formatted current time string
@@ -112,8 +108,8 @@ enum WidgetDataManager {
     sharedDefaults?.removeObject(forKey: playbackDataKey)
   }
 
-  /// Check if playback data is stale (more than 2 minutes old)
+  /// Check if playback data is stale (more than 24 hours old)
   static func isDataStale(_ data: WidgetPlaybackData) -> Bool {
-    Date().timeIntervalSince(data.lastUpdated) > 120
+    Date().timeIntervalSince(data.lastUpdated) > 86400
   }
 }

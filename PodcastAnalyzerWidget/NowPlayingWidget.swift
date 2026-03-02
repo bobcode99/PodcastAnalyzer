@@ -5,6 +5,7 @@
 //  Now Playing widget showing current episode with artwork and progress
 //
 
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -127,7 +128,10 @@ struct SmallWidgetView: View {
           .cornerRadius(8)
 
           // Play button with progress
-          WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying)
+          Button(intent: TogglePlaybackIntent()) {
+            WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying)
+          }
+          .buttonStyle(.plain)
         }
 
         // Title
@@ -220,7 +224,10 @@ struct MediumWidgetView: View {
 
           // Play button row
           HStack(spacing: 8) {
-            WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying)
+            Button(intent: TogglePlaybackIntent()) {
+              WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying)
+            }
+            .buttonStyle(.plain)
 
             Text(data.isPlaying ? "Playing" : "Paused")
               .font(.caption)

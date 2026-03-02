@@ -54,6 +54,9 @@ struct EpisodeDetailView: View {
     @State private var lastScrollOffset: CGFloat = 0
     @State private var isUserScrolling: Bool = false
 
+    // Scroll-to-top trigger
+    @State private var scrollToTopTrigger = false
+
     // Transcript search focus
     @FocusState private var transcriptSearchFocused: Bool
 
@@ -100,6 +103,23 @@ struct EpisodeDetailView: View {
             Divider()
             tabContentView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .topTrailing) {
+                    if !isHeaderVisible {
+                        Button {
+                            scrollToTopTrigger.toggle()
+                        } label: {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 32, height: 32)
+                                .glassEffect(.regular, in: .circle)
+                        }
+                        .padding(.trailing, 12)
+                        .padding(.top, 8)
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.25), value: isHeaderVisible)
         }
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: 80)
@@ -236,7 +256,7 @@ struct EpisodeDetailView: View {
         switch selectedTab {
         case 0: summaryTab
         case 1: transcriptContent
-        case 2: EpisodeAIAnalysisView(viewModel: viewModel, embedsOwnScroll: true, isHeaderVisible: $isHeaderVisible, lastScrollOffset: $lastScrollOffset, isUserScrolling: $isUserScrolling)
+        case 2: EpisodeAIAnalysisView(viewModel: viewModel, embedsOwnScroll: true, isHeaderVisible: $isHeaderVisible, lastScrollOffset: $lastScrollOffset, isUserScrolling: $isUserScrolling, scrollToTopTrigger: $scrollToTopTrigger)
         default: Text("Unknown tab: \(selectedTab)")
             .foregroundStyle(.secondary)
         }
@@ -317,16 +337,25 @@ struct EpisodeDetailView: View {
 
     // MARK: - Summary Tab (owns its own ScrollView)
     private var summaryTab: some View {
-        ScrollView {
-            summaryContent
-        }
-        .trackScrollForHeaderCollapse(
-            isHeaderVisible: $isHeaderVisible,
-            lastOffset: $lastScrollOffset,
-            isUserScrolling: isUserScrolling
-        )
-        .onScrollPhaseChange { _, newPhase in
-            isUserScrolling = newPhase == .interacting || newPhase == .decelerating
+        ScrollViewReader { proxy in
+            ScrollView {
+                Color.clear.frame(height: 0).id("summaryTop")
+                summaryContent
+            }
+            .trackScrollForHeaderCollapse(
+                isHeaderVisible: $isHeaderVisible,
+                lastOffset: $lastScrollOffset,
+                isUserScrolling: isUserScrolling
+            )
+            .onScrollPhaseChange { _, newPhase in
+                isUserScrolling = newPhase == .interacting || newPhase == .decelerating
+            }
+            .onChange(of: scrollToTopTrigger) { _, _ in
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    proxy.scrollTo("summaryTop", anchor: .top)
+                }
+                isHeaderVisible = true
+            }
         }
     }
 
@@ -374,6 +403,7 @@ struct EpisodeDetailView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 0) {
+                            Color.clear.frame(height: 0).id("transcriptTop")
                             if !viewModel.transcriptSearchQuery.isEmpty,
                                !viewModel.searchMatchIds.isEmpty {
                                 TranscriptSearchNavigationBar(
@@ -425,6 +455,12 @@ struct EpisodeDetailView: View {
                         withAnimation(.easeInOut(duration: 0.3)) {
                             proxy.scrollTo(matchId, anchor: .center)
                         }
+                    }
+                    .onChange(of: scrollToTopTrigger) { _, _ in
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo("transcriptTop", anchor: .top)
+                        }
+                        isHeaderVisible = true
                     }
                 }
             } else {
