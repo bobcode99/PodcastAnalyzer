@@ -82,11 +82,22 @@ struct EpisodeDetailView: View {
         )
     }
 
+    /// Sentences to display based on display mode and search state
+    private var transcriptSentences: [TranscriptSentence] {
+        if !viewModel.transcriptSearchQuery.isEmpty {
+            return viewModel.filteredGroupedSentences
+        } else if subtitleSettings.displayMode == .sentenceHighlight {
+            return viewModel.paragraphGroupedSentences
+        } else {
+            return viewModel.groupedSentences
+        }
+    }
+
     /// Current sentence ID for auto-scroll
     private var currentSentenceId: Int? {
         guard viewModel.isCurrentEpisode else { return nil }
         let time = currentPlaybackTime
-        return viewModel.groupedSentences.first { $0.containsTime(time) }?.id
+        return transcriptSentences.first { $0.containsTime(time) }?.id
     }
 
     var body: some View {
@@ -415,11 +426,8 @@ struct EpisodeDetailView: View {
                                 .padding(.vertical, 4)
                             }
 
-                            let sentences = viewModel.transcriptSearchQuery.isEmpty
-                                ? viewModel.groupedSentences
-                                : viewModel.filteredGroupedSentences
                             SentenceBasedTranscriptView(
-                                sentences: sentences,
+                                sentences: transcriptSentences,
                                 currentTime: viewModel.isCurrentEpisode ? currentPlaybackTime : nil,
                                 searchQuery: viewModel.transcriptSearchQuery,
                                 onSegmentTap: { viewModel.seekToSegment($0) },
@@ -485,7 +493,7 @@ struct EpisodeDetailView: View {
                         currentPlaybackTime = newTime
                     } else {
                         // Check if sentence changed even with small time diff
-                        let newSentenceId = viewModel.groupedSentences.first { $0.containsTime(newTime) }?.id
+                        let newSentenceId = transcriptSentences.first { $0.containsTime(newTime) }?.id
                         let oldSentenceId = currentSentenceId
                         if newSentenceId != oldSentenceId {
                             currentPlaybackTime = newTime

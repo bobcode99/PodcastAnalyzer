@@ -15,6 +15,7 @@ enum SubtitleDisplayMode: String, CaseIterable, Codable, Sendable {
   case translatedOnly = "translated_only"
   case dualOriginalFirst = "dual_original_first"
   case dualTranslatedFirst = "dual_translated_first"
+  case sentenceHighlight = "sentence_highlight"
 
   var displayName: String {
     switch self {
@@ -22,6 +23,7 @@ enum SubtitleDisplayMode: String, CaseIterable, Codable, Sendable {
     case .translatedOnly: return "Translated Only"
     case .dualOriginalFirst: return "Dual (Original First)"
     case .dualTranslatedFirst: return "Dual (Translated First)"
+    case .sentenceHighlight: return "Sentence Highlight"
     }
   }
 
@@ -31,6 +33,7 @@ enum SubtitleDisplayMode: String, CaseIterable, Codable, Sendable {
     case .translatedOnly: return "globe"
     case .dualOriginalFirst: return "text.bubble.fill"
     case .dualTranslatedFirst: return "globe.badge.chevron.backward"
+    case .sentenceHighlight: return "text.line.first.and.arrowtriangle.forward"
     }
   }
 
@@ -40,6 +43,7 @@ enum SubtitleDisplayMode: String, CaseIterable, Codable, Sendable {
     case .translatedOnly: return "Show only the translated text"
     case .dualOriginalFirst: return "Show original text with translation below"
     case .dualTranslatedFirst: return "Show translation with original text below"
+    case .sentenceHighlight: return "Merge segments into sentences with per-segment playback highlighting"
     }
   }
 }

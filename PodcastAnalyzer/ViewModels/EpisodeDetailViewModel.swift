@@ -73,7 +73,7 @@ struct TranscriptSegment: Identifiable, Equatable {
   /// Returns display text based on subtitle display mode
   func displayText(mode: SubtitleDisplayMode) -> (primary: String, secondary: String?) {
     switch mode {
-    case .originalOnly:
+    case .originalOnly, .sentenceHighlight:
       return (text, nil)
     case .translatedOnly:
       return (translatedText ?? text, nil)
@@ -1700,6 +1700,11 @@ final class EpisodeDetailViewModel {
     if !transcriptSearchQuery.isEmpty {
       updateSearchMatches(query: transcriptSearchQuery)
     }
+  }
+
+  /// Paragraph-grouped sentences for sentence highlight mode (larger grouping: up to 8 segments)
+  var paragraphGroupedSentences: [TranscriptSentence] {
+    TranscriptGrouping.groupIntoParagraphSentences(transcriptSegments)
   }
 
   /// Regroup filtered segments into sentences (for search-filtered view)

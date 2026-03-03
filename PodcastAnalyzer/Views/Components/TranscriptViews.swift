@@ -117,6 +117,50 @@ enum TranscriptGrouping {
         return sentences
     }
 
+    /// Maximum segments per paragraph sentence (sentence highlight mode)
+    static let maxSegmentsPerParagraphSentence = 8
+
+    /// Character limit fallback for unpunctuated content in paragraph mode
+    static let paragraphCharLimit = 300
+
+    /// Group segments into paragraph-sized sentences for sentence highlight mode.
+    /// More aggressive grouping: up to 8 segments, only splits on sentence-ending punctuation
+    /// or paragraph boundaries (double newline). Falls back at ~300 chars for unpunctuated content.
+    static func groupIntoParagraphSentences(_ segments: [TranscriptSegment]) -> [TranscriptSentence] {
+        var sentences: [TranscriptSentence] = []
+        var currentGroup: [TranscriptSegment] = []
+        var sentenceId = 0
+        var charCount = 0
+
+        for segment in segments {
+            currentGroup.append(segment)
+            charCount += segment.text.count
+
+            // Check for paragraph boundary (double newline in segment text)
+            let hasParagraphBreak = segment.text.contains("\n\n")
+
+            // Check if segment ends with sentence-ending punctuation
+            let isSentEnd = isSentenceEnd(segment.text)
+
+            // Force break at max segments or character limit (for unpunctuated content)
+            let atMaxSegments = currentGroup.count >= maxSegmentsPerParagraphSentence
+            let atCharLimit = charCount >= paragraphCharLimit
+
+            if isSentEnd || hasParagraphBreak || atMaxSegments || atCharLimit {
+                sentences.append(TranscriptSentence(id: sentenceId, segments: currentGroup))
+                sentenceId += 1
+                currentGroup = []
+                charCount = 0
+            }
+        }
+
+        if !currentGroup.isEmpty {
+            sentences.append(TranscriptSentence(id: sentenceId, segments: currentGroup))
+        }
+
+        return sentences
+    }
+
     /// Compute highlight state for a sentence given the current playback time
     static func highlightState(for sentence: TranscriptSentence, currentTime: TimeInterval?) -> SentenceHighlightState {
         guard let time = currentTime else { return .future }
@@ -246,7 +290,7 @@ struct SentenceBasedTranscriptView: View {
     var currentSearchMatchId: Int?
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 12) {
+        LazyVStack(alignment: .leading, spacing: subtitleMode == .sentenceHighlight ? 2 : 12) {
             ForEach(sentences) { sentence in
                 let highlightState = TranscriptGrouping.highlightState(
                     for: sentence,
@@ -299,10 +343,15 @@ struct SentenceView: View, Equatable {
         return false
     }
 
+    /// Whether sentence highlight mode is active
+    private var isSentenceHighlightMode: Bool {
+        subtitleMode == .sentenceHighlight
+    }
+
     /// Primary text to display based on subtitle mode
     private var primaryText: String {
         switch subtitleMode {
-        case .originalOnly, .dualOriginalFirst:
+        case .originalOnly, .dualOriginalFirst, .sentenceHighlight:
             return sentence.text
         case .translatedOnly, .dualTranslatedFirst:
             return sentence.translatedText ?? sentence.text
@@ -312,7 +361,7 @@ struct SentenceView: View, Equatable {
     /// Whether primary text uses translated content
     private var primaryIsTranslated: Bool {
         switch subtitleMode {
-        case .originalOnly, .dualOriginalFirst:
+        case .originalOnly, .dualOriginalFirst, .sentenceHighlight:
             return false
         case .translatedOnly, .dualTranslatedFirst:
             return sentence.translatedText != nil
@@ -322,7 +371,7 @@ struct SentenceView: View, Equatable {
     /// Secondary text for dual modes (nil for single modes)
     private var secondaryText: String? {
         switch subtitleMode {
-        case .originalOnly, .translatedOnly:
+        case .originalOnly, .translatedOnly, .sentenceHighlight:
             return nil
         case .dualOriginalFirst:
             return sentence.translatedText
@@ -364,17 +413,19 @@ struct SentenceView: View, Equatable {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.vertical, 8)
-            .padding(.leading, 8)
+            .padding(.vertical, isSentenceHighlightMode ? 4 : 8)
+            .padding(.leading, isSentenceHighlightMode ? 0 : 8)
             .padding(.trailing, 12)
             .overlay(alignment: .leading) {
-                // Active sentence accent bar
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.blue)
-                    .frame(width: 3)
-                    .opacity(isActive ? 1 : 0)
-                    .scaleEffect(x: 1, y: isActive ? 1 : 0.5, anchor: .leading)
-                    .animation(.easeInOut(duration: 0.25), value: isActive)
+                // Active sentence accent bar (hidden in sentence highlight mode)
+                if !isSentenceHighlightMode {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.blue)
+                        .frame(width: 3)
+                        .opacity(isActive ? 1 : 0)
+                        .scaleEffect(x: 1, y: isActive ? 1 : 0.5, anchor: .leading)
+                        .animation(.easeInOut(duration: 0.25), value: isActive)
+                }
             }
         }
         .buttonStyle(.plain)
