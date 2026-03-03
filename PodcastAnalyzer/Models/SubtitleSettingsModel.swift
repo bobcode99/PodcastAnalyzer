@@ -169,6 +169,11 @@ final class SubtitleSettingsManager {
     didSet { saveSettings() }
   }
 
+  /// Use CJK Token Reducer to translate CJK text to English before AI processing (reduces token usage)
+  var useCJKTokenReducer: Bool = false {
+    didSet { saveSettings() }
+  }
+
   // MARK: - UserDefaults Keys
 
   private enum Keys {
@@ -178,6 +183,7 @@ final class SubtitleSettingsManager {
     static let autoDownloadTranscripts = "subtitle_auto_download_transcripts"
     static let groupSegmentsIntoSentences = "subtitle_group_segments_into_sentences"
     static let autoGenerateTranscripts = "subtitle_auto_generate_transcripts"
+    static let useCJKTokenReducer = "subtitle_use_cjk_token_reducer"
   }
 
   // MARK: - Initialization
@@ -220,6 +226,10 @@ final class SubtitleSettingsManager {
     if defaults.object(forKey: Keys.autoGenerateTranscripts) != nil {
       autoGenerateTranscripts = defaults.bool(forKey: Keys.autoGenerateTranscripts)
     }
+
+    if defaults.object(forKey: Keys.useCJKTokenReducer) != nil {
+      useCJKTokenReducer = defaults.bool(forKey: Keys.useCJKTokenReducer)
+    }
   }
 
   private func saveSettings() {
@@ -230,6 +240,7 @@ final class SubtitleSettingsManager {
     defaults.set(autoDownloadTranscripts, forKey: Keys.autoDownloadTranscripts)
     defaults.set(groupSegmentsIntoSentences, forKey: Keys.groupSegmentsIntoSentences)
     defaults.set(autoGenerateTranscripts, forKey: Keys.autoGenerateTranscripts)
+    defaults.set(useCJKTokenReducer, forKey: Keys.useCJKTokenReducer)
   }
 
   // MARK: - Translation Availability
