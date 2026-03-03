@@ -1115,10 +1115,7 @@ struct TrendingEpisodesPagedView: View {
           VStack(spacing: 0) {
             ForEach(Array(page.enumerated()), id: \.element.id) { rowIndex, episode in
               let rank = pageIndex * 3 + rowIndex + 1
-              NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
-                TrendingEpisodeRow(episode: episode, rank: rank, showEllipsis: true)
-              }
-              .buttonStyle(.plain)
+              TrendingEpisodeRowWithNav(episode: episode, rank: rank)
               if rowIndex < page.count - 1 {
                 Divider()
                   .padding(.leading, 108)
@@ -1133,6 +1130,32 @@ struct TrendingEpisodesPagedView: View {
     }
     .scrollTargetBehavior(.viewAligned)
     .scrollIndicators(.hidden)
+    .frame(height: 320)
+  }
+}
+
+/// Wraps a TrendingEpisodeRow with separate NavigationLink and Menu hit targets
+private struct TrendingEpisodeRowWithNav: View {
+  let episode: ApplePodcastService.TrendingEpisode
+  let rank: Int
+
+  var body: some View {
+    HStack(spacing: 0) {
+      NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
+        TrendingEpisodeRow(episode: episode, rank: rank)
+      }
+      .buttonStyle(.plain)
+
+      Menu {
+        TrendingEpisodeContextMenu(episode: episode)
+      } label: {
+        Image(systemName: "ellipsis")
+          .font(.body)
+          .foregroundStyle(.secondary)
+          .frame(width: 44, height: 44)
+          .contentShape(Rectangle())
+      }
+    }
   }
 }
 
@@ -1141,7 +1164,6 @@ struct TrendingEpisodesPagedView: View {
 struct TrendingEpisodeRow: View {
   let episode: ApplePodcastService.TrendingEpisode
   let rank: Int
-  var showEllipsis: Bool = false
 
   private var formattedDuration: String {
     guard let millis = episode.episode.trackTimeMillis else { return "" }
@@ -1198,18 +1220,6 @@ struct TrendingEpisodeRow: View {
       }
 
       Spacer(minLength: 0)
-
-      if showEllipsis {
-        Menu {
-          TrendingEpisodeContextMenu(episode: episode)
-        } label: {
-          Image(systemName: "ellipsis")
-            .font(.body)
-            .foregroundStyle(.secondary)
-            .frame(width: 32, height: 32)
-            .contentShape(Rectangle())
-        }
-      }
     }
     .padding(.vertical, 10)
   }
@@ -1260,8 +1270,21 @@ struct TrendingEpisodesListView: View {
   var body: some View {
     List {
       ForEach(Array(episodes.prefix(200).enumerated()), id: \.element.id) { index, episode in
-        NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
-          TrendingEpisodeRow(episode: episode, rank: index + 1, showEllipsis: true)
+        HStack(spacing: 0) {
+          NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
+            TrendingEpisodeRow(episode: episode, rank: index + 1)
+          }
+          .buttonStyle(.plain)
+
+          Menu {
+            TrendingEpisodeContextMenu(episode: episode)
+          } label: {
+            Image(systemName: "ellipsis")
+              .font(.body)
+              .foregroundStyle(.secondary)
+              .frame(width: 44, height: 44)
+              .contentShape(Rectangle())
+          }
         }
         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
       }
