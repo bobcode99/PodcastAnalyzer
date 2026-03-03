@@ -1130,36 +1130,35 @@ struct TrendingEpisodesPagedView: View {
     }
     .scrollTargetBehavior(.viewAligned)
     .scrollIndicators(.hidden)
-    .frame(height: 320)
+    .frame(height: 250)
   }
 }
 
-/// Wraps a TrendingEpisodeRow with separate NavigationLink and Menu hit targets.
-/// Uses ZStack approach: NavigationLink as background, Menu as foreground overlay
-/// to avoid gesture conflicts in horizontal ScrollView.
+/// Wraps a TrendingEpisodeRow with NavigationLink (hidden background) and inline ellipsis Menu.
 private struct TrendingEpisodeRowWithNav: View {
   let episode: ApplePodcastService.TrendingEpisode
   let rank: Int
 
   var body: some View {
-    TrendingEpisodeRow(episode: episode, rank: rank)
-      .background {
-        NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
-          EmptyView()
-        }
-        .opacity(0)
+    HStack(spacing: 0) {
+      TrendingEpisodeRow(episode: episode, rank: rank)
+
+      Menu {
+        TrendingEpisodeContextMenu(episode: episode)
+      } label: {
+        Image(systemName: "ellipsis")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .frame(width: 36, height: 36)
+          .contentShape(Rectangle())
       }
-      .overlay(alignment: .trailing) {
-        Menu {
-          TrendingEpisodeContextMenu(episode: episode)
-        } label: {
-          Image(systemName: "ellipsis")
-            .font(.body)
-            .foregroundStyle(.secondary)
-            .frame(width: 44, height: 44)
-            .contentShape(Rectangle())
-        }
+    }
+    .background {
+      NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
+        EmptyView()
       }
+      .opacity(0)
+    }
   }
 }
 
@@ -1200,16 +1199,16 @@ struct TrendingEpisodeRow: View {
   }
 
   var body: some View {
-    HStack(spacing: 12) {
-      CachedArtworkImage(urlString: episode.podcastArtworkUrl, size: 80, cornerRadius: 12)
+    HStack(spacing: 10) {
+      CachedArtworkImage(urlString: episode.podcastArtworkUrl, size: 56, cornerRadius: 10)
 
       Text("\(rank)")
-        .font(.title2)
+        .font(.headline)
         .fontWeight(.bold)
         .foregroundStyle(.secondary)
-        .frame(width: 28)
+        .frame(width: 24)
 
-      VStack(alignment: .leading, spacing: 4) {
+      VStack(alignment: .leading, spacing: 3) {
         Text(episode.episode.trackName)
           .font(.subheadline)
           .fontWeight(.medium)
@@ -1225,7 +1224,7 @@ struct TrendingEpisodeRow: View {
 
       Spacer(minLength: 0)
     }
-    .padding(.vertical, 10)
+    .padding(.vertical, 8)
   }
 }
 
@@ -1274,25 +1273,26 @@ struct TrendingEpisodesListView: View {
   var body: some View {
     List {
       ForEach(Array(episodes.prefix(200).enumerated()), id: \.element.id) { index, episode in
-        TrendingEpisodeRow(episode: episode, rank: index + 1)
-          .background {
-            NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
-              EmptyView()
-            }
-            .opacity(0)
+        HStack(spacing: 0) {
+          TrendingEpisodeRow(episode: episode, rank: index + 1)
+
+          Menu {
+            TrendingEpisodeContextMenu(episode: episode)
+          } label: {
+            Image(systemName: "ellipsis")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .frame(width: 36, height: 36)
+              .contentShape(Rectangle())
           }
-          .overlay(alignment: .trailing) {
-            Menu {
-              TrendingEpisodeContextMenu(episode: episode)
-            } label: {
-              Image(systemName: "ellipsis")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-            }
+        }
+        .background {
+          NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
+            EmptyView()
           }
-          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+          .opacity(0)
+        }
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
       }
     }
     .listStyle(.plain)

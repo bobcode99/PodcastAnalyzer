@@ -31,16 +31,19 @@ struct TranscriptSentence: Identifiable {
         segments.last?.endTime ?? 0
     }
 
-    /// Combined text of all segments (with proper spacing)
+    /// Combined text of all segments (no spaces for CJK, spaces for non-CJK)
     var text: String {
-        segments.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+        let texts = segments.map { $0.text.trimmingCharacters(in: .whitespaces) }
+        let separator = CJKTextUtils.containsCJK(texts.joined()) ? "" : " "
+        return texts.joined(separator: separator)
     }
 
     /// Combined translated text (if available)
     var translatedText: String? {
         let translations = segments.compactMap { $0.translatedText?.trimmingCharacters(in: .whitespaces) }
         guard translations.count == segments.count else { return nil }
-        return translations.joined(separator: " ")
+        let separator = CJKTextUtils.containsCJK(translations.joined()) ? "" : " "
+        return translations.joined(separator: separator)
     }
 
     /// Formatted start time string
@@ -135,7 +138,7 @@ enum TranscriptGrouping {
 
 // MARK: - CJK Text Utilities
 
-enum CJKTextUtils {
+nonisolated enum CJKTextUtils {
     /// CJK Unicode ranges
     private static let cjkRanges: [ClosedRange<UInt32>] = [
         0x4E00...0x9FFF,    // CJK Unified Ideographs
