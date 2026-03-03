@@ -731,8 +731,9 @@ extension View {
                     return
                 }
 
-                // At-top auto-expand
-                if newValue.contentOffset <= 0 {
+                // Near-top threshold: only show header when scrolled close to top
+                let nearTopThreshold: CGFloat = 60
+                if newValue.contentOffset <= nearTopThreshold {
                     if !isHeaderVisible.wrappedValue {
                         isHeaderVisible.wrappedValue = true
                     }
@@ -748,13 +749,13 @@ extension View {
                 }
 
                 let delta = newValue.contentOffset - lastOffset.wrappedValue
-                // 5pt dead zone — but always update lastOffset to prevent drift
-                guard abs(delta) > 5 else { return }
+                // Dead zone to prevent jitter
+                guard abs(delta) > 8 else { return }
 
+                // Only collapse when scrolling down; do NOT re-show on scroll-up
+                // Header only reappears when near the top (handled above)
                 if delta > 0 && isHeaderVisible.wrappedValue {
                     isHeaderVisible.wrappedValue = false
-                } else if delta < 0 && !isHeaderVisible.wrappedValue {
-                    isHeaderVisible.wrappedValue = true
                 }
                 lastOffset.wrappedValue = newValue.contentOffset
             }

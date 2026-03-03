@@ -1134,28 +1134,32 @@ struct TrendingEpisodesPagedView: View {
   }
 }
 
-/// Wraps a TrendingEpisodeRow with separate NavigationLink and Menu hit targets
+/// Wraps a TrendingEpisodeRow with separate NavigationLink and Menu hit targets.
+/// Uses ZStack approach: NavigationLink as background, Menu as foreground overlay
+/// to avoid gesture conflicts in horizontal ScrollView.
 private struct TrendingEpisodeRowWithNav: View {
   let episode: ApplePodcastService.TrendingEpisode
   let rank: Int
 
   var body: some View {
-    HStack(spacing: 0) {
-      NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
-        TrendingEpisodeRow(episode: episode, rank: rank)
+    TrendingEpisodeRow(episode: episode, rank: rank)
+      .background {
+        NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
+          EmptyView()
+        }
+        .opacity(0)
       }
-      .buttonStyle(.plain)
-
-      Menu {
-        TrendingEpisodeContextMenu(episode: episode)
-      } label: {
-        Image(systemName: "ellipsis")
-          .font(.body)
-          .foregroundStyle(.secondary)
-          .frame(width: 44, height: 44)
-          .contentShape(Rectangle())
+      .overlay(alignment: .trailing) {
+        Menu {
+          TrendingEpisodeContextMenu(episode: episode)
+        } label: {
+          Image(systemName: "ellipsis")
+            .font(.body)
+            .foregroundStyle(.secondary)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+        }
       }
-    }
   }
 }
 
@@ -1270,23 +1274,25 @@ struct TrendingEpisodesListView: View {
   var body: some View {
     List {
       ForEach(Array(episodes.prefix(200).enumerated()), id: \.element.id) { index, episode in
-        HStack(spacing: 0) {
-          NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
-            TrendingEpisodeRow(episode: episode, rank: index + 1)
+        TrendingEpisodeRow(episode: episode, rank: index + 1)
+          .background {
+            NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
+              EmptyView()
+            }
+            .opacity(0)
           }
-          .buttonStyle(.plain)
-
-          Menu {
-            TrendingEpisodeContextMenu(episode: episode)
-          } label: {
-            Image(systemName: "ellipsis")
-              .font(.body)
-              .foregroundStyle(.secondary)
-              .frame(width: 44, height: 44)
-              .contentShape(Rectangle())
+          .overlay(alignment: .trailing) {
+            Menu {
+              TrendingEpisodeContextMenu(episode: episode)
+            } label: {
+              Image(systemName: "ellipsis")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+            }
           }
-        }
-        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
       }
     }
     .listStyle(.plain)
