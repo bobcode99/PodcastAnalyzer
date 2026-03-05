@@ -487,16 +487,28 @@ struct EpisodeDetailView: View {
                 guard !Task.isCancelled else { break }
                 if viewModel.isCurrentEpisode && viewModel.audioManager.isPlaying {
                     let newTime = viewModel.audioManager.currentTime
-                    // Skip update if time diff < 0.5s and sentence unchanged
                     let timeDiff = abs(newTime - currentPlaybackTime)
-                    if timeDiff >= 0.5 {
-                        currentPlaybackTime = newTime
-                    } else {
-                        // Check if sentence changed even with small time diff
-                        let newSentenceId = transcriptSentences.first { $0.containsTime(newTime) }?.id
-                        let oldSentenceId = currentSentenceId
-                        if newSentenceId != oldSentenceId {
+
+                    if subtitleSettings.displayMode == .sentenceHighlight {
+                        // Sentence highlight mode: update whenever the active segment changes
+                        // (segments within a sentence are short, so check more frequently)
+                        let currentSentence = transcriptSentences.first { $0.containsTime(newTime) }
+                        let oldSentence = transcriptSentences.first { $0.containsTime(currentPlaybackTime) }
+                        let newSegIdx = currentSentence?.segments.firstIndex { newTime >= $0.startTime && newTime <= $0.endTime }
+                        let oldSegIdx = oldSentence?.segments.firstIndex { currentPlaybackTime >= $0.startTime && currentPlaybackTime <= $0.endTime }
+                        if newSegIdx != oldSegIdx || currentSentence?.id != oldSentence?.id || timeDiff >= 0.5 {
                             currentPlaybackTime = newTime
+                        }
+                    } else {
+                        // Default mode: skip update if time diff < 0.5s and sentence unchanged
+                        if timeDiff >= 0.5 {
+                            currentPlaybackTime = newTime
+                        } else {
+                            let newSentenceId = transcriptSentences.first { $0.containsTime(newTime) }?.id
+                            let oldSentenceId = currentSentenceId
+                            if newSentenceId != oldSentenceId {
+                                currentPlaybackTime = newTime
+                            }
                         }
                     }
                 }
