@@ -254,22 +254,6 @@ struct SettingsView: View {
               }
             }
           }
-          Toggle(isOn: Binding(
-            get: { SubtitleSettingsManager.shared.useCJKTokenReducer },
-            set: { SubtitleSettingsManager.shared.useCJKTokenReducer = $0 }
-          )) {
-            HStack {
-              Image(systemName: "character.textbox")
-                .foregroundStyle(.orange)
-                .frame(width: 24)
-              VStack(alignment: .leading, spacing: 2) {
-                Text("CJK Token Reducer")
-                Text("Translate CJK text to English before AI processing to reduce token usage")
-                  .font(.caption2)
-                  .foregroundStyle(.secondary)
-              }
-            }
-          }
         } header: {
           Text("Translation")
         } footer: {

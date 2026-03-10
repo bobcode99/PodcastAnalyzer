@@ -45,7 +45,7 @@ nonisolated struct SRTParser {
             }
         }
 
-        return transcriptText.joined(separator: " ")
+        return CJKTextUtils.joinTexts(transcriptText)
     }
 
     /// Parse SRT content into structured segments with timestamps
@@ -73,7 +73,7 @@ nonisolated struct SRTParser {
                         id: index,
                         startTime: start,
                         endTime: end,
-                        text: currentText.joined(separator: " ")
+                        text: CJKTextUtils.joinTexts(currentText)
                     ))
                 }
                 // Reset for next segment
@@ -166,6 +166,6 @@ extension TranscriptSegment {
     /// - Returns: Combined text from segments in range
     static func getText(from segments: [TranscriptSegment], startIndex: Int, endIndex: Int) -> String {
         let filtered = segments.filter { $0.id >= startIndex && $0.id <= endIndex }
-        return filtered.map { $0.text }.joined(separator: " ")
+        return CJKTextUtils.joinTexts(filtered.map { $0.text })
     }
 }

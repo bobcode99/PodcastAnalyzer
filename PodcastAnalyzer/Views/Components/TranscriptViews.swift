@@ -31,19 +31,17 @@ struct TranscriptSentence: Identifiable {
         segments.last?.endTime ?? 0
     }
 
-    /// Combined text of all segments (no spaces for CJK, spaces for non-CJK)
+    /// Combined text of all segments with CJK-aware spacing
     var text: String {
         let texts = segments.map { $0.text.trimmingCharacters(in: .whitespaces) }
-        let separator = CJKTextUtils.containsCJK(texts.joined()) ? "" : " "
-        return texts.joined(separator: separator)
+        return CJKTextUtils.joinTexts(texts)
     }
 
     /// Combined translated text (if available)
     var translatedText: String? {
         let translations = segments.compactMap { $0.translatedText?.trimmingCharacters(in: .whitespaces) }
         guard translations.count == segments.count else { return nil }
-        let separator = CJKTextUtils.containsCJK(translations.joined()) ? "" : " "
-        return translations.joined(separator: separator)
+        return CJKTextUtils.joinTexts(translations)
     }
 
     /// Formatted start time string
@@ -215,6 +213,29 @@ nonisolated enum CJKTextUtils {
         } else {
             return text.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
         }
+    }
+
+    /// Check if a Unicode scalar is in CJK ranges
+    static func isCJKScalar(_ scalar: Unicode.Scalar) -> Bool {
+        let value = scalar.value
+        return cjkRanges.contains { $0.contains(value) }
+    }
+
+    /// Join text segments with CJK-aware spacing.
+    /// Uses no separator when either boundary character is CJK, space otherwise.
+    static func joinTexts(_ texts: [String]) -> String {
+        guard var result = texts.first else { return "" }
+        for i in 1..<texts.count {
+            let next = texts[i]
+            guard !next.isEmpty else { continue }
+            let prevEndIsCJK = result.unicodeScalars.last.map { isCJKScalar($0) } ?? false
+            let nextStartIsCJK = next.unicodeScalars.first.map { isCJKScalar($0) } ?? false
+            if !prevEndIsCJK && !nextStartIsCJK {
+                result += " "
+            }
+            result += next
+        }
+        return result
     }
 }
 
@@ -469,7 +490,6 @@ struct SentenceView: View, Equatable {
     /// - Future segment: primary foreground, regular
     private func buildSegmentHighlightedAttributedString() -> AttributedString {
         var result = AttributedString()
-        let isCJK = CJKTextUtils.containsCJK(sentence.text)
 
         for (index, segment) in sentence.segments.enumerated() {
             let segmentText = segment.text.trimmingCharacters(in: .whitespaces)
@@ -500,9 +520,14 @@ struct SentenceView: View, Equatable {
 
             result.append(attrText)
 
-            // Add space between segments (not for CJK or last segment)
-            if index < sentence.segments.count - 1 && !isCJK {
-                result.append(AttributedString(" "))
+            // Add space between segments using CJK-aware boundary check
+            if index < sentence.segments.count - 1 {
+                let nextText = sentence.segments[index + 1].text.trimmingCharacters(in: .whitespaces)
+                let endIsCJK = segmentText.unicodeScalars.last.map { CJKTextUtils.isCJKScalar($0) } ?? false
+                let startIsCJK = nextText.unicodeScalars.first.map { CJKTextUtils.isCJKScalar($0) } ?? false
+                if !endIsCJK && !startIsCJK {
+                    result.append(AttributedString(" "))
+                }
             }
         }
 
@@ -663,7 +688,6 @@ struct TranscriptPreviewView: View {
     /// Build attributed string for preview with segment highlighting
     private func buildPreviewAttributedString(for sentence: TranscriptSentence) -> AttributedString {
         var result = AttributedString()
-        let isCJK = CJKTextUtils.containsCJK(sentence.text)
 
         for (index, segment) in sentence.segments.enumerated() {
             let segmentText = segment.text.trimmingCharacters(in: .whitespaces)
@@ -684,8 +708,13 @@ struct TranscriptPreviewView: View {
 
             result.append(attrText)
 
-            if index < sentence.segments.count - 1 && !isCJK {
-                result.append(AttributedString(" "))
+            if index < sentence.segments.count - 1 {
+                let nextText = sentence.segments[index + 1].text.trimmingCharacters(in: .whitespaces)
+                let endIsCJK = segmentText.unicodeScalars.last.map { CJKTextUtils.isCJKScalar($0) } ?? false
+                let startIsCJK = nextText.unicodeScalars.first.map { CJKTextUtils.isCJKScalar($0) } ?? false
+                if !endIsCJK && !startIsCJK {
+                    result.append(AttributedString(" "))
+                }
             }
         }
 

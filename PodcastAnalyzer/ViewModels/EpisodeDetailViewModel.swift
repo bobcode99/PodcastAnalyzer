@@ -148,6 +148,8 @@ final class EpisodeDetailViewModel {
 
   // Parsed transcript segments for live captions
   var transcriptSegments: [TranscriptSegment] = []
+  // Raw (unmerged) segments for sentence highlight mode's per-segment granularity
+  var rawTranscriptSegments: [TranscriptSegment] = []
   var transcriptSearchQuery: String = ""
 
   // Sentence grouping (precomputed, not per-render)
@@ -1340,7 +1342,7 @@ final class EpisodeDetailViewModel {
     for startIndex in stride(from: 0, to: sentences.count, by: sentencesPerParagraph) {
       let endIndex = min(startIndex + sentencesPerParagraph, sentences.count)
       let chunk = sentences[startIndex..<endIndex]
-      let paragraphText = chunk.map { $0.text }.joined(separator: " ")
+      let paragraphText = CJKTextUtils.joinTexts(chunk.map { $0.text })
       paragraphs.append(paragraphText)
     }
 
@@ -1382,6 +1384,7 @@ final class EpisodeDetailViewModel {
   func parseTranscriptSegments() {
     guard !transcriptText.isEmpty else {
       transcriptSegments = []
+      rawTranscriptSegments = []
       return
     }
 
@@ -1481,6 +1484,9 @@ final class EpisodeDetailViewModel {
         ))
     }
 
+    // Always store raw segments for sentence highlight mode
+    rawTranscriptSegments = segments
+
     // Apply sentence grouping if enabled
     if subtitleSettings.groupSegmentsIntoSentences {
       let grouped = groupSegmentsIntoSentences(segments)
@@ -1542,13 +1548,15 @@ final class EpisodeDetailViewModel {
   private func mergeSegments(_ segments: [TranscriptSegment]) -> TranscriptSegment? {
     guard let first = segments.first, let last = segments.last else { return nil }
 
-    // Combine text with spaces
-    let combinedText = segments.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+    // Combine text with CJK-aware spacing
+    let texts = segments.map { $0.text.trimmingCharacters(in: .whitespaces) }
+    let combinedText = CJKTextUtils.joinTexts(texts)
 
     // Combine translated text if all segments have translations
     let translatedText: String?
     if segments.allSatisfy({ $0.translatedText != nil }) {
-      translatedText = segments.compactMap { $0.translatedText?.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+      let translations = segments.compactMap { $0.translatedText?.trimmingCharacters(in: .whitespaces) }
+      translatedText = CJKTextUtils.joinTexts(translations)
     } else {
       translatedText = nil
     }
@@ -1703,8 +1711,10 @@ final class EpisodeDetailViewModel {
   }
 
   /// Paragraph-grouped sentences for sentence highlight mode (larger grouping: up to 8 segments)
+  /// Uses raw (unmerged) segments to preserve per-segment granularity for highlighting
   var paragraphGroupedSentences: [TranscriptSentence] {
-    TranscriptGrouping.groupIntoParagraphSentences(transcriptSegments)
+    let segments = rawTranscriptSegments.isEmpty ? transcriptSegments : rawTranscriptSegments
+    return TranscriptGrouping.groupIntoParagraphSentences(segments)
   }
 
   /// Regroup filtered segments into sentences (for search-filtered view)
