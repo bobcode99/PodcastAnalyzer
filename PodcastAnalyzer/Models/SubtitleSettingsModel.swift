@@ -15,7 +15,6 @@ enum SubtitleDisplayMode: String, CaseIterable, Codable, Sendable {
   case translatedOnly = "translated_only"
   case dualOriginalFirst = "dual_original_first"
   case dualTranslatedFirst = "dual_translated_first"
-  case sentenceHighlight = "sentence_highlight"
 
   var displayName: String {
     switch self {
@@ -23,7 +22,6 @@ enum SubtitleDisplayMode: String, CaseIterable, Codable, Sendable {
     case .translatedOnly: return "Translated Only"
     case .dualOriginalFirst: return "Dual (Original First)"
     case .dualTranslatedFirst: return "Dual (Translated First)"
-    case .sentenceHighlight: return "Sentence Highlight"
     }
   }
 
@@ -33,7 +31,6 @@ enum SubtitleDisplayMode: String, CaseIterable, Codable, Sendable {
     case .translatedOnly: return "globe"
     case .dualOriginalFirst: return "text.bubble.fill"
     case .dualTranslatedFirst: return "globe.badge.chevron.backward"
-    case .sentenceHighlight: return "text.line.first.and.arrowtriangle.forward"
     }
   }
 
@@ -43,7 +40,14 @@ enum SubtitleDisplayMode: String, CaseIterable, Codable, Sendable {
     case .translatedOnly: return "Show only the translated text"
     case .dualOriginalFirst: return "Show original text with translation below"
     case .dualTranslatedFirst: return "Show translation with original text below"
-    case .sentenceHighlight: return "Merge segments into sentences with per-segment playback highlighting"
+    }
+  }
+
+  /// Whether this mode requires translation to be available
+  var requiresTranslation: Bool {
+    switch self {
+    case .originalOnly: return false
+    case .translatedOnly, .dualOriginalFirst, .dualTranslatedFirst: return true
     }
   }
 }
@@ -173,6 +177,11 @@ final class SubtitleSettingsManager {
     didSet { saveSettings() }
   }
 
+  /// Per-segment playback highlighting (works with all display modes)
+  var sentenceHighlightEnabled: Bool = true {
+    didSet { saveSettings() }
+  }
+
   // MARK: - UserDefaults Keys
 
   private enum Keys {
@@ -182,6 +191,7 @@ final class SubtitleSettingsManager {
     static let autoDownloadTranscripts = "subtitle_auto_download_transcripts"
     static let groupSegmentsIntoSentences = "subtitle_group_segments_into_sentences"
     static let autoGenerateTranscripts = "subtitle_auto_generate_transcripts"
+    static let sentenceHighlightEnabled = "subtitle_sentence_highlight_enabled"
   }
 
   // MARK: - Initialization
@@ -225,6 +235,12 @@ final class SubtitleSettingsManager {
       autoGenerateTranscripts = defaults.bool(forKey: Keys.autoGenerateTranscripts)
     }
 
+    // Default to true for sentence highlight if not set
+    if defaults.object(forKey: Keys.sentenceHighlightEnabled) == nil {
+      sentenceHighlightEnabled = true
+    } else {
+      sentenceHighlightEnabled = defaults.bool(forKey: Keys.sentenceHighlightEnabled)
+    }
   }
 
   private func saveSettings() {
@@ -235,6 +251,7 @@ final class SubtitleSettingsManager {
     defaults.set(autoDownloadTranscripts, forKey: Keys.autoDownloadTranscripts)
     defaults.set(groupSegmentsIntoSentences, forKey: Keys.groupSegmentsIntoSentences)
     defaults.set(autoGenerateTranscripts, forKey: Keys.autoGenerateTranscripts)
+    defaults.set(sentenceHighlightEnabled, forKey: Keys.sentenceHighlightEnabled)
   }
 
   // MARK: - Translation Availability
@@ -254,6 +271,6 @@ final class SubtitleSettingsManager {
 
   /// Whether translation is needed for current display mode
   var needsTranslation: Bool {
-    displayMode != .originalOnly
+    displayMode.requiresTranslation
   }
 }

@@ -304,6 +304,9 @@ struct SentenceBasedTranscriptView: View {
     /// Subtitle display mode
     var subtitleMode: SubtitleDisplayMode = .originalOnly
 
+    /// Whether sentence highlight (per-segment playback highlighting) is enabled
+    var sentenceHighlightEnabled: Bool = false
+
     /// Search match IDs for navigation highlight
     var searchMatchIds: Set<Int> = []
 
@@ -311,7 +314,7 @@ struct SentenceBasedTranscriptView: View {
     var currentSearchMatchId: Int?
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: subtitleMode == .sentenceHighlight ? 2 : 12) {
+        LazyVStack(alignment: .leading, spacing: sentenceHighlightEnabled ? 2 : 12) {
             ForEach(sentences) { sentence in
                 let highlightState = TranscriptGrouping.highlightState(
                     for: sentence,
@@ -322,6 +325,7 @@ struct SentenceBasedTranscriptView: View {
                     highlightState: highlightState,
                     searchQuery: searchQuery,
                     subtitleMode: subtitleMode,
+                    sentenceHighlightEnabled: sentenceHighlightEnabled,
                     showTimestamp: showTimestamps,
                     isSearchMatch: searchMatchIds.contains(sentence.id),
                     isCurrentSearchMatch: currentSearchMatchId == sentence.id,
@@ -343,6 +347,7 @@ struct SentenceView: View, Equatable {
     let highlightState: SentenceHighlightState
     let searchQuery: String
     let subtitleMode: SubtitleDisplayMode
+    var sentenceHighlightEnabled: Bool = false
     var showTimestamp: Bool = false
     var isSearchMatch: Bool = false
     var isCurrentSearchMatch: Bool = false
@@ -354,6 +359,7 @@ struct SentenceView: View, Equatable {
         lhs.highlightState == rhs.highlightState &&
         lhs.searchQuery == rhs.searchQuery &&
         lhs.subtitleMode == rhs.subtitleMode &&
+        lhs.sentenceHighlightEnabled == rhs.sentenceHighlightEnabled &&
         lhs.isSearchMatch == rhs.isSearchMatch &&
         lhs.isCurrentSearchMatch == rhs.isCurrentSearchMatch
     }
@@ -364,15 +370,10 @@ struct SentenceView: View, Equatable {
         return false
     }
 
-    /// Whether sentence highlight mode is active
-    private var isSentenceHighlightMode: Bool {
-        subtitleMode == .sentenceHighlight
-    }
-
     /// Primary text to display based on subtitle mode
     private var primaryText: String {
         switch subtitleMode {
-        case .originalOnly, .dualOriginalFirst, .sentenceHighlight:
+        case .originalOnly, .dualOriginalFirst:
             return sentence.text
         case .translatedOnly, .dualTranslatedFirst:
             return sentence.translatedText ?? sentence.text
@@ -382,7 +383,7 @@ struct SentenceView: View, Equatable {
     /// Whether primary text uses translated content
     private var primaryIsTranslated: Bool {
         switch subtitleMode {
-        case .originalOnly, .dualOriginalFirst, .sentenceHighlight:
+        case .originalOnly, .dualOriginalFirst:
             return false
         case .translatedOnly, .dualTranslatedFirst:
             return sentence.translatedText != nil
@@ -392,7 +393,7 @@ struct SentenceView: View, Equatable {
     /// Secondary text for dual modes (nil for single modes)
     private var secondaryText: String? {
         switch subtitleMode {
-        case .originalOnly, .translatedOnly, .sentenceHighlight:
+        case .originalOnly, .translatedOnly:
             return nil
         case .dualOriginalFirst:
             return sentence.translatedText
@@ -434,12 +435,12 @@ struct SentenceView: View, Equatable {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.vertical, isSentenceHighlightMode ? 4 : 8)
-            .padding(.leading, isSentenceHighlightMode ? 0 : 8)
+            .padding(.vertical, sentenceHighlightEnabled ? 4 : 8)
+            .padding(.leading, sentenceHighlightEnabled ? 0 : 8)
             .padding(.trailing, 12)
             .overlay(alignment: .leading) {
                 // Active sentence accent bar (hidden in sentence highlight mode)
-                if !isSentenceHighlightMode {
+                if !sentenceHighlightEnabled {
                     RoundedRectangle(cornerRadius: 1.5)
                         .fill(Color.blue)
                         .frame(width: 3)
@@ -795,6 +796,7 @@ struct FullTranscriptContent: View {
                             onSegmentTap: onSegmentTap,
                             showTimestamps: false,
                             subtitleMode: settings.displayMode,
+                            sentenceHighlightEnabled: settings.sentenceHighlightEnabled,
                             searchMatchIds: searchMatchIds,
                             currentSearchMatchId: searchMatchIdsList.isEmpty ? nil : searchMatchIdsList[currentSearchIndex]
                         )

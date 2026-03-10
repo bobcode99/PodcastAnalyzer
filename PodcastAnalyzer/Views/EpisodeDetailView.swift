@@ -86,7 +86,7 @@ struct EpisodeDetailView: View {
     private var transcriptSentences: [TranscriptSentence] {
         if !viewModel.transcriptSearchQuery.isEmpty {
             return viewModel.filteredGroupedSentences
-        } else if subtitleSettings.displayMode == .sentenceHighlight {
+        } else if subtitleSettings.sentenceHighlightEnabled {
             return viewModel.paragraphGroupedSentences
         } else {
             return viewModel.groupedSentences
@@ -207,7 +207,7 @@ struct EpisodeDetailView: View {
             )
         }
         .sheet(isPresented: $showSubtitleSettings) {
-            SubtitleSettingsSheet()
+            SubtitleSettingsSheet(hasTranslation: viewModel.hasExistingTranslation)
         }
         .sheet(isPresented: $showTranslationLanguagePicker) {
             TranslationLanguagePickerSheet(
@@ -432,6 +432,7 @@ struct EpisodeDetailView: View {
                                 searchQuery: viewModel.transcriptSearchQuery,
                                 onSegmentTap: { viewModel.seekToSegment($0) },
                                 subtitleMode: subtitleSettings.displayMode,
+                                sentenceHighlightEnabled: subtitleSettings.sentenceHighlightEnabled,
                                 searchMatchIds: Set(viewModel.searchMatchIds),
                                 currentSearchMatchId: viewModel.searchMatchIds.isEmpty
                                     ? nil : viewModel.searchMatchIds[viewModel.currentMatchIndex]
@@ -489,7 +490,7 @@ struct EpisodeDetailView: View {
                     let newTime = viewModel.audioManager.currentTime
                     let timeDiff = abs(newTime - currentPlaybackTime)
 
-                    if subtitleSettings.displayMode == .sentenceHighlight {
+                    if subtitleSettings.sentenceHighlightEnabled {
                         // Sentence highlight mode: update whenever the active segment changes
                         // (segments within a sentence are short, so check more frequently)
                         let currentSentence = transcriptSentences.first { $0.containsTime(newTime) }
@@ -623,6 +624,14 @@ struct EpisodeDetailView: View {
                                 Label(mode.displayName, systemImage: mode.icon)
                             }
                         }
+                        .disabled(mode.requiresTranslation && !viewModel.hasExistingTranslation)
+                    }
+                    Divider()
+                    Toggle(isOn: Binding(
+                        get: { subtitleSettings.sentenceHighlightEnabled },
+                        set: { subtitleSettings.sentenceHighlightEnabled = $0 }
+                    )) {
+                        Label("Sentence Highlight", systemImage: "text.line.first.and.arrowtriangle.forward")
                     }
                     Divider()
                     Button {

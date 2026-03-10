@@ -73,7 +73,7 @@ struct TranscriptSegment: Identifiable, Equatable {
   /// Returns display text based on subtitle display mode
   func displayText(mode: SubtitleDisplayMode) -> (primary: String, secondary: String?) {
     switch mode {
-    case .originalOnly, .sentenceHighlight:
+    case .originalOnly:
       return (text, nil)
     case .translatedOnly:
       return (translatedText ?? text, nil)

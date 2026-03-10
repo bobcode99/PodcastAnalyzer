@@ -11,6 +11,9 @@ struct SubtitleSettingsSheet: View {
   @Environment(\.dismiss) private var dismiss
   private var settings: SubtitleSettingsManager { .shared }
 
+  /// Whether translation exists for the current episode
+  var hasTranslation: Bool = false
+
   var body: some View {
     NavigationStack {
       Form {
@@ -22,7 +25,7 @@ struct SubtitleSettingsSheet: View {
             } label: {
               HStack {
                 Label(mode.displayName, systemImage: mode.icon)
-                  .foregroundStyle(.primary)
+                  .foregroundStyle(mode.requiresTranslation && !hasTranslation ? .tertiary : .primary)
                 Spacer()
                 if settings.displayMode == mode {
                   Image(systemName: "checkmark")
@@ -30,11 +33,30 @@ struct SubtitleSettingsSheet: View {
                 }
               }
             }
+            .disabled(mode.requiresTranslation && !hasTranslation)
           }
         } header: {
           Text("Display Mode")
         } footer: {
-          Text(settings.displayMode.description)
+          if hasTranslation {
+            Text(settings.displayMode.description)
+          } else {
+            Text("Translate the transcript to unlock additional display modes")
+          }
+        }
+
+        // Sentence Highlight Section
+        Section {
+          Toggle(isOn: Binding(
+            get: { settings.sentenceHighlightEnabled },
+            set: { settings.sentenceHighlightEnabled = $0 }
+          )) {
+            Label("Sentence Highlight", systemImage: "text.line.first.and.arrowtriangle.forward")
+          }
+        } header: {
+          Text("Playback Highlight")
+        } footer: {
+          Text("Highlight the currently playing segment within each sentence during playback")
         }
 
         // Info Section
