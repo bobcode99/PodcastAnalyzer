@@ -38,7 +38,8 @@ final class HomeViewModel {
       if oldValue != selectedRegion {
         // Save to UserDefaults for consistency
         UserDefaults.standard.set(selectedRegion, forKey: "selectedPodcastRegion")
-        Task {
+        regionChangeTask?.cancel()
+        regionChangeTask = Task {
           await loadTopPodcasts(forceRefresh: true)
           await loadTrendingEpisodes(forceRefresh: true)
         }
@@ -62,6 +63,9 @@ final class HomeViewModel {
 
   @ObservationIgnored
   private var subscribeTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var regionChangeTask: Task<Void, Never>?
 
   // Podcast preview/subscription
   var selectedPodcast: AppleRSSPodcast?
@@ -94,6 +98,18 @@ final class HomeViewModel {
 
   // Use Unit Separator (U+001F) as delimiter
   private static let episodeKeyDelimiter = "\u{1F}"
+
+  /// Whether the "For You" section should be shown (cached from UserDefaults)
+  var showForYouRecommendations: Bool {
+    UserDefaults.standard.object(forKey: "showForYouRecommendations") == nil ||
+    UserDefaults.standard.bool(forKey: "showForYouRecommendations")
+  }
+
+  /// Whether the "Top Episodes" section should be shown (cached from UserDefaults)
+  var showTrendingEpisodes: Bool {
+    UserDefaults.standard.object(forKey: "showTrendingEpisodes") == nil ||
+    UserDefaults.standard.bool(forKey: "showTrendingEpisodes")
+  }
 
   var selectedRegionName: String {
     if let region = Constants.podcastRegions.first(where: { $0.code == selectedRegion }) {
@@ -184,6 +200,14 @@ final class HomeViewModel {
   private func loadUpNextEpisodes() async {
     guard let context = modelContext else { return }
 
+    // Batch fetch all EpisodeDownloadModels once (instead of N+1 individual queries)
+    let allDescriptor = FetchDescriptor<EpisodeDownloadModel>()
+    let allModels = (try? context.fetch(allDescriptor)) ?? []
+    var modelsByKey: [String: EpisodeDownloadModel] = [:]
+    for model in allModels {
+      modelsByKey[model.id] = model
+    }
+
     // Get up to 20 most recent unplayed episodes from subscribed podcasts
     var allEpisodes: [LibraryEpisode] = []
     var lastPlayedDates: [String: Date] = [:]
@@ -194,13 +218,7 @@ final class HomeViewModel {
       // Get recent episodes (limit 10 per podcast for performance)
       for episode in podcastModel.podcastInfo.episodes.prefix(10) {
         let key = Self.makeEpisodeKey(podcastTitle: podcastTitle, episodeTitle: episode.title)
-
-        // Check if episode is completed
-        let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-          predicate: #Predicate { $0.id == key }
-        )
-
-        let model = try? context.fetch(descriptor).first
+        let model = modelsByKey[key]
 
         // Only include unplayed episodes
         if model?.isCompleted != true {
@@ -531,15 +549,17 @@ final class HomeViewModel {
       }
 
       // Build available episodes from subscribed podcasts (unplayed)
+      // Reuse allModels already fetched above as a dictionary for O(1) lookup
+      var modelsByKey: [String: EpisodeDownloadModel] = [:]
+      for model in allModels {
+        modelsByKey[model.id] = model
+      }
+
       var availableEpisodes: [(title: String, podcastTitle: String, description: String)] = []
       for podcastModel in podcastInfoModelList {
         for episode in podcastModel.podcastInfo.episodes.prefix(5) {
           let key = Self.makeEpisodeKey(podcastTitle: podcastModel.podcastInfo.title, episodeTitle: episode.title)
-          let epDescriptor = FetchDescriptor<EpisodeDownloadModel>(
-            predicate: #Predicate { $0.id == key }
-          )
-          let model = try? context.fetch(epDescriptor).first
-          if model?.isCompleted != true {
+          if modelsByKey[key]?.isCompleted != true {
             availableEpisodes.append((
               title: episode.title,
               podcastTitle: podcastModel.podcastInfo.title,
@@ -580,16 +600,21 @@ final class HomeViewModel {
       return
     }
 
+    // Batch fetch all models once
+    let allDescriptor = FetchDescriptor<EpisodeDownloadModel>()
+    let allModels = (try? context.fetch(allDescriptor)) ?? []
+    var modelsByKey: [String: EpisodeDownloadModel] = [:]
+    for model in allModels {
+      modelsByKey[model.id] = model
+    }
+
     var resolved: [LibraryEpisode] = []
     for title in recommendations.recommendedTitles {
       // Search through subscribed podcasts for the episode
       for podcastModel in podcastInfoModelList {
         if let episode = podcastModel.podcastInfo.episodes.first(where: { $0.title == title }) {
           let key = Self.makeEpisodeKey(podcastTitle: podcastModel.podcastInfo.title, episodeTitle: episode.title)
-          let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-            predicate: #Predicate { $0.id == key }
-          )
-          let model = try? context.fetch(descriptor).first
+          let model = modelsByKey[key]
 
           resolved.append(LibraryEpisode(
             id: key,
@@ -654,6 +679,8 @@ final class HomeViewModel {
   func cleanup() {
     regionObserverTask?.cancel()
     regionObserverTask = nil
+    regionChangeTask?.cancel()
+    regionChangeTask = nil
     recommendationsTask?.cancel()
     recommendationsTask = nil
     trendingTask?.cancel()

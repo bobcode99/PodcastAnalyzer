@@ -34,6 +34,7 @@ struct PodcastSearchView: View {
     // Cached library filter results (updated only when searchText changes)
     @State private var filteredPodcasts: [PodcastInfoModel] = []
     @State private var filteredEpisodes: [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
+    @State private var subscribeTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -211,16 +212,15 @@ struct PodcastSearchView: View {
     private func subscribeToPodcast(_ podcast: Podcast) {
         guard let feedUrl = podcast.feedUrl else { return }
 
-        Task {
+        subscribeTask?.cancel()
+        subscribeTask = Task {
             do {
                 let rssService = PodcastRssService()
                 let podcastInfo = try await rssService.fetchPodcast(from: feedUrl)
                 let podcastInfoModel = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date.now)
 
-                await MainActor.run {
-                    modelContext.insert(podcastInfoModel)
-                    try? modelContext.save()
-                }
+                modelContext.insert(podcastInfoModel)
+                try? modelContext.save()
             } catch {
                 print("Failed to subscribe: \(error)")
             }

@@ -21,7 +21,6 @@ struct ExpandedPlayerView: View {
   @State private var viewModel = ExpandedPlayerViewModel()
   @State private var showSpeedPicker = false
   @State private var showQueue = false
-  @State private var showEllipsisMenu = false
   @State private var showSleepTimerPicker = false
 
   // Scrubbing state for smooth slider interaction

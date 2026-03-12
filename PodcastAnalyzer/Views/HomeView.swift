@@ -41,18 +41,24 @@ struct TrendingEpisodeDetailDestination: Hashable {
     self.podcastId = trending.podcastId
   }
 
+  private static let isoFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+  }()
+
+  private static let isoFormatterNoFrac: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+  }()
+
   /// Convert to PodcastEpisodeInfo for EpisodeDetailView
   var asPodcastEpisodeInfo: PodcastEpisodeInfo {
-    // Parse ISO 8601 date
     var pubDate: Date?
     if let dateStr = releaseDate {
-      let formatter = ISO8601DateFormatter()
-      formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-      pubDate = formatter.date(from: dateStr)
-      if pubDate == nil {
-        formatter.formatOptions = [.withInternetDateTime]
-        pubDate = formatter.date(from: dateStr)
-      }
+      pubDate = Self.isoFormatter.date(from: dateStr)
+              ?? Self.isoFormatterNoFrac.date(from: dateStr)
     }
 
     return PodcastEpisodeInfo(
@@ -70,10 +76,6 @@ struct HomeView: View {
   @State private var viewModel = HomeViewModel()
   @Environment(\.modelContext) private var modelContext
   @State private var showRegionPicker = false
-
-  // Context menu state for popular shows
-  @State private var podcastToSubscribe: AppleRSSPodcast?
-  @State private var showSubscribeSheet = false
 
   // Deferred navigation state (avoids eager destination creation)
   @State private var selectedEpisode: LibraryEpisode?
@@ -231,10 +233,7 @@ struct HomeView: View {
   @available(iOS 26.0, macOS 26.0, *)
   @ViewBuilder
   private var forYouSection: some View {
-    let showForYou = UserDefaults.standard.object(forKey: "showForYouRecommendations") == nil ||
-                     UserDefaults.standard.bool(forKey: "showForYouRecommendations")
-
-    if showForYou && (!viewModel.recommendedEpisodes.isEmpty || viewModel.isLoadingRecommendations) {
+    if viewModel.showForYouRecommendations && (!viewModel.recommendedEpisodes.isEmpty || viewModel.isLoadingRecommendations) {
       VStack(alignment: .leading, spacing: 12) {
         HStack {
           Image(systemName: "star.leadinghalf.filled")
@@ -303,10 +302,7 @@ struct HomeView: View {
 
   @ViewBuilder
   private var trendingEpisodesSection: some View {
-    let showTrending = UserDefaults.standard.object(forKey: "showTrendingEpisodes") == nil ||
-                       UserDefaults.standard.bool(forKey: "showTrendingEpisodes")
-
-    if showTrending && (!viewModel.trendingEpisodes.isEmpty || viewModel.isLoadingTrendingEpisodes) {
+    if viewModel.showTrendingEpisodes && (!viewModel.trendingEpisodes.isEmpty || viewModel.isLoadingTrendingEpisodes) {
       VStack(alignment: .leading, spacing: 12) {
         HStack {
           Text("Top Episodes")
@@ -1165,6 +1161,24 @@ struct TrendingEpisodeRow: View {
   let episode: ApplePodcastService.TrendingEpisode
   let rank: Int
 
+  private static let isoFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+  }()
+
+  private static let isoFormatterNoFrac: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+  }()
+
+  private static let relativeFormatter: RelativeDateTimeFormatter = {
+    let f = RelativeDateTimeFormatter()
+    f.unitsStyle = .abbreviated
+    return f
+  }()
+
   private var formattedDuration: String {
     guard let millis = episode.episode.trackTimeMillis else { return "" }
     let totalSeconds = millis / 1000
@@ -1178,16 +1192,9 @@ struct TrendingEpisodeRow: View {
 
   private var relativeDate: String {
     guard let dateStr = episode.episode.releaseDate else { return "" }
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    // Try with fractional seconds first, then without
-    guard let date = formatter.date(from: dateStr) ?? {
-      formatter.formatOptions = [.withInternetDateTime]
-      return formatter.date(from: dateStr)
-    }() else { return "" }
-    let relative = RelativeDateTimeFormatter()
-    relative.unitsStyle = .abbreviated
-    return relative.localizedString(for: date, relativeTo: Date())
+    guard let date = Self.isoFormatter.date(from: dateStr)
+            ?? Self.isoFormatterNoFrac.date(from: dateStr) else { return "" }
+    return Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
   }
 
   private var metadataText: String {
@@ -1271,7 +1278,10 @@ struct TrendingEpisodesListView: View {
     List {
       ForEach(Array(episodes.prefix(200).enumerated()), id: \.element.id) { index, episode in
         HStack(spacing: 0) {
-          TrendingEpisodeRow(episode: episode, rank: index + 1)
+          NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
+            TrendingEpisodeRow(episode: episode, rank: index + 1)
+          }
+          .buttonStyle(.plain)
 
           Menu {
             TrendingEpisodeContextMenu(episode: episode)
@@ -1282,12 +1292,6 @@ struct TrendingEpisodesListView: View {
               .frame(width: 36, height: 36)
               .contentShape(Rectangle())
           }
-        }
-        .background {
-          NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
-            EmptyView()
-          }
-          .opacity(0)
         }
         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
       }

@@ -81,11 +81,11 @@ struct LibraryView: View {
       viewModel.setPodcasts(subscribedPodcasts)
       updateSortedPodcasts()
       setupNotificationObservers()
+    }
+    .task {
       // Refresh saved/downloaded counts in case they changed while view was off-screen
-      Task {
-        await viewModel.refreshSavedEpisodes()
-        await viewModel.refreshDownloadedEpisodes()
-      }
+      await viewModel.refreshSavedEpisodes()
+      await viewModel.refreshDownloadedEpisodes()
     }
     .onChange(of: subscribedPodcasts) { _, newPodcasts in
       // Only update if count or IDs actually changed to avoid re-evaluation loops
@@ -477,9 +477,9 @@ struct SavedEpisodesView: View {
     .onAppear {
       viewModel.setModelContext(modelContext)
       batchFetchEpisodeModels()
-      Task {
-        await viewModel.refreshSavedEpisodes()
-      }
+    }
+    .task {
+      await viewModel.refreshSavedEpisodes()
     }
     .confirmationDialog(
       "Delete Download",
@@ -620,7 +620,9 @@ struct DownloadedPodcastsGridView: View {
     }
     .onAppear {
       viewModel.setModelContext(modelContext)
-      Task { await viewModel.refreshDownloadedEpisodes() }
+    }
+    .task {
+      await viewModel.refreshDownloadedEpisodes()
     }
   }
 }
@@ -731,9 +733,9 @@ struct DownloadedEpisodesView: View {
     .onAppear {
       viewModel.setModelContext(modelContext)
       batchFetchEpisodeModels()
-      Task {
-        await viewModel.refreshDownloadedEpisodes()
-      }
+    }
+    .task {
+      await viewModel.refreshDownloadedEpisodes()
     }
     .confirmationDialog(
       "Delete Download",
