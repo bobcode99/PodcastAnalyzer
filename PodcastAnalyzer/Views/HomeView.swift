@@ -1118,7 +1118,7 @@ struct TrendingEpisodesPagedView: View {
               TrendingEpisodeRowWithNav(episode: episode, rank: rank)
               if rowIndex < page.count - 1 {
                 Divider()
-                  .padding(.leading, 108)
+                  .padding(.leading, 86)
               }
             }
           }
@@ -1130,34 +1130,31 @@ struct TrendingEpisodesPagedView: View {
     }
     .scrollTargetBehavior(.viewAligned)
     .scrollIndicators(.hidden)
-    .frame(height: 250)
+    .frame(height: 210)
   }
 }
 
-/// Wraps a TrendingEpisodeRow with NavigationLink (hidden background) and inline ellipsis Menu.
+/// Wraps a TrendingEpisodeRow with NavigationLink and inline ellipsis Menu.
 private struct TrendingEpisodeRowWithNav: View {
   let episode: ApplePodcastService.TrendingEpisode
   let rank: Int
 
   var body: some View {
     HStack(spacing: 0) {
-      TrendingEpisodeRow(episode: episode, rank: rank)
+      NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
+        TrendingEpisodeRow(episode: episode, rank: rank)
+      }
+      .buttonStyle(.plain)
 
       Menu {
         TrendingEpisodeContextMenu(episode: episode)
       } label: {
         Image(systemName: "ellipsis")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .frame(width: 36, height: 36)
+          .font(.caption)
+          .foregroundStyle(.tertiary)
+          .frame(width: 28, height: 28)
           .contentShape(Rectangle())
       }
-    }
-    .background {
-      NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
-        EmptyView()
-      }
-      .opacity(0)
     }
   }
 }
@@ -1199,16 +1196,16 @@ struct TrendingEpisodeRow: View {
   }
 
   var body: some View {
-    HStack(spacing: 10) {
-      CachedArtworkImage(urlString: episode.podcastArtworkUrl, size: 56, cornerRadius: 10)
+    HStack(spacing: 8) {
+      CachedArtworkImage(urlString: episode.podcastArtworkUrl, size: 50, cornerRadius: 8)
 
       Text("\(rank)")
-        .font(.headline)
+        .font(.subheadline)
         .fontWeight(.bold)
         .foregroundStyle(.secondary)
-        .frame(width: 24)
+        .frame(width: 20)
 
-      VStack(alignment: .leading, spacing: 3) {
+      VStack(alignment: .leading, spacing: 2) {
         Text(episode.episode.trackName)
           .font(.subheadline)
           .fontWeight(.medium)
@@ -1217,14 +1214,14 @@ struct TrendingEpisodeRow: View {
 
         if !metadataText.isEmpty {
           Text(metadataText)
-            .font(.caption)
+            .font(.caption2)
             .foregroundStyle(.secondary)
         }
       }
 
       Spacer(minLength: 0)
     }
-    .padding(.vertical, 8)
+    .padding(.vertical, 6)
   }
 }
 
