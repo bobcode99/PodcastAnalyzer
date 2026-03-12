@@ -1152,6 +1152,9 @@ private struct TrendingEpisodeRowWithNav: View {
           .contentShape(Rectangle())
       }
     }
+    .contextMenu {
+      TrendingEpisodeContextMenu(episode: episode)
+    }
   }
 }
 
@@ -1292,6 +1295,9 @@ struct TrendingEpisodesListView: View {
               .frame(width: 36, height: 36)
               .contentShape(Rectangle())
           }
+        }
+        .contextMenu {
+          TrendingEpisodeContextMenu(episode: episode)
         }
         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
       }
