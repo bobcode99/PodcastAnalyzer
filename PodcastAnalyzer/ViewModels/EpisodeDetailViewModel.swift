@@ -1711,9 +1711,12 @@ final class EpisodeDetailViewModel {
   }
 
   /// Paragraph-grouped sentences for sentence highlight mode (larger grouping: up to 8 segments)
-  /// Uses raw (unmerged) segments to preserve per-segment granularity for highlighting
+  /// Uses raw (unmerged) segments for per-segment highlight granularity.
+  /// Falls back to merged segments when translations exist (translations are on merged segments).
   var paragraphGroupedSentences: [TranscriptSentence] {
-    let segments = rawTranscriptSegments.isEmpty ? transcriptSegments : rawTranscriptSegments
+    let hasTranslations = transcriptSegments.contains { $0.translatedText != nil }
+    let segments = (!rawTranscriptSegments.isEmpty && !hasTranslations)
+      ? rawTranscriptSegments : transcriptSegments
     return TranscriptGrouping.groupIntoParagraphSentences(segments)
   }
 
