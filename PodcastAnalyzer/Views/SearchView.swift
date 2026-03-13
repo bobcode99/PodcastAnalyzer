@@ -35,6 +35,7 @@ struct PodcastSearchView: View {
     @State private var filteredPodcasts: [PodcastInfoModel] = []
     @State private var filteredEpisodes: [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
     @State private var subscribeTask: Task<Void, Never>?
+    @State private var debounceTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,15 +66,25 @@ struct PodcastSearchView: View {
         }
         .onChange(of: searchText) { _, newValue in
             viewModel.searchText = newValue
-            if selectedTab == .applePodcasts && !newValue.isEmpty {
-                viewModel.performSearch()
+            // Debounce: wait before firing search/filter to avoid lag on every keystroke
+            debounceTask?.cancel()
+            debounceTask = Task {
+                try? await Task.sleep(for: .milliseconds(400))
+                guard !Task.isCancelled else { return }
+                if selectedTab == .applePodcasts && !newValue.isEmpty {
+                    viewModel.performSearch()
+                }
+                if selectedTab == .library {
+                    updateLibraryFilters()
+                }
             }
-            updateLibraryFilters()
         }
         .onChange(of: selectedTab) { _, newTab in
             if newTab == .applePodcasts && !searchText.isEmpty {
                 viewModel.searchText = searchText
                 viewModel.performSearch()
+            } else if newTab == .library {
+                updateLibraryFilters()
             }
         }
     }
@@ -145,14 +156,16 @@ struct PodcastSearchView: View {
                             artistName: podcast.artistName,
                             collectionId: String(podcast.collectionId),
                             applePodcastUrl: nil
-                        )) {
+                        )
+                        .onAppear { dismissKeyboard() }
+                        ) {
                             ApplePodcastRow(
                                 podcast: podcast,
                                 isSubscribed: isSubscribed(podcast),
                                 onSubscribe: { subscribeToPodcast(podcast) }
                             )
                         }
-                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
                     }
                 }
                 .listStyle(.plain)
@@ -204,6 +217,12 @@ struct PodcastSearchView: View {
     }
 
     // MARK: - Helper Methods
+
+    private func dismissKeyboard() {
+        #if os(iOS)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
+    }
 
     private func isSubscribed(_ podcast: Podcast) -> Bool {
         subscribedPodcasts.contains { $0.podcastInfo.title == podcast.collectionName }
@@ -353,6 +372,7 @@ struct LibraryPodcastRow: View {
             }
             .padding(.vertical, 4)
         }
+        .contentShape(Rectangle())
     }
 }
 
@@ -419,6 +439,7 @@ struct LibraryEpisodeRow: View {
             }
             .padding(.vertical, 4)
         }
+        .contentShape(Rectangle())
     }
 
     private func playEpisode() {
