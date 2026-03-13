@@ -256,6 +256,7 @@ struct LibraryView: View {
               PodcastGridCell(podcast: podcast)
             }
             .buttonStyle(.plain)
+            .contentShape(Rectangle())
             .contextMenu {
               // View episodes
               NavigationLink(destination: EpisodeListView(podcastModel: podcast)) {
@@ -605,6 +606,7 @@ struct DownloadedPodcastsGridView: View {
                 )
               }
               .buttonStyle(.plain)
+              .contentShape(Rectangle())
             }
           }
           .padding(.horizontal)

@@ -753,6 +753,7 @@ struct TopPodcastRow: View {
           .foregroundStyle(.secondary)
       }
       .padding(.vertical, 8)
+      .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
     .contextMenu {
@@ -1139,6 +1140,7 @@ private struct TrendingEpisodeRowWithNav: View {
     HStack(spacing: 0) {
       NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
         TrendingEpisodeRow(episode: episode, rank: rank)
+          .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
 
@@ -1283,6 +1285,7 @@ struct TrendingEpisodesListView: View {
         HStack(spacing: 0) {
           NavigationLink(value: TrendingEpisodeDetailDestination(from: episode)) {
             TrendingEpisodeRow(episode: episode, rank: index + 1)
+              .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
 
