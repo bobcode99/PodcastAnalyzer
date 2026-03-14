@@ -166,6 +166,62 @@ struct HomeView: View {
     }
   }
 
+  // MARK: - Up Next Context Menu Builder
+
+  private func upNextContextMenu(for episode: LibraryEpisode) -> UpNextContextMenu {
+    let checker = EpisodeStatusChecker(episode: episode)
+    return UpNextContextMenu(
+      episode: episode,
+      isStarred: episode.isStarred,
+      isCompleted: episode.isCompleted,
+      downloadState: checker.downloadState,
+      podcastModel: viewModel.findPodcastModel(for: episode.podcastTitle),
+      onToggleStar: { viewModel.toggleStar(for: episode) },
+      onTogglePlayed: { viewModel.togglePlayed(for: episode) },
+      onPlayNext: {
+        guard let audioURL = episode.episodeInfo.audioURL else { return }
+        let playbackEpisode = PlaybackEpisode(
+          id: episode.id,
+          title: episode.episodeInfo.title,
+          podcastTitle: episode.podcastTitle,
+          audioURL: audioURL,
+          imageURL: episode.imageURL,
+          episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+          pubDate: episode.episodeInfo.pubDate,
+          duration: episode.episodeInfo.duration,
+          guid: episode.episodeInfo.guid
+        )
+        EnhancedAudioManager.shared.playNext(playbackEpisode)
+      },
+      onDownload: {
+        DownloadManager.shared.downloadEpisode(
+          episode: episode.episodeInfo,
+          podcastTitle: episode.podcastTitle,
+          language: episode.language
+        )
+      },
+      onCancelDownload: {
+        DownloadManager.shared.cancelDownload(
+          episodeTitle: episode.episodeInfo.title,
+          podcastTitle: episode.podcastTitle
+        )
+      },
+      onDeleteDownload: {
+        DownloadManager.shared.deleteDownload(
+          episodeTitle: episode.episodeInfo.title,
+          podcastTitle: episode.podcastTitle
+        )
+      },
+      onRetryDownload: {
+        DownloadManager.shared.downloadEpisode(
+          episode: episode.episodeInfo,
+          podcastTitle: episode.podcastTitle,
+          language: episode.language
+        )
+      }
+    )
+  }
+
   // MARK: - Up Next Section
 
   @ViewBuilder
@@ -214,10 +270,7 @@ struct HomeView: View {
               }
               .buttonStyle(.plain)
               .contextMenu {
-                UpNextContextMenu(
-                  episode: episode,
-                  viewModel: viewModel
-                )
+                upNextContextMenu(for: episode)
               }
             }
           }
@@ -284,10 +337,7 @@ struct HomeView: View {
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
-                  UpNextContextMenu(
-                    episode: episode,
-                    viewModel: viewModel
-                  )
+                  upNextContextMenu(for: episode)
                 }
               }
             }
@@ -488,137 +538,6 @@ struct ForYouCard: View {
     }
     .onDisappear {
       statusObserver?.cleanup()
-    }
-  }
-}
-
-// MARK: - Up Next Context Menu
-
-struct UpNextContextMenu: View {
-  let episode: LibraryEpisode
-  var viewModel: HomeViewModel
-
-  private var downloadManager: DownloadManager { DownloadManager.shared }
-  private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
-
-  private var statusChecker: EpisodeStatusChecker {
-    EpisodeStatusChecker(episode: episode)
-  }
-
-  private var downloadState: DownloadState { statusChecker.downloadState }
-  private var isDownloaded: Bool { statusChecker.isDownloaded }
-
-  var body: some View {
-    // Go to Show
-    if let podcastModel = viewModel.findPodcastModel(for: episode.podcastTitle) {
-      NavigationLink(destination: EpisodeListView(podcastModel: podcastModel)) {
-        Label("Go to Show", systemImage: "square.stack")
-      }
-
-      Divider()
-    }
-
-    // Star/Unstar
-    Button {
-      viewModel.toggleStar(for: episode)
-    } label: {
-      Label(
-        episode.isStarred ? "Unstar" : "Star",
-        systemImage: episode.isStarred ? "star.fill" : "star"
-      )
-    }
-
-    // Mark as Played/Unplayed
-    Button {
-      viewModel.togglePlayed(for: episode)
-    } label: {
-      Label(
-        episode.isCompleted ? "Mark as Unplayed" : "Mark as Played",
-        systemImage: episode.isCompleted ? "arrow.counterclockwise" : "checkmark.circle"
-      )
-    }
-
-    Divider()
-
-    // Play Next
-    if let audioURL = episode.episodeInfo.audioURL {
-      Button {
-        let playbackEpisode = PlaybackEpisode(
-          id: episode.id,
-          title: episode.episodeInfo.title,
-          podcastTitle: episode.podcastTitle,
-          audioURL: audioURL,
-          imageURL: episode.imageURL,
-          episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
-          pubDate: episode.episodeInfo.pubDate,
-          duration: episode.episodeInfo.duration,
-          guid: episode.episodeInfo.guid
-        )
-        audioManager.playNext(playbackEpisode)
-      } label: {
-        Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
-      }
-
-      Divider()
-    }
-
-    // Download actions
-    switch downloadState {
-    case .notDownloaded:
-      Button {
-        downloadManager.downloadEpisode(
-          episode: episode.episodeInfo,
-          podcastTitle: episode.podcastTitle,
-          language: episode.language
-        )
-      } label: {
-        Label("Download", systemImage: "arrow.down.circle")
-      }
-
-    case .downloading:
-      Button {
-        downloadManager.cancelDownload(
-          episodeTitle: episode.episodeInfo.title,
-          podcastTitle: episode.podcastTitle
-        )
-      } label: {
-        Label("Cancel Download", systemImage: "xmark.circle")
-      }
-
-    case .finishing:
-      Label("Saving...", systemImage: "arrow.down.circle.dotted")
-
-    case .downloaded:
-      Button(role: .destructive) {
-        downloadManager.deleteDownload(
-          episodeTitle: episode.episodeInfo.title,
-          podcastTitle: episode.podcastTitle
-        )
-      } label: {
-        Label("Delete Download", systemImage: "trash")
-      }
-
-    case .failed:
-      Button {
-        downloadManager.downloadEpisode(
-          episode: episode.episodeInfo,
-          podcastTitle: episode.podcastTitle,
-          language: episode.language
-        )
-      } label: {
-        Label("Retry Download", systemImage: "arrow.clockwise")
-      }
-    }
-
-    Divider()
-
-    // Share
-    if let audioURL = episode.episodeInfo.audioURL, let url = URL(string: audioURL) {
-      Button {
-        PlatformShareSheet.share(url: url)
-      } label: {
-        Label("Share Episode", systemImage: "square.and.arrow.up")
-      }
     }
   }
 }
