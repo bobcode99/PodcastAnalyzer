@@ -8,7 +8,7 @@
 import Foundation
 
 /// Utility for parsing SRT subtitle files and extracting transcript text
-struct SRTParser {
+nonisolated struct SRTParser {
 
     /// Parse SRT content and extract plain text transcript
     /// - Parameter srtContent: Raw SRT file content

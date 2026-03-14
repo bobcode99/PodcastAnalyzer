@@ -18,7 +18,18 @@ import UIKit
 
 struct LibraryView: View {
   @State private var viewModel = LibraryViewModel(modelContext: nil)
+  @AppStorage("showEpisodeArtwork") private var showEpisodeArtwork = true
   @Environment(\.modelContext) private var modelContext
+
+  // Use @Query for instant persistence and automatic updates
+  @Query(
+    filter: #Predicate<PodcastInfoModel> { $0.isSubscribed },
+    sort: \.lastUpdated,
+    order: .reverse
+  ) private var subscribedPodcasts: [PodcastInfoModel]
+
+  // Cached sorted podcasts to avoid re-sorting on every render
+  @State private var sortedPodcasts: [PodcastInfoModel] = []
 
   // Grid layout: 2 columns
   private let columns = [
@@ -30,54 +41,64 @@ struct LibraryView: View {
   @State private var podcastToUnsubscribe: PodcastInfoModel?
   @State private var showUnsubscribeConfirmation = false
 
+  // Notification observers
+  @State private var syncObserver: NSObjectProtocol?
+  @State private var downloadObserver: NSObjectProtocol?
+
   var body: some View {
-    NavigationStack {
-      ZStack {
-        ScrollView {
-          VStack(spacing: 24) {
-            // Quick access cards
-            quickAccessSection
-              .padding(.horizontal, 16)
+    ZStack {
+      ScrollView {
+        VStack(spacing: 24) {
+          // Quick access cards
+          quickAccessSection
+            .padding(.horizontal, 16)
 
-            // Subscribed Podcasts Grid
-            podcastsGridSection
-              .padding(.horizontal, 16)
-          }
-          .padding(.top, 8)
-          .padding(.bottom, 40)
+          // Subscribed Podcasts Grid
+          podcastsGridSection
+            .padding(.horizontal, 16)
         }
+        .padding(.top, 8)
+        .padding(.bottom, 40)
+      }
 
-        if viewModel.isLoading && viewModel.podcastInfoModelList.isEmpty {
-          ProgressView("Loading Library...")
-            .scaleEffect(1.5)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.platformBackground)
-        }
-      }
-      .navigationTitle(Constants.libraryString)
-      .toolbar {
-        ToolbarItem(placement: .primaryAction) {
-          Button(action: {
-            Task {
-              await viewModel.refreshAllPodcasts()
-            }
-          }) {
-            Image(systemName: "arrow.clockwise")
-          }
-          .disabled(viewModel.isLoading)
-        }
-      }
-      .platformToolbarTitleDisplayMode()
-      .refreshable {
-        await viewModel.refreshAllPodcasts()
+      // Initial loading state only when truly empty
+      if viewModel.isLoading && subscribedPodcasts.isEmpty
+          && viewModel.savedEpisodes.isEmpty && viewModel.downloadedEpisodes.isEmpty {
+        ProgressView("Loading Library...")
+          .scaleEffect(1.5)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .background(Color.platformBackground)
       }
     }
+    .navigationTitle(Constants.libraryString)
+    .platformToolbarTitleDisplayMode()
+    .refreshable {
+      await viewModel.refreshAllPodcasts()
+    }
     .onAppear {
-      // This is the key: set the context once
+      // Set the context and initial podcasts
       viewModel.setModelContext(modelContext)
+      viewModel.setPodcasts(subscribedPodcasts)
+      updateSortedPodcasts()
+      setupNotificationObservers()
+      // Refresh saved/downloaded counts in case they changed while view was off-screen
+      Task {
+        await viewModel.refreshSavedEpisodes()
+        await viewModel.refreshDownloadedEpisodes()
+      }
+    }
+    .onChange(of: subscribedPodcasts) { _, newPodcasts in
+      // Only update if count or IDs actually changed to avoid re-evaluation loops
+      if newPodcasts.map(\.id) != sortedPodcasts.map(\.id) {
+        viewModel.setPodcasts(newPodcasts)
+        withAnimation(.easeInOut(duration: 0.3)) {
+          updateSortedPodcasts()
+        }
+      }
     }
     .onDisappear {
       viewModel.cleanup()
+      removeNotificationObservers()
     }
     .confirmationDialog(
       "Unsubscribe from Podcast",
@@ -108,58 +129,105 @@ struct LibraryView: View {
       // Row of quick access cards
       HStack(spacing: 12) {
         // Saved (Starred) card
-        NavigationLink(destination: SavedEpisodesView(viewModel: viewModel)) {
+        NavigationLink(destination: SavedEpisodesView(viewModel: viewModel, showEpisodeArtwork: showEpisodeArtwork)) {
           QuickAccessCard(
             icon: "star.fill",
             iconColor: .yellow,
             title: "Saved",
-            count: viewModel.savedEpisodes.count
+            count: viewModel.savedEpisodes.count,
+            isLoading: false
           )
         }
         .buttonStyle(.plain)
 
-        // Downloaded card
-        NavigationLink(destination: DownloadedEpisodesView(viewModel: viewModel)) {
+        // Downloaded card - include actively downloading episodes in the count
+        NavigationLink(destination: DownloadedPodcastsGridView(viewModel: viewModel)) {
           QuickAccessCard(
             icon: "arrow.down.circle.fill",
             iconColor: .green,
             title: "Downloaded",
-            count: viewModel.downloadedEpisodes.count
+            count: viewModel.downloadedEpisodes.count + viewModel.downloadingEpisodes.count,
+            isLoading: false
           )
         }
         .buttonStyle(.plain)
       }
 
       // Latest episodes row
-      NavigationLink(destination: LatestEpisodesView(viewModel: viewModel)) {
+      NavigationLink(destination: LatestEpisodesView(viewModel: viewModel, showEpisodeArtwork: showEpisodeArtwork)) {
         HStack {
           HStack(spacing: 8) {
             Image(systemName: "clock.fill")
               .font(.system(size: 16))
-              .foregroundColor(.blue)
+              .foregroundStyle(.blue)
             Text("Latest Episodes")
               .font(.subheadline)
               .fontWeight(.medium)
-              .foregroundColor(.primary)
+              .foregroundStyle(.primary)
           }
 
           Spacer()
 
           HStack(spacing: 4) {
-            Text("\(viewModel.latestEpisodes.count)")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            Image(systemName: "chevron.right")
-              .font(.caption)
-              .foregroundColor(.secondary)
+             Text("\(viewModel.latestEpisodes.count)")
+               .font(.caption)
+               .foregroundStyle(.secondary)
+             Image(systemName: "chevron.right")
+               .font(.caption)
+               .foregroundStyle(.secondary)
           }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color.platformSystemGray6)
-        .cornerRadius(12)
+        .glassEffect(.regular, in: .rect(cornerRadius: 12))
       }
       .buttonStyle(.plain)
+    }
+  }
+
+  // MARK: - Helper Methods
+
+  private func updateSortedPodcasts() {
+    sortedPodcasts = subscribedPodcasts.sorted { p1, p2 in
+      let date1 = p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      let date2 = p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
+      return date1 > date2
+    }
+  }
+
+  private func setupNotificationObservers() {
+    // Listen for sync completion to refresh data
+    syncObserver = NotificationCenter.default.addObserver(
+      forName: .podcastSyncCompleted,
+      object: nil,
+      queue: .main
+    ) { @Sendable [viewModel] _ in
+      Task { @MainActor in
+        // Trigger view model refresh - it will use its own model context
+        viewModel.refreshData()
+      }
+    }
+
+    // Listen for download completion to update counts
+    downloadObserver = NotificationCenter.default.addObserver(
+      forName: .episodeDownloadCompleted,
+      object: nil,
+      queue: .main
+    ) { @Sendable [viewModel] _ in
+      Task { @MainActor in
+        viewModel.refreshData()
+      }
+    }
+  }
+
+  private func removeNotificationObservers() {
+    if let observer = syncObserver {
+      NotificationCenter.default.removeObserver(observer)
+      syncObserver = nil
+    }
+    if let observer = downloadObserver {
+      NotificationCenter.default.removeObserver(observer)
+      downloadObserver = nil
     }
   }
 
@@ -174,16 +242,16 @@ struct LibraryView: View {
 
         Spacer()
 
-        Text("\(viewModel.podcastsSortedByRecentUpdate.count)")
-          .font(.subheadline)
-          .foregroundColor(.secondary)
+          Text("\(sortedPodcasts.count)")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
       }
 
-      if viewModel.podcastsSortedByRecentUpdate.isEmpty {
+      if sortedPodcasts.isEmpty {
         emptyPodcastsView
       } else {
         LazyVGrid(columns: columns, spacing: 16) {
-          ForEach(viewModel.podcastsSortedByRecentUpdate) { podcast in
+          ForEach(sortedPodcasts) { podcast in
             NavigationLink(destination: EpisodeListView(podcastModel: podcast)) {
               PodcastGridCell(podcast: podcast)
             }
@@ -258,12 +326,12 @@ struct LibraryView: View {
     VStack(spacing: 12) {
       Image(systemName: "square.stack.3d.up")
         .font(.system(size: 40))
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       Text("No Subscriptions")
         .font(.headline)
       Text("Search and subscribe to podcasts to build your library")
         .font(.caption)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
     }
     .frame(maxWidth: .infinity)
@@ -278,19 +346,25 @@ struct QuickAccessCard: View {
   let iconColor: Color
   let title: String
   let count: Int
+  var isLoading: Bool = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack {
         Image(systemName: icon)
           .font(.system(size: 20))
-          .foregroundColor(iconColor)
+          .foregroundStyle(iconColor)
 
         Spacer()
 
-        Image(systemName: "chevron.right")
-          .font(.caption)
-          .foregroundColor(.secondary)
+        if isLoading {
+          ProgressView()
+            .scaleEffect(0.6)
+        } else {
+          Image(systemName: "chevron.right")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
 
       Spacer()
@@ -299,17 +373,16 @@ struct QuickAccessCard: View {
         Text(title)
           .font(.subheadline)
           .fontWeight(.semibold)
-          .foregroundColor(.primary)
+          .foregroundStyle(.primary)
 
         Text("\(count) episodes")
           .font(.caption)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
     }
     .padding(12)
     .frame(maxWidth: .infinity, minHeight: 90)
-    .background(Color.platformSystemGray6)
-    .cornerRadius(12)
+    .glassEffect(Glass.regular, in: .rect(cornerRadius: 12))
   }
 }
 
@@ -318,41 +391,43 @@ struct QuickAccessCard: View {
 struct PodcastGridCell: View {
   let podcast: PodcastInfoModel
 
-  private var latestEpisodeDate: String? {
-    guard let date = podcast.podcastInfo.episodes.first?.pubDate else { return nil }
+  private static let relativeDateFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
     formatter.unitsStyle = .abbreviated
-    return formatter.localizedString(for: date, relativeTo: Date())
+    return formatter
+  }()
+
+  private var latestEpisodeDate: String? {
+    guard let date = podcast.podcastInfo.episodes.first?.pubDate else { return nil }
+    return Self.relativeDateFormatter.localizedString(for: date, relativeTo: Date())
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       // Artwork - using CachedAsyncImage for better performance
-      GeometryReader { geo in
-        CachedAsyncImage(url: URL(string: podcast.podcastInfo.imageURL)) { image in
-          image.resizable().aspectRatio(contentMode: .fill)
-        } placeholder: {
-          Color.gray.opacity(0.2)
-            .overlay(ProgressView().scaleEffect(0.5))
-        }
-        .frame(width: geo.size.width, height: geo.size.width)
-        .cornerRadius(10)
-        .clipped()
+      // Fixed aspect ratio instead of GeometryReader to prevent excessive re-evaluation
+      CachedAsyncImage(url: URL(string: podcast.podcastInfo.imageURL)) { image in
+        image.resizable().aspectRatio(contentMode: .fill)
+      } placeholder: {
+        Color.gray.opacity(0.2)
+          .overlay(ProgressView().scaleEffect(0.5))
       }
       .aspectRatio(1, contentMode: .fit)
+      .clipShape(.rect(cornerRadius: 10))
+      .clipped()
 
       // Podcast title
       Text(podcast.podcastInfo.title)
         .font(.caption)
         .fontWeight(.medium)
         .lineLimit(2)
-        .foregroundColor(.primary)
+        .foregroundStyle(.primary)
 
       // Latest episode date
       if let dateStr = latestEpisodeDate {
         Text(dateStr)
           .font(.caption2)
-          .foregroundColor(.secondary)
+          .foregroundStyle(.secondary)
       }
     }
   }
@@ -362,10 +437,11 @@ struct PodcastGridCell: View {
 
 struct SavedEpisodesView: View {
   @Bindable var viewModel: LibraryViewModel
+  let showEpisodeArtwork: Bool
   @Environment(\.modelContext) private var modelContext
-  @State private var settingsViewModel = SettingsViewModel()
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
+  @State private var episodeModels: [String: EpisodeDownloadModel] = [:]
 
   var body: some View {
     Group {
@@ -375,8 +451,8 @@ struct SavedEpisodesView: View {
         List(viewModel.filteredSavedEpisodes) { episode in
           EpisodeRowView(
             libraryEpisode: episode,
-            episodeModel: fetchEpisodeModel(for: episode),
-            showArtwork: settingsViewModel.showEpisodeArtwork,
+            episodeModel: episodeModels[episode.id],
+            showArtwork: showEpisodeArtwork,
             onToggleStar: { toggleStar(episode) },
             onDownload: { downloadEpisode(episode) },
             onDeleteRequested: {
@@ -400,6 +476,10 @@ struct SavedEpisodesView: View {
     #endif
     .onAppear {
       viewModel.setModelContext(modelContext)
+      batchFetchEpisodeModels()
+      Task {
+        await viewModel.refreshSavedEpisodes()
+      }
     }
     .confirmationDialog(
       "Delete Download",
@@ -424,12 +504,12 @@ struct SavedEpisodesView: View {
     VStack(spacing: 16) {
       Image(systemName: "star")
         .font(.system(size: 50))
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       Text("No Saved Episodes")
         .font(.headline)
       Text("Star episodes to save them here for later")
         .font(.subheadline)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
     }
     .padding()
@@ -438,30 +518,30 @@ struct SavedEpisodesView: View {
 
   // MARK: - Helper Methods
 
-  private func fetchEpisodeModel(for episode: LibraryEpisode) -> EpisodeDownloadModel? {
-    let episodeId = episode.id
-    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      predicate: #Predicate { $0.id == episodeId }
-    )
-    return try? modelContext.fetch(descriptor).first
+  private func batchFetchEpisodeModels() {
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+    guard let results = try? modelContext.fetch(descriptor) else { return }
+    var models: [String: EpisodeDownloadModel] = [:]
+    for model in results { models[model.id] = model }
+    episodeModels = models
   }
 
   private func toggleStar(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isStarred.toggle()
       try? modelContext.save()
-      viewModel.setModelContext(modelContext)
+      Task { await viewModel.refreshSavedEpisodes() }
     }
   }
 
   private func togglePlayed(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isCompleted.toggle()
       if !model.isCompleted {
         model.lastPlaybackPosition = 0
       }
       try? modelContext.save()
-      viewModel.setModelContext(modelContext)
+      Task { await viewModel.refreshSavedEpisodes() }
     }
   }
 
@@ -478,7 +558,101 @@ struct SavedEpisodesView: View {
       episodeTitle: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle
     )
-    viewModel.setModelContext(modelContext)
+    if let model = episodeModels[episode.id] {
+      model.localAudioPath = nil
+      try? modelContext.save()
+    }
+    Task { await viewModel.refreshSavedEpisodes() }
+  }
+}
+
+// MARK: - Downloaded Podcasts Grid View (Sub-page)
+
+struct DownloadedPodcastsGridView: View {
+  @Bindable var viewModel: LibraryViewModel
+  @Environment(\.modelContext) private var modelContext
+
+  private let columns = [
+    GridItem(.flexible(), spacing: 12),
+    GridItem(.flexible(), spacing: 12)
+  ]
+
+  var body: some View {
+    Group {
+      if viewModel.podcastsWithDownloads.isEmpty {
+        VStack(spacing: 16) {
+          Image(systemName: "arrow.down.circle")
+            .font(.system(size: 50))
+            .foregroundStyle(.secondary)
+          Text("No Downloads")
+            .font(.headline)
+          Text("Downloaded episodes will appear here")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        ScrollView {
+          LazyVGrid(columns: columns, spacing: 16) {
+            ForEach(viewModel.podcastsWithDownloads, id: \.podcast.id) { item in
+              NavigationLink(destination: EpisodeListView(
+                podcastModel: item.podcast,
+                initialFilter: .downloaded
+              )) {
+                DownloadedPodcastCell(
+                  podcast: item.podcast,
+                  downloadCount: item.downloadCount
+                )
+              }
+              .buttonStyle(.plain)
+            }
+          }
+          .padding(.horizontal)
+        }
+      }
+    }
+    .navigationTitle("Downloaded")
+    #if os(iOS)
+    .navigationBarTitleDisplayMode(.inline)
+    #endif
+    .refreshable {
+      await viewModel.refreshDownloadedEpisodes()
+    }
+    .onAppear {
+      viewModel.setModelContext(modelContext)
+      Task { await viewModel.refreshDownloadedEpisodes() }
+    }
+  }
+}
+
+// MARK: - Downloaded Podcast Cell
+
+struct DownloadedPodcastCell: View {
+  let podcast: PodcastInfoModel
+  let downloadCount: Int
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      CachedAsyncImage(url: URL(string: podcast.podcastInfo.imageURL)) { image in
+        image.resizable().aspectRatio(contentMode: .fill)
+      } placeholder: {
+        Color.gray.opacity(0.2)
+          .overlay(ProgressView().scaleEffect(0.5))
+      }
+      .aspectRatio(1, contentMode: .fit)
+      .clipShape(.rect(cornerRadius: 10))
+      .clipped()
+
+      Text(podcast.podcastInfo.title)
+        .font(.caption)
+        .fontWeight(.medium)
+        .lineLimit(2)
+        .foregroundStyle(.primary)
+
+      Text("\(downloadCount) downloaded")
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    }
   }
 }
 
@@ -486,34 +660,66 @@ struct SavedEpisodesView: View {
 
 struct DownloadedEpisodesView: View {
   @Bindable var viewModel: LibraryViewModel
+  let showEpisodeArtwork: Bool
   @Environment(\.modelContext) private var modelContext
-  @State private var settingsViewModel = SettingsViewModel()
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
+  @State private var episodeModels: [String: EpisodeDownloadModel] = [:]
 
   var body: some View {
     Group {
-      if viewModel.downloadedEpisodes.isEmpty {
+      if viewModel.downloadedEpisodes.isEmpty && viewModel.downloadingEpisodes.isEmpty {
         emptyStateView
       } else {
-        List(viewModel.filteredDownloadedEpisodes) { episode in
-          EpisodeRowView(
-            libraryEpisode: episode,
-            episodeModel: fetchEpisodeModel(for: episode),
-            showArtwork: settingsViewModel.showEpisodeArtwork,
-            onToggleStar: { toggleStar(episode) },
-            onDownload: { downloadEpisode(episode) },
-            onDeleteRequested: {
-              episodeToDelete = episode
-              showDeleteConfirmation = true
-            },
-            onTogglePlayed: { togglePlayed(episode) }
-          )
-          .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        List {
+          // Downloading Section
+          if !viewModel.downloadingEpisodes.isEmpty {
+            Section {
+              ForEach(viewModel.downloadingEpisodes) { downloading in
+                DownloadingEpisodeRow(episode: downloading)
+                  .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+              }
+            } header: {
+              Text("Downloading")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
+                .textCase(nil)
+            }
+          }
+
+          // Downloaded Section
+          if !viewModel.filteredDownloadedEpisodes.isEmpty {
+            Section {
+              ForEach(viewModel.filteredDownloadedEpisodes) { episode in
+                EpisodeRowView(
+                  libraryEpisode: episode,
+                  episodeModel: episodeModels[episode.id],
+                  showArtwork: showEpisodeArtwork,
+                  onToggleStar: { toggleStar(episode) },
+                  onDownload: { downloadEpisode(episode) },
+                  onDeleteRequested: {
+                    episodeToDelete = episode
+                    showDeleteConfirmation = true
+                  },
+                  onTogglePlayed: { togglePlayed(episode) }
+                )
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+              }
+            } header: {
+              if !viewModel.downloadingEpisodes.isEmpty {
+                Text("Downloaded")
+                  .font(.subheadline)
+                  .fontWeight(.semibold)
+                  .foregroundStyle(.primary)
+                  .textCase(nil)
+              }
+            }
+          }
         }
         .listStyle(.plain)
         .refreshable {
-          viewModel.setModelContext(modelContext)
+          await viewModel.refreshDownloadedEpisodes()
         }
       }
     }
@@ -524,6 +730,10 @@ struct DownloadedEpisodesView: View {
     #endif
     .onAppear {
       viewModel.setModelContext(modelContext)
+      batchFetchEpisodeModels()
+      Task {
+        await viewModel.refreshDownloadedEpisodes()
+      }
     }
     .confirmationDialog(
       "Delete Download",
@@ -548,12 +758,12 @@ struct DownloadedEpisodesView: View {
     VStack(spacing: 16) {
       Image(systemName: "arrow.down.circle")
         .font(.system(size: 50))
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       Text("No Downloads")
         .font(.headline)
       Text("Downloaded episodes will appear here for offline listening")
         .font(.subheadline)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
     }
     .padding()
@@ -562,30 +772,30 @@ struct DownloadedEpisodesView: View {
 
   // MARK: - Helper Methods
 
-  private func fetchEpisodeModel(for episode: LibraryEpisode) -> EpisodeDownloadModel? {
-    let episodeId = episode.id
-    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      predicate: #Predicate { $0.id == episodeId }
-    )
-    return try? modelContext.fetch(descriptor).first
+  private func batchFetchEpisodeModels() {
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+    guard let results = try? modelContext.fetch(descriptor) else { return }
+    var models: [String: EpisodeDownloadModel] = [:]
+    for model in results { models[model.id] = model }
+    episodeModels = models
   }
 
   private func toggleStar(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isStarred.toggle()
       try? modelContext.save()
-      viewModel.setModelContext(modelContext)
+      Task { await viewModel.refreshDownloadedEpisodes() }
     }
   }
 
   private func togglePlayed(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isCompleted.toggle()
       if !model.isCompleted {
         model.lastPlaybackPosition = 0
       }
       try? modelContext.save()
-      viewModel.setModelContext(modelContext)
+      Task { await viewModel.refreshDownloadedEpisodes() }
     }
   }
 
@@ -602,7 +812,76 @@ struct DownloadedEpisodesView: View {
       episodeTitle: episode.episodeInfo.title,
       podcastTitle: episode.podcastTitle
     )
-    viewModel.setModelContext(modelContext)
+    if let model = episodeModels[episode.id] {
+      model.localAudioPath = nil
+      try? modelContext.save()
+    }
+    Task { await viewModel.refreshDownloadedEpisodes() }
+  }
+}
+
+// MARK: - Downloading Episode Row
+
+struct DownloadingEpisodeRow: View {
+  let episode: DownloadingEpisode
+
+  private var statusText: String {
+    switch episode.state {
+    case .downloading(let progress):
+      return "\(Int(progress * 100))%"
+    case .finishing:
+      return "Finishing..."
+    default:
+      return ""
+    }
+  }
+
+  var body: some View {
+    HStack(spacing: 12) {
+      // Artwork - use CachedAsyncImage for better memory management
+      CachedAsyncImage(url: URL(string: episode.imageURL ?? "")) { image in
+        image
+          .resizable()
+          .aspectRatio(contentMode: .fill)
+      } placeholder: {
+        Rectangle()
+          .fill(Color.gray.opacity(0.2))
+          .overlay(
+            Image(systemName: "music.note")
+              .foregroundStyle(.gray)
+          )
+      }
+      .frame(width: 56, height: 56)
+      .clipShape(.rect(cornerRadius: 8))
+
+      // Title and progress
+      VStack(alignment: .leading, spacing: 4) {
+        Text(episode.episodeTitle)
+          .font(.subheadline)
+          .fontWeight(.medium)
+          .lineLimit(2)
+
+        Text(episode.podcastTitle)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+
+        // Progress bar
+        ProgressView(value: episode.progress)
+          .progressViewStyle(.linear)
+          .tint(.blue)
+          .frame(height: 4)
+      }
+
+      Spacer()
+
+      // Status
+      Text(statusText)
+        .font(.caption)
+        .foregroundStyle(.blue)
+        .fontWeight(.medium)
+    }
+    .padding(.vertical, 4)
   }
 }
 
@@ -610,10 +889,11 @@ struct DownloadedEpisodesView: View {
 
 struct LatestEpisodesView: View {
   @Bindable var viewModel: LibraryViewModel
+  let showEpisodeArtwork: Bool
   @Environment(\.modelContext) private var modelContext
-  @State private var settingsViewModel = SettingsViewModel()
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
+  @State private var episodeModels: [String: EpisodeDownloadModel] = [:]
 
   var body: some View {
     Group {
@@ -623,8 +903,8 @@ struct LatestEpisodesView: View {
         List(viewModel.filteredLatestEpisodes) { episode in
           EpisodeRowView(
             libraryEpisode: episode,
-            episodeModel: fetchEpisodeModel(for: episode),
-            showArtwork: settingsViewModel.showEpisodeArtwork,
+            episodeModel: episodeModels[episode.id],
+            showArtwork: showEpisodeArtwork,
             onToggleStar: { toggleStar(episode) },
             onDownload: { downloadEpisode(episode) },
             onDeleteRequested: {
@@ -648,6 +928,7 @@ struct LatestEpisodesView: View {
     #endif
     .onAppear {
       viewModel.setModelContext(modelContext)
+      batchFetchEpisodeModels()
     }
     .confirmationDialog(
       "Delete Download",
@@ -672,12 +953,12 @@ struct LatestEpisodesView: View {
     VStack(spacing: 16) {
       Image(systemName: "clock")
         .font(.system(size: 50))
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
       Text("No Episodes")
         .font(.headline)
       Text("Subscribe to podcasts to see latest episodes")
         .font(.subheadline)
-        .foregroundColor(.secondary)
+        .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
     }
     .padding()
@@ -686,21 +967,20 @@ struct LatestEpisodesView: View {
 
   // MARK: - Helper Methods
 
-  private func fetchEpisodeModel(for episode: LibraryEpisode) -> EpisodeDownloadModel? {
-    let episodeId = episode.id
-    let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-      predicate: #Predicate { $0.id == episodeId }
-    )
-    return try? modelContext.fetch(descriptor).first
+  private func batchFetchEpisodeModels() {
+    let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+    guard let results = try? modelContext.fetch(descriptor) else { return }
+    var models: [String: EpisodeDownloadModel] = [:]
+    for model in results { models[model.id] = model }
+    episodeModels = models
   }
 
   private func toggleStar(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isStarred.toggle()
       try? modelContext.save()
       viewModel.setModelContext(modelContext)
     } else if let audioURL = episode.episodeInfo.audioURL {
-      // Create model if it doesn't exist
       let model = EpisodeDownloadModel(
         episodeTitle: episode.episodeInfo.title,
         podcastTitle: episode.podcastTitle,
@@ -711,12 +991,13 @@ struct LatestEpisodesView: View {
       model.isStarred = true
       modelContext.insert(model)
       try? modelContext.save()
+      episodeModels[episode.id] = model
       viewModel.setModelContext(modelContext)
     }
   }
 
   private func togglePlayed(_ episode: LibraryEpisode) {
-    if let model = fetchEpisodeModel(for: episode) {
+    if let model = episodeModels[episode.id] {
       model.isCompleted.toggle()
       if !model.isCompleted {
         model.lastPlaybackPosition = 0
@@ -724,7 +1005,6 @@ struct LatestEpisodesView: View {
       try? modelContext.save()
       viewModel.setModelContext(modelContext)
     } else if let audioURL = episode.episodeInfo.audioURL {
-      // Create model if it doesn't exist
       let model = EpisodeDownloadModel(
         episodeTitle: episode.episodeInfo.title,
         podcastTitle: episode.podcastTitle,
@@ -735,6 +1015,7 @@ struct LatestEpisodesView: View {
       model.isCompleted = true
       modelContext.insert(model)
       try? modelContext.save()
+      episodeModels[episode.id] = model
       viewModel.setModelContext(modelContext)
     }
   }
@@ -765,6 +1046,7 @@ struct LibraryEpisodeContextMenu: View {
 
   private let downloadManager = DownloadManager.shared
   private let audioManager = EnhancedAudioManager.shared
+  @State private var cachedPodcastModel: PodcastInfoModel?
 
   private var statusChecker: EpisodeStatusChecker {
     EpisodeStatusChecker(episode: episode)
@@ -776,89 +1058,94 @@ struct LibraryEpisodeContextMenu: View {
   private var playbackURL: String { statusChecker.playbackURL }
 
   var body: some View {
-    // Go to Show
-    goToShowButton
+    Group {
+      // Go to Show
+      goToShowButton
 
-    Divider()
+      Divider()
 
-    // Play episode
-    Button {
-      playEpisode()
-    } label: {
-      Label("Play Episode", systemImage: "play.fill")
-    }
-    .disabled(episode.episodeInfo.audioURL == nil)
-
-    // Play Next
-    Button {
-      addToPlayNext()
-    } label: {
-      Label("Play Next", systemImage: "text.insert")
-    }
-    .disabled(episode.episodeInfo.audioURL == nil)
-
-    Divider()
-
-    // Star/Unstar
-    Button {
-      toggleStar()
-    } label: {
-      Label(
-        episode.isStarred ? "Remove from Saved" : "Save Episode",
-        systemImage: episode.isStarred ? "star.slash" : "star"
-      )
-    }
-
-    // Mark as Played/Unplayed
-    Button {
-      togglePlayed()
-    } label: {
-      Label(
-        episode.isCompleted ? "Mark as Unplayed" : "Mark as Played",
-        systemImage: episode.isCompleted ? "arrow.counterclockwise" : "checkmark.circle"
-      )
-    }
-
-    Divider()
-
-    // Download/Delete download
-    if isDownloaded {
-      Button(role: .destructive) {
-        deleteDownload()
-      } label: {
-        Label("Delete Download", systemImage: "trash")
-      }
-    } else if case .downloading = downloadState {
+      // Play episode
       Button {
-        cancelDownload()
+        playEpisode()
       } label: {
-        Label("Cancel Download", systemImage: "xmark.circle")
+        Label("Play Episode", systemImage: "play.fill")
       }
-    } else if episode.episodeInfo.audioURL != nil {
+      .disabled(episode.episodeInfo.audioURL == nil)
+
+      // Play Next
       Button {
-        startDownload()
+        addToPlayNext()
       } label: {
-        Label("Download", systemImage: "arrow.down.circle")
+        Label("Play Next", systemImage: "text.insert")
+      }
+      .disabled(episode.episodeInfo.audioURL == nil)
+
+      Divider()
+
+      // Star/Unstar
+      Button {
+        toggleStar()
+      } label: {
+        Label(
+          episode.isStarred ? "Remove from Saved" : "Save Episode",
+          systemImage: episode.isStarred ? "star.slash" : "star"
+        )
+      }
+
+      // Mark as Played/Unplayed
+      Button {
+        togglePlayed()
+      } label: {
+        Label(
+          episode.isCompleted ? "Mark as Unplayed" : "Mark as Played",
+          systemImage: episode.isCompleted ? "arrow.counterclockwise" : "checkmark.circle"
+        )
+      }
+
+      Divider()
+
+      // Download/Delete download
+      if isDownloaded {
+        Button(role: .destructive) {
+          deleteDownload()
+        } label: {
+          Label("Delete Download", systemImage: "trash")
+        }
+      } else if case .downloading = downloadState {
+        Button {
+          cancelDownload()
+        } label: {
+          Label("Cancel Download", systemImage: "xmark.circle")
+        }
+      } else if episode.episodeInfo.audioURL != nil {
+        Button {
+          startDownload()
+        } label: {
+          Label("Download", systemImage: "arrow.down.circle")
+        }
+      }
+
+      Divider()
+
+      // Share
+      Button {
+        shareEpisode()
+      } label: {
+        Label("Share", systemImage: "square.and.arrow.up")
       }
     }
-
-    Divider()
-
-    // Share
-    Button {
-      shareEpisode()
-    } label: {
-      Label("Share", systemImage: "square.and.arrow.up")
+    .onAppear {
+      let title = episode.podcastTitle
+      let descriptor = FetchDescriptor<PodcastInfoModel>(
+        predicate: #Predicate { $0.title == title }
+      )
+      cachedPodcastModel = try? modelContext.fetch(descriptor).first
     }
   }
 
   @ViewBuilder
   private var goToShowButton: some View {
-    let title = episode.podcastTitle
-    let descriptor = FetchDescriptor<PodcastInfoModel>(
-      predicate: #Predicate { $0.title == title }
-    )
-    if let podcastModel = try? modelContext.fetch(descriptor).first {
+    if let podcastModel = cachedPodcastModel {
       NavigationLink(destination: EpisodeListView(podcastModel: podcastModel)) {
         Label("Go to Show", systemImage: "square.stack")
       }

@@ -12,7 +12,7 @@ import SwiftUI
 
 // MARK: - Episode Key Utilities
 
-enum EpisodeKeyUtils {
+nonisolated enum EpisodeKeyUtils {
   /// Unit Separator (U+001F) used as delimiter between podcast title and episode title
   static let delimiter = "\u{1F}"
 
@@ -113,7 +113,7 @@ struct EpisodeStatusChecker {
   /// Get the playback URL (local file if downloaded, otherwise remote URL)
   var playbackURL: String {
     if let path = localAudioPath {
-      return "file://" + path
+      return URL(fileURLWithPath: path).absoluteString
     }
     return audioURL ?? ""
   }
@@ -377,7 +377,7 @@ final class EpisodeStatusObserver {
 
   var playbackURL: String {
     if case .downloaded(let path) = downloadState {
-      return "file://" + path
+      return URL(fileURLWithPath: path).absoluteString
     }
     return audioURL ?? ""
   }

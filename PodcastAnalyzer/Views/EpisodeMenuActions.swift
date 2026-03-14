@@ -60,18 +60,6 @@ struct EpisodeMenuActions: View {
 
     Divider()
 
-    // Auto-transcript toggle
-    Toggle(
-      isOn: Binding(
-        get: { DownloadManager.shared.autoTranscriptEnabled },
-        set: { DownloadManager.shared.autoTranscriptEnabled = $0 }
-      )
-    ) {
-      Label("Auto-Generate Transcripts", systemImage: "text.bubble")
-    }
-
-    Divider()
-
     // Share action
     if audioURL != nil {
       Button(action: onShare) {

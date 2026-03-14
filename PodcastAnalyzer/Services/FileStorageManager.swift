@@ -13,7 +13,7 @@
 //
 
 import Foundation
-import os.log
+import OSLog
 
 enum FileStorageError: LocalizedError {
   case invalidURL
@@ -71,21 +71,42 @@ actor FileStorageManager {
     documentsDirectory.appendingPathComponent("Captions", isDirectory: true)
   }
 
+  // Log files in Documents (user can access via Files app)
+  var logsDirectory: URL {
+    documentsDirectory.appendingPathComponent("Logs", isDirectory: true)
+  }
+
   // Temporary downloads
   private var tempDirectory: URL {
     fileManager.temporaryDirectory.appendingPathComponent("Downloads", isDirectory: true)
   }
 
   private init() {
-    Task {
-      await createDirectories()
+    // Compute directory URLs inline (actor computed properties aren't accessible from nonisolated init)
+    let fm = FileManager.default
+    let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    let lib = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+    #if os(macOS)
+    let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    let audio = appSupport.appendingPathComponent("PodcastAnalyzer/Audio", isDirectory: true)
+    #else
+    let audio = lib.appendingPathComponent("Audio", isDirectory: true)
+    #endif
+    let dirs = [
+      audio,
+      docs.appendingPathComponent("Captions", isDirectory: true),
+      docs.appendingPathComponent("Logs", isDirectory: true),
+      fm.temporaryDirectory.appendingPathComponent("Downloads", isDirectory: true)
+    ]
+    for dir in dirs where !fm.fileExists(atPath: dir.path) {
+      try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
     }
   }
 
   // MARK: - Directory Management
 
   private func createDirectories() {
-    let directories = [audioDirectory, captionsDirectory, tempDirectory]
+    let directories = [audioDirectory, captionsDirectory, logsDirectory, tempDirectory]
 
     for directory in directories {
       // Only create if it doesn't exist
@@ -351,6 +372,279 @@ actor FileStorageManager {
     }
   }
 
+  // MARK: - Word Timing File Management
+
+  /// Generates filename for word timing JSON (same base as caption but with .json extension)
+  private func wordTimingFileName(for episodeTitle: String, podcastTitle: String) -> String {
+    let sanitized = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
+    return "\(sanitized)_wordtimings.json"
+  }
+
+  /// Gets the full path for a word timing JSON file
+  func wordTimingFilePath(for episodeTitle: String, podcastTitle: String) -> URL {
+    captionsDirectory.appendingPathComponent(
+      wordTimingFileName(for: episodeTitle, podcastTitle: podcastTitle))
+  }
+
+  /// Saves word timing JSON alongside the SRT file
+  func saveWordTimingFile(content: String, episodeTitle: String, podcastTitle: String) throws -> URL {
+    if !fileManager.fileExists(atPath: captionsDirectory.path) {
+      try fileManager.createDirectory(at: captionsDirectory, withIntermediateDirectories: true)
+    }
+
+    let destinationURL = wordTimingFilePath(for: episodeTitle, podcastTitle: podcastTitle)
+
+    do {
+      try content.write(to: destinationURL, atomically: true, encoding: .utf8)
+      logger.info("Saved word timing file: \(destinationURL.lastPathComponent)")
+      return destinationURL
+    } catch {
+      logger.error("Failed to save word timing: \(error.localizedDescription)")
+      throw FileStorageError.saveFailed(error)
+    }
+  }
+
+  /// Loads word timing JSON file if it exists
+  func loadWordTimingFile(for episodeTitle: String, podcastTitle: String) throws -> String? {
+    let path = wordTimingFilePath(for: episodeTitle, podcastTitle: podcastTitle)
+
+    guard fileManager.fileExists(atPath: path.path) else {
+      return nil  // Return nil instead of throwing - word timings are optional
+    }
+
+    return try String(contentsOf: path, encoding: .utf8)
+  }
+
+  /// Checks if word timing file exists
+  func wordTimingFileExists(for episodeTitle: String, podcastTitle: String) -> Bool {
+    let path = wordTimingFilePath(for: episodeTitle, podcastTitle: podcastTitle)
+    return fileManager.fileExists(atPath: path.path)
+  }
+
+  /// Deletes word timing file
+  func deleteWordTimingFile(for episodeTitle: String, podcastTitle: String) throws {
+    let path = wordTimingFilePath(for: episodeTitle, podcastTitle: podcastTitle)
+
+    if fileManager.fileExists(atPath: path.path) {
+      try fileManager.removeItem(at: path)
+      logger.info("Deleted word timing file: \(path.lastPathComponent)")
+    }
+  }
+
+  // MARK: - Translated Caption File Management
+
+  /// Generates filename for translated captions
+  /// Format: {podcast}_{episode}_{langCode}.srt
+  func translatedCaptionFileName(
+    for episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) -> String {
+    let sanitized = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
+    let langCode = targetLanguage.replacingOccurrences(of: "-", with: "_")
+    return "\(sanitized)_\(langCode).srt"
+  }
+
+  /// Gets the full path for a translated caption file
+  func translatedCaptionFilePath(
+    for episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) -> URL {
+    captionsDirectory.appendingPathComponent(
+      translatedCaptionFileName(
+        for: episodeTitle,
+        podcastTitle: podcastTitle,
+        targetLanguage: targetLanguage
+      )
+    )
+  }
+
+  /// Checks if translated caption file exists
+  func translatedCaptionFileExists(
+    for episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) -> Bool {
+    let path = translatedCaptionFilePath(
+      for: episodeTitle,
+      podcastTitle: podcastTitle,
+      targetLanguage: targetLanguage
+    )
+    return fileManager.fileExists(atPath: path.path)
+  }
+
+  /// Saves translated caption/SRT file (bilingual format)
+  func saveTranslatedCaptionFile(
+    content: String,
+    episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) throws -> URL {
+    // Ensure captions directory exists
+    if !fileManager.fileExists(atPath: self.captionsDirectory.path) {
+      do {
+        try fileManager.createDirectory(
+          at: self.captionsDirectory, withIntermediateDirectories: true)
+        logger.info("Created captions directory: \(self.captionsDirectory.path)")
+      } catch {
+        logger.error("Failed to create captions directory: \(error.localizedDescription)")
+        throw FileStorageError.directoryCreationFailed(error)
+      }
+    }
+
+    let destinationURL = translatedCaptionFilePath(
+      for: episodeTitle,
+      podcastTitle: podcastTitle,
+      targetLanguage: targetLanguage
+    )
+
+    do {
+      try content.write(to: destinationURL, atomically: true, encoding: .utf8)
+      logger.info("Saved translated caption file: \(destinationURL.lastPathComponent)")
+      return destinationURL
+    } catch {
+      logger.error("Failed to save translated caption: \(error.localizedDescription)")
+      throw FileStorageError.saveFailed(error)
+    }
+  }
+
+  /// Loads translated caption file content
+  func loadTranslatedCaptionFile(
+    for episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) throws -> String {
+    let path = translatedCaptionFilePath(
+      for: episodeTitle,
+      podcastTitle: podcastTitle,
+      targetLanguage: targetLanguage
+    )
+
+    guard fileManager.fileExists(atPath: path.path) else {
+      throw FileStorageError.fileNotFound
+    }
+
+    do {
+      return try String(contentsOf: path, encoding: .utf8)
+    } catch {
+      logger.error("Failed to load translated caption: \(error.localizedDescription)")
+      throw error
+    }
+  }
+
+  /// Deletes translated caption file
+  func deleteTranslatedCaptionFile(
+    for episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) throws {
+    let path = translatedCaptionFilePath(
+      for: episodeTitle,
+      podcastTitle: podcastTitle,
+      targetLanguage: targetLanguage
+    )
+
+    guard fileManager.fileExists(atPath: path.path) else {
+      throw FileStorageError.fileNotFound
+    }
+
+    do {
+      try fileManager.removeItem(at: path)
+      logger.info("Deleted translated caption file: \(path.lastPathComponent)")
+    } catch {
+      logger.error("Failed to delete translated caption: \(error.localizedDescription)")
+      throw FileStorageError.deleteFailed(error)
+    }
+  }
+
+  /// Gets the creation/modification date of a translated caption file
+  func getTranslatedCaptionFileDate(
+    for episodeTitle: String,
+    podcastTitle: String,
+    targetLanguage: String
+  ) -> Date? {
+    let path = translatedCaptionFilePath(
+      for: episodeTitle,
+      podcastTitle: podcastTitle,
+      targetLanguage: targetLanguage
+    )
+
+    guard fileManager.fileExists(atPath: path.path) else {
+      return nil
+    }
+
+    do {
+      let attributes = try fileManager.attributesOfItem(atPath: path.path)
+      if let modDate = attributes[.modificationDate] as? Date {
+        return modDate
+      }
+      return attributes[.creationDate] as? Date
+    } catch {
+      logger.error("Failed to get translated caption file date: \(error.localizedDescription)")
+      return nil
+    }
+  }
+
+  /// Lists all available translation language codes for an episode
+  /// Returns a Set of language codes (e.g., "zh-Hant", "ja", "es")
+  func listAvailableTranslations(
+    for episodeTitle: String,
+    podcastTitle: String
+  ) -> Set<String> {
+    let sanitized = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
+
+    guard fileManager.fileExists(atPath: captionsDirectory.path) else {
+      return []
+    }
+
+    do {
+      let contents = try fileManager.contentsOfDirectory(
+        at: captionsDirectory,
+        includingPropertiesForKeys: nil
+      )
+
+      var languageCodes: Set<String> = []
+
+      // Pattern: {sanitized}_{langCode}.srt
+      // We need to find files that match this pattern and extract the language code
+      let prefix = sanitized + "_"
+      let suffix = ".srt"
+
+      for fileURL in contents {
+        let fileName = fileURL.lastPathComponent
+
+        // Skip the original caption file (no language suffix)
+        if fileName == sanitized + ".srt" {
+          continue
+        }
+
+        // Check if this is a translated caption file for this episode
+        if fileName.hasPrefix(prefix) && fileName.hasSuffix(suffix) {
+          // Extract the language code
+          // Remove prefix and suffix to get language code
+          var langPart = fileName
+          langPart.removeFirst(prefix.count)
+          langPart.removeLast(suffix.count)
+
+          // Skip word timings file pattern
+          if langPart == "wordtimings" {
+            continue
+          }
+
+          // Convert underscore back to hyphen for standard language codes
+          let langCode = langPart.replacingOccurrences(of: "_", with: "-")
+          languageCodes.insert(langCode)
+        }
+      }
+
+      return languageCodes
+    } catch {
+      logger.error("Failed to list available translations: \(error.localizedDescription)")
+      return []
+    }
+  }
+
   // MARK: - Storage Info
 
   /// Gets total size of stored audio files
@@ -413,6 +707,19 @@ actor FileStorageManager {
       logger.info("Cleared all caption files (\(contents.count) files)")
     } catch {
       logger.error("Failed to clear caption files: \(error.localizedDescription)")
+    }
+  }
+
+  /// Clears all log files from storage
+  func clearAllLogFiles() {
+    do {
+      let contents = try fileManager.contentsOfDirectory(at: logsDirectory, includingPropertiesForKeys: nil)
+      for fileURL in contents {
+        try fileManager.removeItem(at: fileURL)
+      }
+      logger.info("Cleared all log files (\(contents.count) files)")
+    } catch {
+      logger.error("Failed to clear log files: \(error.localizedDescription)")
     }
   }
 

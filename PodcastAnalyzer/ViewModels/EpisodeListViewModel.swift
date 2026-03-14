@@ -15,53 +15,72 @@ import UIKit
 import AppKit
 #endif
 
-import os.log
+import OSLog
 
 private let viewModelLogger = Logger(subsystem: "com.podcast.analyzer", category: "ViewModelLifecycle")
 
 @MainActor
 @Observable
 final class EpisodeListViewModel {
-  var episodeModels: [String: EpisodeDownloadModel] = [:]
+  var episodeModels: [String: EpisodeDownloadModel] = [:] {
+    didSet { recomputeFilteredEpisodes() }
+  }
 
   #if DEBUG
   private let instanceId = UUID()
   #endif
-  var selectedFilter: EpisodeFilter = .all
-  var sortOldestFirst: Bool = false
-  var searchText: String = ""
+  var selectedFilter: EpisodeFilter = .all {
+    didSet { recomputeFilteredEpisodes() }
+  }
+  var sortOldestFirst: Bool = false {
+    didSet { recomputeFilteredEpisodes() }
+  }
+  var searchText: String = "" {
+    didSet { recomputeFilteredEpisodes() }
+  }
   var isRefreshing: Bool = false
   var isDescriptionExpanded: Bool = false
 
-  // HTML-rendered description view
-  var descriptionView: AnyView = AnyView(EmptyView())
+  enum DescriptionContent {
+    case loading
+    case empty
+    case parsed(NSAttributedString)
+  }
+
+  // HTML-rendered description content
+  var descriptionContent: DescriptionContent = .loading
 
   // MARK: - Dependencies
   private let podcastModel: PodcastInfoModel
   private let downloadManager = DownloadManager.shared
   private let rssService = PodcastRssService()
   private var modelContext: ModelContext?
-  private var refreshTimer: Timer?
   private var downloadCompletionObserver: NSObjectProtocol?
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
   private static let episodeKeyDelimiter = "\u{1F}"
 
-  // MARK: - Computed Properties
+  // MARK: - Cached Filtered Episodes
+
+  private(set) var filteredEpisodes: [PodcastEpisodeInfo] = []
 
   var podcastInfo: PodcastInfo {
     podcastModel.podcastInfo
   }
 
-  var filteredEpisodes: [PodcastEpisodeInfo] {
+  var filteredEpisodeCount: Int {
+    filteredEpisodes.count
+  }
+
+  private func recomputeFilteredEpisodes() {
     var episodes = podcastModel.podcastInfo.episodes
 
     // Apply search filter first
     if !searchText.isEmpty {
-      let query = searchText.lowercased()
+      let query = searchText
       episodes = episodes.filter { episode in
-        episode.title.lowercased().contains(query)
-          || (episode.podcastEpisodeDescription?.lowercased().contains(query) ?? false)
+        episode.title.localizedStandardContains(query)
+          || (episode.podcastEpisodeDescription?.localizedStandardContains(query) ?? false)
       }
     }
 
@@ -106,17 +125,15 @@ final class EpisodeListViewModel {
       }
     }
 
-    return episodes
-  }
-
-  var filteredEpisodeCount: Int {
-    filteredEpisodes.count
+    filteredEpisodes = episodes
   }
 
   // MARK: - Initialization
 
-  init(podcastModel: PodcastInfoModel) {
+  init(podcastModel: PodcastInfoModel, initialFilter: EpisodeFilter = .all) {
     self.podcastModel = podcastModel
+    self.selectedFilter = initialFilter
+    recomputeFilteredEpisodes()
     parseDescription()
     #if DEBUG
     viewModelLogger.info("📦 EpisodeListViewModel INIT: \(self.instanceId) for \(podcastModel.podcastInfo.title)")
@@ -153,7 +170,7 @@ final class EpisodeListViewModel {
       // Only handle if this is for our podcast
       guard podcastTitle == myPodcastTitle else { return }
 
-      // Dispatch to MainActor for the update
+      // Dispatch to MainActor for the update (handler registered on .main but closure is non-isolated)
       Task { @MainActor in
         self.updateEpisodeDownloadModel(
           episodeTitle: episodeTitle,
@@ -211,11 +228,13 @@ final class EpisodeListViewModel {
     let html = podcastModel.podcastInfo.podcastInfoDescription ?? ""
 
     guard !html.isEmpty else {
-      descriptionView = AnyView(
-        Text("No description available.")
-          .foregroundColor(.secondary)
-          .font(.caption)
-      )
+      descriptionContent = .empty
+      return
+    }
+
+    let cacheKey = NSString(string: "\(html.hashValue)_13")
+    if let cached = descriptionCache.object(forKey: cacheKey) {
+      descriptionContent = .parsed(cached)
       return
     }
 
@@ -236,34 +255,9 @@ final class EpisodeListViewModel {
 
     Task {
       let attributedString = parser.render(html)
-
-      await MainActor.run {
-        self.descriptionView = AnyView(
-          HTMLTextView(attributedString: attributedString)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        )
-      }
+      descriptionCache.setObject(attributedString, forKey: cacheKey)
+      self.descriptionContent = .parsed(attributedString)
     }
-  }
-
-  // MARK: - Timer Management
-
-  func startRefreshTimer() {
-    // Stop any existing timer first to prevent duplicates
-    stopRefreshTimer()
-
-    // Refresh every 5 seconds instead of 2 to reduce CPU usage
-    refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-      guard let self else { return }
-      Task { @MainActor in
-        self.loadEpisodeModels()
-      }
-    }
-  }
-
-  func stopRefreshTimer() {
-    refreshTimer?.invalidate()
-    refreshTimer = nil
   }
 
   // MARK: - Episode Key Helper
@@ -304,6 +298,7 @@ final class EpisodeListViewModel {
       let updatedPodcast = try await rssService.fetchPodcast(
         from: podcastModel.podcastInfo.rssUrl)
       podcastModel.podcastInfo = updatedPodcast
+      recomputeFilteredEpisodes()
       try? modelContext?.save()
     } catch {
       print("Failed to refresh podcast: \(error)")
@@ -383,7 +378,6 @@ final class EpisodeListViewModel {
     #if DEBUG
     viewModelLogger.info("🗑️ EpisodeListViewModel CLEANUP: \(self.instanceId)")
     #endif
-    stopRefreshTimer()
     if let observer = downloadCompletionObserver {
       NotificationCenter.default.removeObserver(observer)
       downloadCompletionObserver = nil

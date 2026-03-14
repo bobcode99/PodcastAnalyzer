@@ -89,17 +89,10 @@ struct EpisodePlayButtonWithProgress: View {
 
         // Progress bar (only when partially played)
         if playbackProgress > 0 && playbackProgress < 1 {
-          GeometryReader { geo in
-            ZStack(alignment: .leading) {
-              Capsule()
-                .fill(Color.white.opacity(0.4))
-                .frame(height: 2)
-              Capsule()
-                .fill(Color.white)
-                .frame(width: geo.size.width * playbackProgress, height: 2)
-            }
-          }
-          .frame(width: 24, height: 2)
+          ProgressView(value: playbackProgress)
+            .progressViewStyle(.linear)
+            .tint(.white)
+            .frame(width: 24)
         }
 
         // Duration text
@@ -109,7 +102,7 @@ struct EpisodePlayButtonWithProgress: View {
             .fontWeight(.medium)
         }
       }
-      .foregroundColor(.white)
+      .foregroundStyle(.white)
       .padding(.horizontal, 8)
       .padding(.vertical, 5)
       .background(Color.blue)
@@ -120,9 +113,10 @@ struct EpisodePlayButtonWithProgress: View {
   }
 }
 
-// MARK: - Reactive Play Button for LibraryEpisode
+// MARK: - Reactive Play Button for LibraryEpisode (Deprecated)
 
 /// A reactive version that observes EnhancedAudioManager for live playback updates
+@available(*, deprecated, renamed: "LivePlaybackButton", message: "Use LivePlaybackButton instead for live playback state")
 struct ReactiveEpisodePlayButton: View {
   let episode: LibraryEpisode
   let action: () -> Void
@@ -180,8 +174,5 @@ struct ReactiveEpisodePlayButton: View {
         refreshTrigger.toggle()
       }
     }
-    // Access audioManager properties to trigger observation
-    .onChange(of: audioManager.isPlaying) { _, _ in }
-    .onChange(of: audioManager.currentTime) { _, _ in }
   }
 }
