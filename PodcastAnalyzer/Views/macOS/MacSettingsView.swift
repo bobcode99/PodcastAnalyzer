@@ -229,7 +229,7 @@ struct PlaybackSettingsTab: View {
       Section {
         Picker("Default Playback Speed", selection: $viewModel.defaultPlaybackSpeed) {
           ForEach(playbackSpeeds, id: \.self) { speed in
-            Text(formatSpeed(speed)).tag(speed)
+            Text(Formatters.formatSpeed(speed)).tag(speed)
           }
         }
         .onChange(of: viewModel.defaultPlaybackSpeed) { _, newValue in
@@ -250,15 +250,6 @@ struct PlaybackSettingsTab: View {
     .padding()
   }
 
-  private func formatSpeed(_ speed: Float) -> String {
-    if speed == 1.0 {
-      return "1x"
-    } else if speed.truncatingRemainder(dividingBy: 1) == 0 {
-      return "\(Int(speed))x"
-    } else {
-      return String(format: "%.2gx", speed)
-    }
-  }
 }
 
 // MARK: - Transcript Settings Tab

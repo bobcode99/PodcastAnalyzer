@@ -8,9 +8,6 @@
 import SwiftData
 import SwiftUI
 
-#if os(iOS)
-import UIKit
-#endif
 
 // MARK: - Search Tab Enum
 
@@ -156,9 +153,7 @@ struct PodcastSearchView: View {
                             artistName: podcast.artistName,
                             collectionId: String(podcast.collectionId),
                             applePodcastUrl: nil
-                        )
-                        .onAppear { dismissKeyboard() }
-                        ) {
+                        )) {
                             ApplePodcastRow(
                                 podcast: podcast,
                                 isSubscribed: isSubscribed(podcast),
@@ -204,7 +199,10 @@ struct PodcastSearchView: View {
                                     episode: item.episode,
                                     podcastTitle: item.podcastTitle,
                                     podcastImageURL: item.podcastImageURL,
-                                    podcastLanguage: item.podcastLanguage
+                                    podcastLanguage: item.podcastLanguage,
+                                    onPlay: {
+                                      playEpisode(item.episode, podcastTitle: item.podcastTitle, imageURL: item.podcastImageURL)
+                                    }
                                 )
                             }
                         }
@@ -217,12 +215,6 @@ struct PodcastSearchView: View {
     }
 
     // MARK: - Helper Methods
-
-    private func dismissKeyboard() {
-        #if os(iOS)
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        #endif
-    }
 
     private func isSubscribed(_ podcast: Podcast) -> Bool {
         subscribedPodcasts.contains { $0.podcastInfo.title == podcast.collectionName }
@@ -244,6 +236,28 @@ struct PodcastSearchView: View {
                 print("Failed to subscribe: \(error)")
             }
         }
+    }
+
+    private func playEpisode(_ episode: PodcastEpisodeInfo, podcastTitle: String, imageURL: String) {
+        guard let audioURL = episode.audioURL else { return }
+        let playbackEpisode = PlaybackEpisode(
+            id: "\(podcastTitle)\u{1F}\(episode.title)",
+            title: episode.title,
+            podcastTitle: podcastTitle,
+            audioURL: audioURL,
+            imageURL: episode.imageURL ?? imageURL,
+            episodeDescription: episode.podcastEpisodeDescription,
+            pubDate: episode.pubDate,
+            duration: episode.duration,
+            guid: episode.guid
+        )
+        EnhancedAudioManager.shared.play(
+            episode: playbackEpisode,
+            audioURL: audioURL,
+            startTime: 0,
+            imageURL: episode.imageURL ?? imageURL,
+            useDefaultSpeed: true
+        )
     }
 
     private func updateLibraryFilters() {
@@ -383,8 +397,7 @@ struct LibraryEpisodeRow: View {
     let podcastTitle: String
     let podcastImageURL: String
     let podcastLanguage: String
-
-    private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
+    let onPlay: () -> Void
 
     var body: some View {
         NavigationLink {
@@ -396,11 +409,9 @@ struct LibraryEpisodeRow: View {
             )
         } label: {
             HStack(spacing: 12) {
-                // Artwork - using CachedAsyncImage for better performance
                 CachedArtworkImage(urlString: episode.imageURL ?? podcastImageURL, size: 56, cornerRadius: 8)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    // Date and duration
                     HStack(spacing: 4) {
                         if let date = episode.pubDate {
                             Text(date.formatted(date: .abbreviated, time: .omitted))
@@ -413,7 +424,6 @@ struct LibraryEpisodeRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                    // Title
                     Text(episode.title)
                         .font(.subheadline)
                         .fontWeight(.medium)
@@ -422,11 +432,8 @@ struct LibraryEpisodeRow: View {
 
                 Spacer()
 
-                // Play button
                 if episode.audioURL != nil {
-                    Button(action: {
-                        playEpisode()
-                    }) {
+                    Button(action: onPlay) {
                         Image(systemName: "play.fill")
                             .font(.title3)
                             .foregroundStyle(.white)
@@ -440,30 +447,6 @@ struct LibraryEpisodeRow: View {
             .padding(.vertical, 4)
         }
         .contentShape(Rectangle())
-    }
-
-    private func playEpisode() {
-        guard let audioURL = episode.audioURL else { return }
-
-        let playbackEpisode = PlaybackEpisode(
-            id: "\(podcastTitle)\u{1F}\(episode.title)",
-            title: episode.title,
-            podcastTitle: podcastTitle,
-            audioURL: audioURL,
-            imageURL: episode.imageURL ?? podcastImageURL,
-            episodeDescription: episode.podcastEpisodeDescription,
-            pubDate: episode.pubDate,
-            duration: episode.duration,
-            guid: episode.guid
-        )
-
-        audioManager.play(
-            episode: playbackEpisode,
-            audioURL: audioURL,
-            startTime: 0,
-            imageURL: episode.imageURL ?? podcastImageURL,
-            useDefaultSpeed: true
-        )
     }
 }
 
