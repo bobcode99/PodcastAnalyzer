@@ -210,7 +210,7 @@ struct HomeView: View {
               Button {
                 selectedEpisode = episode
               } label: {
-                UpNextCard(episode: episode)
+                UpNextCard(episode: episode, onPlay: { viewModel.playEpisode(episode) })
               }
               .buttonStyle(.plain)
               .contextMenu {
@@ -388,101 +388,16 @@ struct HomeView: View {
       } else {
         LazyVStack(spacing: 0) {
           ForEach(Array(viewModel.topPodcasts.prefix(25).enumerated()), id: \.element.id) { index, podcast in
-            TopPodcastRow(podcast: podcast, rank: index + 1, viewModel: viewModel)
+            TopPodcastRow(
+              podcast: podcast,
+              rank: index + 1,
+              isSubscribed: viewModel.isAlreadySubscribed(podcast),
+              onSubscribe: { viewModel.subscribeToPodcast(podcast) }
+            )
           }
         }
         .padding(.horizontal)
       }
-    }
-  }
-}
-
-// MARK: - Up Next Card
-
-struct UpNextCard: View {
-  let episode: LibraryEpisode
-  @Environment(\.modelContext) private var modelContext
-  @State private var statusObserver: EpisodeStatusObserver?
-
-  private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
-
-  private func playEpisode() {
-    guard episode.episodeInfo.audioURL != nil else { return }
-    guard let observer = statusObserver else { return }
-
-    let playbackEpisode = PlaybackEpisode(
-      id: EpisodeKeyUtils.makeKey(podcastTitle: episode.podcastTitle, episodeTitle: episode.episodeInfo.title),
-      title: episode.episodeInfo.title,
-      podcastTitle: episode.podcastTitle,
-      audioURL: observer.playbackURL,
-      imageURL: episode.imageURL,
-      episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
-      pubDate: episode.episodeInfo.pubDate,
-      duration: episode.episodeInfo.duration,
-      guid: episode.episodeInfo.guid
-    )
-
-    audioManager.play(
-      episode: playbackEpisode,
-      audioURL: observer.playbackURL,
-      startTime: episode.lastPlaybackPosition,
-      imageURL: episode.imageURL ?? "",
-      useDefaultSpeed: episode.lastPlaybackPosition == 0
-    )
-  }
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      // Episode artwork - using CachedAsyncImage for better performance
-      ZStack(alignment: .bottomTrailing) {
-        CachedArtworkImage(urlString: episode.imageURL, size: 140, cornerRadius: 12)
-
-        // Status icons overlay (reactive)
-        if let observer = statusObserver {
-          EpisodeStatusIcons(
-            isStarred: episode.isStarred,
-            isDownloaded: observer.isDownloaded,
-            hasTranscript: observer.hasTranscript,
-            hasAIAnalysis: observer.hasAIAnalysis,
-            isDownloading: observer.isDownloading,
-            downloadProgress: observer.downloadProgress,
-            isTranscribing: observer.isTranscribing,
-            isCompact: true
-          )
-        }
-      }
-
-      // Podcast title
-      Text(episode.podcastTitle)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-
-      // Episode title
-      Text(episode.episodeInfo.title)
-        .font(.subheadline)
-        .fontWeight(.medium)
-        .lineLimit(2)
-        .multilineTextAlignment(.leading)
-
-      Spacer(minLength: 0)
-
-      // Play button with progress - uses live audio manager state
-      LivePlaybackButton(
-        episode: episode,
-        style: .compact,
-        action: playEpisode
-      )
-    }
-    .frame(width: 140, height: 258, alignment: .top)
-    .onAppear {
-      if statusObserver == nil {
-        statusObserver = EpisodeStatusObserver(episode: episode)
-      }
-      statusObserver?.setModelContext(modelContext)
-    }
-    .onDisappear {
-      statusObserver?.cleanup()
     }
   }
 }
@@ -703,264 +618,6 @@ struct UpNextContextMenu: View {
         PlatformShareSheet.share(url: url)
       } label: {
         Label("Share Episode", systemImage: "square.and.arrow.up")
-      }
-    }
-  }
-}
-
-// MARK: - Top Podcast Row
-
-struct TopPodcastRow: View {
-  let podcast: AppleRSSPodcast
-  let rank: Int
-  var viewModel: HomeViewModel
-
-  var body: some View {
-    NavigationLink(value: podcast) {
-      HStack(spacing: 12) {
-        // Rank
-        Text("\(rank)")
-          .font(.headline)
-          .foregroundStyle(.secondary)
-          .frame(width: 24)
-
-        // Artwork - using CachedAsyncImage for better performance
-        CachedArtworkImage(urlString: podcast.safeArtworkUrl, size: 56, cornerRadius: 8)
-
-        // Info
-        VStack(alignment: .leading, spacing: 2) {
-          Text(podcast.name)
-            .font(.subheadline)
-            .fontWeight(.medium)
-            .lineLimit(1)
-            .foregroundStyle(.primary)
-
-          Text(podcast.artistName)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-
-          if let genres = podcast.genres, let first = genres.first {
-            Text(first.name)
-              .font(.caption2)
-              .foregroundStyle(.blue)
-          }
-        }
-
-        Spacer()
-
-        Image(systemName: "chevron.right")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      .padding(.vertical, 8)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .contextMenu {
-      // View episodes
-      NavigationLink(value: podcast) {
-        Label("View Episodes", systemImage: "list.bullet")
-      }
-
-      Divider()
-
-      // Subscribe
-      if viewModel.isAlreadySubscribed(podcast) {
-        Label("Already Subscribed", systemImage: "checkmark.circle.fill")
-          .foregroundStyle(.green)
-      } else {
-        Button {
-          viewModel.subscribeToPodcast(podcast)
-        } label: {
-          Label("Subscribe", systemImage: "plus.circle")
-        }
-      }
-
-      // View on Apple Podcasts
-      if let url = URL(string: podcast.url) {
-        Link(destination: url) {
-          Label("View on Apple Podcasts", systemImage: "link")
-        }
-      }
-
-      Divider()
-
-      // Copy name
-      Button {
-        PlatformClipboard.string = podcast.name
-      } label: {
-        Label("Copy Name", systemImage: "doc.on.doc")
-      }
-
-      // Share
-      if let url = URL(string: podcast.url) {
-        Button {
-          PlatformShareSheet.share(url: url)
-        } label: {
-          Label("Share", systemImage: "square.and.arrow.up")
-        }
-      }
-    }
-
-    Divider()
-  }
-}
-
-// MARK: - Region Picker Sheet
-
-struct RegionPickerSheet: View {
-  @Binding var selectedRegion: String
-  @Binding var isPresented: Bool
-
-  var body: some View {
-    NavigationStack {
-      List {
-        ForEach(Constants.podcastRegions, id: \.code) { region in
-          Button(action: {
-            selectedRegion = region.code
-            isPresented = false
-          }) {
-            HStack {
-              Text(region.flag)
-                .font(.title2)
-              Text(region.name)
-                .foregroundStyle(.primary)
-
-              Spacer()
-
-              if selectedRegion == region.code {
-                Image(systemName: "checkmark")
-                  .foregroundStyle(.blue)
-              }
-            }
-          }
-        }
-      }
-      .navigationTitle("Select Region")
-      #if os(iOS)
-      .navigationBarTitleDisplayMode(.inline)
-      #endif
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel") {
-            isPresented = false
-          }
-        }
-      }
-    }
-  }
-}
-
-// MARK: - Podcast Preview Sheet
-
-struct PodcastPreviewSheet: View {
-  let podcast: AppleRSSPodcast
-  var viewModel: HomeViewModel
-  @Environment(\.dismiss) private var dismiss
-
-  var body: some View {
-    NavigationStack {
-      ScrollView {
-        VStack(spacing: 20) {
-          // Artwork
-          CachedAsyncImage(url: URL(string: podcast.safeArtworkUrl.replacingOccurrences(of: "100x100", with: "600x600"))) { image in
-              image.resizable().scaledToFit()
-          } placeholder: {
-              Color.gray
-          }
-          .frame(width: 200, height: 200)
-          .clipShape(.rect(cornerRadius: 16))
-          .shadow(radius: 8)
-
-          // Title and Artist
-          VStack(spacing: 4) {
-            Text(podcast.name)
-              .font(.title2)
-              .fontWeight(.bold)
-              .multilineTextAlignment(.center)
-
-            Text(podcast.artistName)
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-          }
-
-          // Genres
-          if let genres = podcast.genres {
-            HStack {
-              ForEach(genres, id: \.genreId) { genre in
-                Text(genre.name)
-                  .font(.caption)
-                  .padding(.horizontal, 10)
-                  .padding(.vertical, 4)
-                  .foregroundStyle(.blue)
-                  .glassEffect(.regular.tint(.blue), in: .rect(cornerRadius: 12))
-              }
-            }
-          }
-
-          // Subscribe Button
-          if viewModel.isAlreadySubscribed(podcast) {
-            HStack {
-              Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-              Text("Already Subscribed")
-                .font(.headline)
-                .foregroundStyle(.green)
-            }
-            .frame(maxWidth: .infinity)
-            .padding()
-            .glassEffect(.regular.tint(.green), in: .rect(cornerRadius: 12))
-            .padding(.horizontal)
-          } else if viewModel.isSubscribing {
-            ProgressView("Subscribing...")
-          } else if viewModel.subscriptionError != nil {
-            VStack(spacing: 8) {
-              Text("Failed to subscribe")
-                .foregroundStyle(.red)
-              Button("Try Again") {
-                viewModel.subscribeToPodcast(podcast)
-              }
-            }
-          } else {
-            Button(action: {
-              viewModel.subscribeToPodcast(podcast)
-            }) {
-              Label("Subscribe", systemImage: "plus.circle.fill")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding()
-            }
-            .buttonStyle(.glassProminent)
-            .padding(.horizontal)
-          }
-
-          // View on Apple Podcasts
-          if let url = URL(string: podcast.url) {
-            Link(destination: url) {
-              Label("View on Apple Podcasts", systemImage: "link")
-                .font(.subheadline)
-            }
-            .padding(.top, 8)
-          }
-        }
-        .padding()
-      }
-      .navigationTitle("Podcast")
-      #if os(iOS)
-      .navigationBarTitleDisplayMode(.inline)
-      #endif
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Close") {
-            dismiss()
-          }
-        }
-      }
-      .onChange(of: viewModel.subscriptionSuccess) { _, success in
-        if success {
-          dismiss()
-        }
       }
     }
   }
@@ -1302,7 +959,12 @@ struct PopularShowsListView: View {
   var body: some View {
     List {
       ForEach(Array(podcasts.prefix(200).enumerated()), id: \.element.id) { index, podcast in
-        TopPodcastRow(podcast: podcast, rank: index + 1, viewModel: viewModel)
+        TopPodcastRow(
+            podcast: podcast,
+            rank: index + 1,
+            isSubscribed: viewModel.isAlreadySubscribed(podcast),
+            onSubscribe: { viewModel.subscribeToPodcast(podcast) }
+          )
           .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
       }
     }
