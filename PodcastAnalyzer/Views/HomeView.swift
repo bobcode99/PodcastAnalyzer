@@ -235,7 +235,24 @@ struct HomeView: View {
         Spacer()
 
         if !viewModel.upNextEpisodes.isEmpty {
-          NavigationLink(destination: UpNextListView(viewModel: viewModel)) {
+          NavigationLink(destination: UpNextListView(
+            episodes: viewModel.upNextEpisodes,
+            onToggleStar: { viewModel.toggleStar(for: $0) },
+            onTogglePlayed: { viewModel.togglePlayed(for: $0) },
+            onDownload: {
+              DownloadManager.shared.downloadEpisode(
+                episode: $0.episodeInfo,
+                podcastTitle: $0.podcastTitle,
+                language: $0.language
+              )
+            },
+            onDeleteDownload: {
+              DownloadManager.shared.deleteDownload(
+                episodeTitle: $0.episodeInfo.title,
+                podcastTitle: $0.podcastTitle
+              )
+            }
+          )) {
             Text("See All")
               .font(.subheadline)
               .foregroundStyle(.blue)
@@ -539,111 +556,6 @@ struct ForYouCard: View {
     .onDisappear {
       statusObserver?.cleanup()
     }
-  }
-}
-
-// MARK: - Up Next List View
-
-struct UpNextListView: View {
-  var viewModel: HomeViewModel
-  @Environment(\.modelContext) private var modelContext
-  @State private var episodeToDelete: LibraryEpisode?
-  @State private var showDeleteConfirmation = false
-  @State private var episodeModels: [String: EpisodeDownloadModel] = [:]
-
-  var body: some View {
-    List(viewModel.upNextEpisodes) { episode in
-      EpisodeRowView(
-        libraryEpisode: episode,
-        episodeModel: episodeModels[episode.id],
-        onToggleStar: { toggleStar(episode) },
-        onDownload: { downloadEpisode(episode) },
-        onDeleteRequested: {
-          episodeToDelete = episode
-          showDeleteConfirmation = true
-        },
-        onTogglePlayed: { togglePlayed(episode) }
-      )
-      .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-    }
-    .listStyle(.plain)
-    .onAppear { batchFetchEpisodeModels() }
-    .onChange(of: viewModel.upNextEpisodes.count) { _, _ in
-      batchFetchEpisodeModels()
-    }
-    .animation(.default, value: viewModel.upNextEpisodes.map(\.id))
-    .navigationTitle("Up Next")
-    #if os(iOS)
-    .navigationBarTitleDisplayMode(.inline)
-    #endif
-    .confirmationDialog(
-      "Delete Download",
-      isPresented: $showDeleteConfirmation,
-      titleVisibility: .visible
-    ) {
-      Button("Delete", role: .destructive) {
-        if let episode = episodeToDelete {
-          deleteDownload(episode)
-        }
-        episodeToDelete = nil
-      }
-      Button("Cancel", role: .cancel) {
-        episodeToDelete = nil
-      }
-    } message: {
-      Text("Are you sure you want to delete this downloaded episode?")
-    }
-  }
-
-  // MARK: - Helper Methods
-
-  private func batchFetchEpisodeModels() {
-    let descriptor = FetchDescriptor<EpisodeDownloadModel>()
-    guard let results = try? modelContext.fetch(descriptor) else { return }
-    var models: [String: EpisodeDownloadModel] = [:]
-    for model in results {
-      models[model.id] = model
-    }
-    episodeModels = models
-  }
-
-  private func toggleStar(_ episode: LibraryEpisode) {
-    if let model = episodeModels[episode.id] {
-      model.isStarred.toggle()
-      try? modelContext.save()
-    } else if let audioURL = episode.episodeInfo.audioURL {
-      let model = EpisodeDownloadModel(
-        episodeTitle: episode.episodeInfo.title,
-        podcastTitle: episode.podcastTitle,
-        audioURL: audioURL,
-        imageURL: episode.imageURL ?? "",
-        pubDate: episode.episodeInfo.pubDate
-      )
-      model.isStarred = true
-      modelContext.insert(model)
-      try? modelContext.save()
-      episodeModels[episode.id] = model
-    }
-  }
-
-  private func togglePlayed(_ episode: LibraryEpisode) {
-    viewModel.togglePlayed(for: episode)
-    batchFetchEpisodeModels()
-  }
-
-  private func downloadEpisode(_ episode: LibraryEpisode) {
-    DownloadManager.shared.downloadEpisode(
-      episode: episode.episodeInfo,
-      podcastTitle: episode.podcastTitle,
-      language: episode.language
-    )
-  }
-
-  private func deleteDownload(_ episode: LibraryEpisode) {
-    DownloadManager.shared.deleteDownload(
-      episodeTitle: episode.episodeInfo.title,
-      podcastTitle: episode.podcastTitle
-    )
   }
 }
 

@@ -56,9 +56,6 @@ final class HomeViewModel {
   private var recommendationsTask: Task<Void, Never>?
 
   @ObservationIgnored
-  private var trendingTask: Task<Void, Never>?
-
-  @ObservationIgnored
   private var loadTask: Task<Void, Never>?
 
   @ObservationIgnored
@@ -67,11 +64,6 @@ final class HomeViewModel {
   @ObservationIgnored
   private var regionChangeTask: Task<Void, Never>?
 
-  // Podcast preview/subscription
-  var selectedPodcast: AppleRSSPodcast?
-  var isSubscribing = false
-  var subscriptionError: String?
-  var subscriptionSuccess = false
 
   @ObservationIgnored
   private var podcastInfoModelList: [PodcastInfoModel] = []
@@ -497,14 +489,6 @@ final class HomeViewModel {
     isLoadingTopPodcasts = false
   }
 
-  // MARK: - Podcast Preview
-
-  func showPodcastPreview(_ podcast: AppleRSSPodcast) {
-    selectedPodcast = podcast
-    subscriptionError = nil
-    subscriptionSuccess = false
-  }
-
   /// Check if a podcast is already subscribed by name
   func isAlreadySubscribed(_ podcast: AppleRSSPodcast) -> Bool {
     podcastInfoModelList.contains { $0.podcastInfo.title == podcast.name }
@@ -513,30 +497,19 @@ final class HomeViewModel {
   // MARK: - Subscribe to Podcast
 
   func subscribeToPodcast(_ podcast: AppleRSSPodcast) {
-    guard let context = modelContext else {
-      subscriptionError = "Unable to save"
-      return
-    }
-
-    isSubscribing = true
-    subscriptionError = nil
-    subscriptionSuccess = false
+    guard let context = modelContext else { return }
 
     subscribeTask?.cancel()
     subscribeTask = Task {
       do {
-        // Look up the podcast to get the RSS feed URL
         guard let result = try await applePodcastService.lookupPodcast(collectionId: podcast.id),
               let feedUrl = result.feedUrl else {
-          subscriptionError = "Could not find RSS feed"
-          isSubscribing = false
+          logger.error("Could not find RSS feed for \(podcast.name)")
           return
         }
 
-        // Fetch podcast info from RSS
         let podcastInfo = try await rssService.fetchPodcast(from: feedUrl)
 
-        // Check if already subscribed
         let title = podcastInfo.title
         let existingDescriptor = FetchDescriptor<PodcastInfoModel>(
           predicate: #Predicate { $0.title == title }
@@ -544,27 +517,18 @@ final class HomeViewModel {
 
         if (try? context.fetch(existingDescriptor).first) != nil {
           logger.info("Already subscribed to \(podcastInfo.title)")
-          subscriptionSuccess = true
-          isSubscribing = false
           return
         }
 
-        // Create new subscription (explicitly set isSubscribed to true)
         let model = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date(), isSubscribed: true)
         context.insert(model)
-
         try context.save()
         podcastInfoModelList.insert(model, at: 0)
         await loadUpNextEpisodes()
-        subscriptionSuccess = true
         logger.info("Successfully subscribed to \(podcastInfo.title)")
-
       } catch {
-        subscriptionError = error.localizedDescription
         logger.error("Failed to subscribe: \(error.localizedDescription)")
       }
-
-      isSubscribing = false
     }
   }
 
@@ -759,8 +723,6 @@ final class HomeViewModel {
     regionChangeTask = nil
     recommendationsTask?.cancel()
     recommendationsTask = nil
-    trendingTask?.cancel()
-    trendingTask = nil
     loadTask?.cancel()
     loadTask = nil
     subscribeTask?.cancel()
