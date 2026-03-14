@@ -210,36 +210,39 @@ class BackgroundSyncManager {
       var totalNewEpisodes = 0
       var newEpisodeDetails: [(podcastTitle: String, episodeTitle: String, audioURL: String?, imageURL: String?, language: String)] = []
 
-      // Sync each podcast
-      for podcast in podcasts {
-        let existingEpisodeTitles = Set(podcast.podcastInfo.episodes.map { $0.title })
-
-        do {
-          let updatedPodcast = try await rssService.fetchPodcast(from: podcast.podcastInfo.rssUrl)
-
-          // Find new episodes
-          let newEpisodes = updatedPodcast.episodes.filter { !existingEpisodeTitles.contains($0.title) }
-
-          if !newEpisodes.isEmpty {
-            totalNewEpisodes += newEpisodes.count
-            for episode in newEpisodes.prefix(3) {  // Limit to first 3 for notification
-              newEpisodeDetails.append((
-                podcastTitle: updatedPodcast.title,
-                episodeTitle: episode.title,
-                audioURL: episode.audioURL,
-                imageURL: episode.imageURL ?? updatedPodcast.imageURL,
-                language: updatedPodcast.language
-              ))
+      // Sync all podcasts in parallel (up to 6 at a time) for faster refresh
+      let maxConcurrent = 6
+      await withTaskGroup(of: (Int, PodcastInfo?, Error?).self) { group in
+        for (index, podcast) in podcasts.enumerated() {
+          // Once we've launched maxConcurrent tasks, wait for one to finish before adding more
+          if index >= maxConcurrent {
+            if let result = await group.next() {
+              processSyncResult(
+                result, podcasts: podcasts,
+                totalNewEpisodes: &totalNewEpisodes,
+                newEpisodeDetails: &newEpisodeDetails
+              )
             }
-
-            // Update the podcast with new episodes
-            podcast.podcastInfo = updatedPodcast
-            podcast.lastUpdated = Date()
-
-            logger.info("Found \(newEpisodes.count) new episodes for \(updatedPodcast.title)")
           }
-        } catch {
-          logger.error("Failed to sync \(podcast.podcastInfo.title): \(error.localizedDescription)")
+
+          let rssUrl = podcast.podcastInfo.rssUrl
+          group.addTask {
+            do {
+              let updatedPodcast = try await self.rssService.fetchPodcast(from: rssUrl)
+              return (index, updatedPodcast, nil)
+            } catch {
+              return (index, nil, error)
+            }
+          }
+        }
+
+        // Collect remaining results
+        for await result in group {
+          processSyncResult(
+            result, podcasts: podcasts,
+            totalNewEpisodes: &totalNewEpisodes,
+            newEpisodeDetails: &newEpisodeDetails
+          )
         }
       }
 
@@ -296,6 +299,45 @@ class BackgroundSyncManager {
     } catch {
       logger.error("Sync failed: \(error.localizedDescription)")
       return false
+    }
+  }
+
+  /// Process a single parallel sync result and merge into accumulated state
+  private func processSyncResult(
+    _ result: (index: Int, podcast: PodcastInfo?, error: Error?),
+    podcasts: [PodcastInfoModel],
+    totalNewEpisodes: inout Int,
+    newEpisodeDetails: inout [(podcastTitle: String, episodeTitle: String, audioURL: String?, imageURL: String?, language: String)]
+  ) {
+    let podcast = podcasts[result.index]
+
+    if let error = result.error {
+      logger.error("Failed to sync \(podcast.podcastInfo.title): \(error.localizedDescription)")
+      return
+    }
+
+    guard let updatedPodcast = result.podcast else { return }
+
+    let existingEpisodeTitles = Set(podcast.podcastInfo.episodes.map { $0.title })
+    let newEpisodes = updatedPodcast.episodes.filter { !existingEpisodeTitles.contains($0.title) }
+
+    if !newEpisodes.isEmpty {
+      totalNewEpisodes += newEpisodes.count
+      for episode in newEpisodes.prefix(3) {
+        newEpisodeDetails.append((
+          podcastTitle: updatedPodcast.title,
+          episodeTitle: episode.title,
+          audioURL: episode.audioURL,
+          imageURL: episode.imageURL ?? updatedPodcast.imageURL,
+          language: updatedPodcast.language
+        ))
+      }
+
+      // Update the podcast with new episodes
+      podcast.podcastInfo = updatedPodcast
+      podcast.lastUpdated = Date()
+
+      logger.info("Found \(newEpisodes.count) new episodes for \(updatedPodcast.title)")
     }
   }
 
