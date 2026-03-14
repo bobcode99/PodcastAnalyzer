@@ -54,6 +54,9 @@ struct EpisodeDetailView: View {
     @State private var lastScrollOffset: CGFloat = 0
     @State private var isUserScrolling: Bool = false
 
+    // Scroll-to-top trigger
+    @State private var scrollToTopTrigger = false
+
     // Transcript search focus
     @FocusState private var transcriptSearchFocused: Bool
 
@@ -79,11 +82,22 @@ struct EpisodeDetailView: View {
         )
     }
 
+    /// Sentences to display based on display mode and search state
+    private var transcriptSentences: [TranscriptSentence] {
+        if !viewModel.transcriptSearchQuery.isEmpty {
+            return viewModel.filteredGroupedSentences
+        } else if subtitleSettings.sentenceHighlightEnabled {
+            return viewModel.paragraphGroupedSentences
+        } else {
+            return viewModel.groupedSentences
+        }
+    }
+
     /// Current sentence ID for auto-scroll
     private var currentSentenceId: Int? {
         guard viewModel.isCurrentEpisode else { return nil }
         let time = currentPlaybackTime
-        return viewModel.groupedSentences.first { $0.containsTime(time) }?.id
+        return transcriptSentences.first { $0.containsTime(time) }?.id
     }
 
     var body: some View {
@@ -100,6 +114,23 @@ struct EpisodeDetailView: View {
             Divider()
             tabContentView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .topTrailing) {
+                    if !isHeaderVisible {
+                        Button {
+                            scrollToTopTrigger.toggle()
+                        } label: {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 32, height: 32)
+                                .glassEffect(.regular, in: .circle)
+                        }
+                        .padding(.trailing, 12)
+                        .padding(.top, 8)
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.25), value: isHeaderVisible)
         }
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: 80)
@@ -176,7 +207,7 @@ struct EpisodeDetailView: View {
             )
         }
         .sheet(isPresented: $showSubtitleSettings) {
-            SubtitleSettingsSheet()
+            SubtitleSettingsSheet(hasTranslation: viewModel.hasExistingTranslation)
         }
         .sheet(isPresented: $showTranslationLanguagePicker) {
             TranslationLanguagePickerSheet(
@@ -236,7 +267,7 @@ struct EpisodeDetailView: View {
         switch selectedTab {
         case 0: summaryTab
         case 1: transcriptContent
-        case 2: EpisodeAIAnalysisView(viewModel: viewModel, embedsOwnScroll: true, isHeaderVisible: $isHeaderVisible, lastScrollOffset: $lastScrollOffset, isUserScrolling: $isUserScrolling)
+        case 2: EpisodeAIAnalysisView(viewModel: viewModel, embedsOwnScroll: true, isHeaderVisible: $isHeaderVisible, lastScrollOffset: $lastScrollOffset, isUserScrolling: $isUserScrolling, scrollToTopTrigger: $scrollToTopTrigger)
         default: Text("Unknown tab: \(selectedTab)")
             .foregroundStyle(.secondary)
         }
@@ -317,16 +348,25 @@ struct EpisodeDetailView: View {
 
     // MARK: - Summary Tab (owns its own ScrollView)
     private var summaryTab: some View {
-        ScrollView {
-            summaryContent
-        }
-        .trackScrollForHeaderCollapse(
-            isHeaderVisible: $isHeaderVisible,
-            lastOffset: $lastScrollOffset,
-            isUserScrolling: isUserScrolling
-        )
-        .onScrollPhaseChange { _, newPhase in
-            isUserScrolling = newPhase == .interacting || newPhase == .decelerating
+        ScrollViewReader { proxy in
+            ScrollView {
+                Color.clear.frame(height: 0).id("summaryTop")
+                summaryContent
+            }
+            .trackScrollForHeaderCollapse(
+                isHeaderVisible: $isHeaderVisible,
+                lastOffset: $lastScrollOffset,
+                isUserScrolling: isUserScrolling
+            )
+            .onScrollPhaseChange { _, newPhase in
+                isUserScrolling = newPhase == .interacting || newPhase == .decelerating
+            }
+            .onChange(of: scrollToTopTrigger) { _, _ in
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    proxy.scrollTo("summaryTop", anchor: .top)
+                }
+                isHeaderVisible = true
+            }
         }
     }
 
@@ -374,6 +414,7 @@ struct EpisodeDetailView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 0) {
+                            Color.clear.frame(height: 0).id("transcriptTop")
                             if !viewModel.transcriptSearchQuery.isEmpty,
                                !viewModel.searchMatchIds.isEmpty {
                                 TranscriptSearchNavigationBar(
@@ -385,15 +426,13 @@ struct EpisodeDetailView: View {
                                 .padding(.vertical, 4)
                             }
 
-                            let sentences = viewModel.transcriptSearchQuery.isEmpty
-                                ? viewModel.groupedSentences
-                                : viewModel.filteredGroupedSentences
                             SentenceBasedTranscriptView(
-                                sentences: sentences,
+                                sentences: transcriptSentences,
                                 currentTime: viewModel.isCurrentEpisode ? currentPlaybackTime : nil,
                                 searchQuery: viewModel.transcriptSearchQuery,
                                 onSegmentTap: { viewModel.seekToSegment($0) },
                                 subtitleMode: subtitleSettings.displayMode,
+                                sentenceHighlightEnabled: subtitleSettings.sentenceHighlightEnabled,
                                 searchMatchIds: Set(viewModel.searchMatchIds),
                                 currentSearchMatchId: viewModel.searchMatchIds.isEmpty
                                     ? nil : viewModel.searchMatchIds[viewModel.currentMatchIndex]
@@ -426,6 +465,12 @@ struct EpisodeDetailView: View {
                             proxy.scrollTo(matchId, anchor: .center)
                         }
                     }
+                    .onChange(of: scrollToTopTrigger) { _, _ in
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo("transcriptTop", anchor: .top)
+                        }
+                        isHeaderVisible = true
+                    }
                 }
             } else {
                 transcriptStatusSection
@@ -443,16 +488,28 @@ struct EpisodeDetailView: View {
                 guard !Task.isCancelled else { break }
                 if viewModel.isCurrentEpisode && viewModel.audioManager.isPlaying {
                     let newTime = viewModel.audioManager.currentTime
-                    // Skip update if time diff < 0.5s and sentence unchanged
                     let timeDiff = abs(newTime - currentPlaybackTime)
-                    if timeDiff >= 0.5 {
-                        currentPlaybackTime = newTime
-                    } else {
-                        // Check if sentence changed even with small time diff
-                        let newSentenceId = viewModel.groupedSentences.first { $0.containsTime(newTime) }?.id
-                        let oldSentenceId = currentSentenceId
-                        if newSentenceId != oldSentenceId {
+
+                    if subtitleSettings.sentenceHighlightEnabled {
+                        // Sentence highlight mode: update whenever the active segment changes
+                        // (segments within a sentence are short, so check more frequently)
+                        let currentSentence = transcriptSentences.first { $0.containsTime(newTime) }
+                        let oldSentence = transcriptSentences.first { $0.containsTime(currentPlaybackTime) }
+                        let newSegIdx = currentSentence?.segments.firstIndex { newTime >= $0.startTime && newTime <= $0.endTime }
+                        let oldSegIdx = oldSentence?.segments.firstIndex { currentPlaybackTime >= $0.startTime && currentPlaybackTime <= $0.endTime }
+                        if newSegIdx != oldSegIdx || currentSentence?.id != oldSentence?.id || timeDiff >= 0.5 {
                             currentPlaybackTime = newTime
+                        }
+                    } else {
+                        // Default mode: skip update if time diff < 0.5s and sentence unchanged
+                        if timeDiff >= 0.5 {
+                            currentPlaybackTime = newTime
+                        } else {
+                            let newSentenceId = transcriptSentences.first { $0.containsTime(newTime) }?.id
+                            let oldSentenceId = currentSentenceId
+                            if newSentenceId != oldSentenceId {
+                                currentPlaybackTime = newTime
+                            }
                         }
                     }
                 }
@@ -567,6 +624,14 @@ struct EpisodeDetailView: View {
                                 Label(mode.displayName, systemImage: mode.icon)
                             }
                         }
+                        .disabled(mode.requiresTranslation && !viewModel.hasExistingTranslation)
+                    }
+                    Divider()
+                    Toggle(isOn: Binding(
+                        get: { subtitleSettings.sentenceHighlightEnabled },
+                        set: { subtitleSettings.sentenceHighlightEnabled = $0 }
+                    )) {
+                        Label("Sentence Highlight", systemImage: "text.line.first.and.arrowtriangle.forward")
                     }
                     Divider()
                     Button {
@@ -695,8 +760,9 @@ extension View {
                     return
                 }
 
-                // At-top auto-expand
-                if newValue.contentOffset <= 0 {
+                // Near-top threshold: only show header when scrolled close to top
+                let nearTopThreshold: CGFloat = 60
+                if newValue.contentOffset <= nearTopThreshold {
                     if !isHeaderVisible.wrappedValue {
                         isHeaderVisible.wrappedValue = true
                     }
@@ -712,13 +778,13 @@ extension View {
                 }
 
                 let delta = newValue.contentOffset - lastOffset.wrappedValue
-                // 5pt dead zone — but always update lastOffset to prevent drift
-                guard abs(delta) > 5 else { return }
+                // Dead zone to prevent jitter
+                guard abs(delta) > 8 else { return }
 
+                // Only collapse when scrolling down; do NOT re-show on scroll-up
+                // Header only reappears when near the top (handled above)
                 if delta > 0 && isHeaderVisible.wrappedValue {
                     isHeaderVisible.wrappedValue = false
-                } else if delta < 0 && !isHeaderVisible.wrappedValue {
-                    isHeaderVisible.wrappedValue = true
                 }
                 lastOffset.wrappedValue = newValue.contentOffset
             }

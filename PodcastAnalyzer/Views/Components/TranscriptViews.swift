@@ -31,16 +31,17 @@ struct TranscriptSentence: Identifiable {
         segments.last?.endTime ?? 0
     }
 
-    /// Combined text of all segments (with proper spacing)
+    /// Combined text of all segments with CJK-aware spacing
     var text: String {
-        segments.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+        let texts = segments.map { $0.text.trimmingCharacters(in: .whitespaces) }
+        return CJKTextUtils.joinTexts(texts)
     }
 
     /// Combined translated text (if available)
     var translatedText: String? {
         let translations = segments.compactMap { $0.translatedText?.trimmingCharacters(in: .whitespaces) }
         guard translations.count == segments.count else { return nil }
-        return translations.joined(separator: " ")
+        return CJKTextUtils.joinTexts(translations)
     }
 
     /// Formatted start time string
@@ -114,6 +115,50 @@ enum TranscriptGrouping {
         return sentences
     }
 
+    /// Maximum segments per paragraph sentence (sentence highlight mode)
+    static let maxSegmentsPerParagraphSentence = 8
+
+    /// Character limit fallback for unpunctuated content in paragraph mode
+    static let paragraphCharLimit = 300
+
+    /// Group segments into paragraph-sized sentences for sentence highlight mode.
+    /// More aggressive grouping: up to 8 segments, only splits on sentence-ending punctuation
+    /// or paragraph boundaries (double newline). Falls back at ~300 chars for unpunctuated content.
+    static func groupIntoParagraphSentences(_ segments: [TranscriptSegment]) -> [TranscriptSentence] {
+        var sentences: [TranscriptSentence] = []
+        var currentGroup: [TranscriptSegment] = []
+        var sentenceId = 0
+        var charCount = 0
+
+        for segment in segments {
+            currentGroup.append(segment)
+            charCount += segment.text.count
+
+            // Check for paragraph boundary (double newline in segment text)
+            let hasParagraphBreak = segment.text.contains("\n\n")
+
+            // Check if segment ends with sentence-ending punctuation
+            let isSentEnd = isSentenceEnd(segment.text)
+
+            // Force break at max segments or character limit (for unpunctuated content)
+            let atMaxSegments = currentGroup.count >= maxSegmentsPerParagraphSentence
+            let atCharLimit = charCount >= paragraphCharLimit
+
+            if isSentEnd || hasParagraphBreak || atMaxSegments || atCharLimit {
+                sentences.append(TranscriptSentence(id: sentenceId, segments: currentGroup))
+                sentenceId += 1
+                currentGroup = []
+                charCount = 0
+            }
+        }
+
+        if !currentGroup.isEmpty {
+            sentences.append(TranscriptSentence(id: sentenceId, segments: currentGroup))
+        }
+
+        return sentences
+    }
+
     /// Compute highlight state for a sentence given the current playback time
     static func highlightState(for sentence: TranscriptSentence, currentTime: TimeInterval?) -> SentenceHighlightState {
         guard let time = currentTime else { return .future }
@@ -135,7 +180,7 @@ enum TranscriptGrouping {
 
 // MARK: - CJK Text Utilities
 
-enum CJKTextUtils {
+nonisolated enum CJKTextUtils {
     /// CJK Unicode ranges
     private static let cjkRanges: [ClosedRange<UInt32>] = [
         0x4E00...0x9FFF,    // CJK Unified Ideographs
@@ -168,6 +213,29 @@ enum CJKTextUtils {
         } else {
             return text.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
         }
+    }
+
+    /// Check if a Unicode scalar is in CJK ranges
+    static func isCJKScalar(_ scalar: Unicode.Scalar) -> Bool {
+        let value = scalar.value
+        return cjkRanges.contains { $0.contains(value) }
+    }
+
+    /// Join text segments with CJK-aware spacing.
+    /// Uses no separator when either boundary character is CJK, space otherwise.
+    static func joinTexts(_ texts: [String]) -> String {
+        guard var result = texts.first else { return "" }
+        for i in 1..<texts.count {
+            let next = texts[i]
+            guard !next.isEmpty else { continue }
+            let prevEndIsCJK = result.unicodeScalars.last.map { isCJKScalar($0) } ?? false
+            let nextStartIsCJK = next.unicodeScalars.first.map { isCJKScalar($0) } ?? false
+            if !prevEndIsCJK && !nextStartIsCJK {
+                result += " "
+            }
+            result += next
+        }
+        return result
     }
 }
 
@@ -236,6 +304,9 @@ struct SentenceBasedTranscriptView: View {
     /// Subtitle display mode
     var subtitleMode: SubtitleDisplayMode = .originalOnly
 
+    /// Whether sentence highlight (per-segment playback highlighting) is enabled
+    var sentenceHighlightEnabled: Bool = false
+
     /// Search match IDs for navigation highlight
     var searchMatchIds: Set<Int> = []
 
@@ -243,7 +314,7 @@ struct SentenceBasedTranscriptView: View {
     var currentSearchMatchId: Int?
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 12) {
+        LazyVStack(alignment: .leading, spacing: sentenceHighlightEnabled ? 2 : 12) {
             ForEach(sentences) { sentence in
                 let highlightState = TranscriptGrouping.highlightState(
                     for: sentence,
@@ -254,6 +325,7 @@ struct SentenceBasedTranscriptView: View {
                     highlightState: highlightState,
                     searchQuery: searchQuery,
                     subtitleMode: subtitleMode,
+                    sentenceHighlightEnabled: sentenceHighlightEnabled,
                     showTimestamp: showTimestamps,
                     isSearchMatch: searchMatchIds.contains(sentence.id),
                     isCurrentSearchMatch: currentSearchMatchId == sentence.id,
@@ -275,6 +347,7 @@ struct SentenceView: View, Equatable {
     let highlightState: SentenceHighlightState
     let searchQuery: String
     let subtitleMode: SubtitleDisplayMode
+    var sentenceHighlightEnabled: Bool = false
     var showTimestamp: Bool = false
     var isSearchMatch: Bool = false
     var isCurrentSearchMatch: Bool = false
@@ -286,6 +359,7 @@ struct SentenceView: View, Equatable {
         lhs.highlightState == rhs.highlightState &&
         lhs.searchQuery == rhs.searchQuery &&
         lhs.subtitleMode == rhs.subtitleMode &&
+        lhs.sentenceHighlightEnabled == rhs.sentenceHighlightEnabled &&
         lhs.isSearchMatch == rhs.isSearchMatch &&
         lhs.isCurrentSearchMatch == rhs.isCurrentSearchMatch
     }
@@ -361,17 +435,19 @@ struct SentenceView: View, Equatable {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.vertical, 8)
-            .padding(.leading, 8)
+            .padding(.vertical, sentenceHighlightEnabled ? 4 : 8)
+            .padding(.leading, sentenceHighlightEnabled ? 0 : 8)
             .padding(.trailing, 12)
             .overlay(alignment: .leading) {
-                // Active sentence accent bar
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.blue)
-                    .frame(width: 3)
-                    .opacity(isActive ? 1 : 0)
-                    .scaleEffect(x: 1, y: isActive ? 1 : 0.5, anchor: .leading)
-                    .animation(.easeInOut(duration: 0.25), value: isActive)
+                // Active sentence accent bar (hidden in sentence highlight mode)
+                if !sentenceHighlightEnabled {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.blue)
+                        .frame(width: 3)
+                        .opacity(isActive ? 1 : 0)
+                        .scaleEffect(x: 1, y: isActive ? 1 : 0.5, anchor: .leading)
+                        .animation(.easeInOut(duration: 0.25), value: isActive)
+                }
             }
         }
         .buttonStyle(.plain)
@@ -415,7 +491,6 @@ struct SentenceView: View, Equatable {
     /// - Future segment: primary foreground, regular
     private func buildSegmentHighlightedAttributedString() -> AttributedString {
         var result = AttributedString()
-        let isCJK = CJKTextUtils.containsCJK(sentence.text)
 
         for (index, segment) in sentence.segments.enumerated() {
             let segmentText = segment.text.trimmingCharacters(in: .whitespaces)
@@ -446,9 +521,14 @@ struct SentenceView: View, Equatable {
 
             result.append(attrText)
 
-            // Add space between segments (not for CJK or last segment)
-            if index < sentence.segments.count - 1 && !isCJK {
-                result.append(AttributedString(" "))
+            // Add space between segments using CJK-aware boundary check
+            if index < sentence.segments.count - 1 {
+                let nextText = sentence.segments[index + 1].text.trimmingCharacters(in: .whitespaces)
+                let endIsCJK = segmentText.unicodeScalars.last.map { CJKTextUtils.isCJKScalar($0) } ?? false
+                let startIsCJK = nextText.unicodeScalars.first.map { CJKTextUtils.isCJKScalar($0) } ?? false
+                if !endIsCJK && !startIsCJK {
+                    result.append(AttributedString(" "))
+                }
             }
         }
 
@@ -609,7 +689,6 @@ struct TranscriptPreviewView: View {
     /// Build attributed string for preview with segment highlighting
     private func buildPreviewAttributedString(for sentence: TranscriptSentence) -> AttributedString {
         var result = AttributedString()
-        let isCJK = CJKTextUtils.containsCJK(sentence.text)
 
         for (index, segment) in sentence.segments.enumerated() {
             let segmentText = segment.text.trimmingCharacters(in: .whitespaces)
@@ -630,8 +709,13 @@ struct TranscriptPreviewView: View {
 
             result.append(attrText)
 
-            if index < sentence.segments.count - 1 && !isCJK {
-                result.append(AttributedString(" "))
+            if index < sentence.segments.count - 1 {
+                let nextText = sentence.segments[index + 1].text.trimmingCharacters(in: .whitespaces)
+                let endIsCJK = segmentText.unicodeScalars.last.map { CJKTextUtils.isCJKScalar($0) } ?? false
+                let startIsCJK = nextText.unicodeScalars.first.map { CJKTextUtils.isCJKScalar($0) } ?? false
+                if !endIsCJK && !startIsCJK {
+                    result.append(AttributedString(" "))
+                }
             }
         }
 
@@ -712,6 +796,7 @@ struct FullTranscriptContent: View {
                             onSegmentTap: onSegmentTap,
                             showTimestamps: false,
                             subtitleMode: settings.displayMode,
+                            sentenceHighlightEnabled: settings.sentenceHighlightEnabled,
                             searchMatchIds: searchMatchIds,
                             currentSearchMatchId: searchMatchIdsList.isEmpty ? nil : searchMatchIdsList[currentSearchIndex]
                         )

@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		154AA7D72F50161700848582 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = BB0000022F4F0001000NUKE0 /* Nuke */; };
+		154AA7D82F50161700848582 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = BB0000032F4F0001000NUKE0 /* NukeUI */; };
 		155164762ED374440015567A /* ZMarkupParser in Frameworks */ = {isa = PBXBuildFile; productRef = 155164752ED374440015567A /* ZMarkupParser */; };
 		158240912ED303EC000ABA90 /* FeedKit in Frameworks */ = {isa = PBXBuildFile; productRef = 158240902ED303EC000ABA90 /* FeedKit */; };
 		158240932ED303EC000ABA90 /* XMLKit in Frameworks */ = {isa = PBXBuildFile; productRef = 158240922ED303EC000ABA90 /* XMLKit */; };
@@ -123,6 +125,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				154AA7D82F50161700848582 /* NukeUI in Frameworks */,
+				154AA7D72F50161700848582 /* Nuke in Frameworks */,
 				155164762ED374440015567A /* ZMarkupParser in Frameworks */,
 				158240912ED303EC000ABA90 /* FeedKit in Frameworks */,
 				158240932ED303EC000ABA90 /* XMLKit in Frameworks */,

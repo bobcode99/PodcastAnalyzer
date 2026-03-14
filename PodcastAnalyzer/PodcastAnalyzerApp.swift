@@ -152,6 +152,9 @@ struct PodcastAnalyzerApp: App {
              let audioParam = components.queryItems?.first(where: { $0.name == "audio" })?.value {
             NotificationNavigationManager.shared.navigateToEpisode(audioURL: audioParam)
           }
+        case "expandplayer":
+          // Widget tap: open expanded player directly
+          NotificationNavigationManager.shared.requestExpandPlayer()
         case "nowplaying":
           // Navigate to currently playing episode
           NotificationNavigationManager.shared.navigateToNowPlaying()

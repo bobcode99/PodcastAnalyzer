@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Speech
 import SwiftData
 import OSLog
 
@@ -25,6 +26,7 @@ struct TranscriptJob: Identifiable {
   let podcastTitle: String
   let audioPath: String
   let language: String
+  let engine: TranscriptEngine?  // nil = use global Settings default
   var status: TranscriptJobStatus = .queued
 }
 
@@ -74,13 +76,20 @@ class TranscriptManager {
 
   /// Queues a transcript generation job
   func queueTranscript(
-    episodeTitle: String, podcastTitle: String, audioPath: String, language: String
+    episodeTitle: String, podcastTitle: String, audioPath: String, language: String,
+    engine: TranscriptEngine? = nil
   ) {
     let jobId = makeJobId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
 
-    if activeJobs[jobId] != nil {
-      logger.info("Transcript job already exists for: \(episodeTitle)")
-      return
+    if let existing = activeJobs[jobId] {
+      if case .failed = existing.status {
+        // Allow retry: remove the failed job so a new one can be queued
+        activeJobs.removeValue(forKey: jobId)
+        logger.info("Retrying failed transcript job for: \(episodeTitle)")
+      } else {
+        logger.info("Transcript job already exists for: \(episodeTitle)")
+        return
+      }
     }
 
     let job = TranscriptJob(
@@ -88,7 +97,8 @@ class TranscriptManager {
       episodeTitle: episodeTitle,
       podcastTitle: podcastTitle,
       audioPath: audioPath,
-      language: language
+      language: language,
+      engine: engine
     )
 
     pendingJobs.append(job)
@@ -162,7 +172,7 @@ class TranscriptManager {
     updatedJob.status = .downloadingModel(progress: 0)
     activeJobs[job.id] = updatedJob
 
-    let engine = TranscriptEngine(
+    let engine = job.engine ?? TranscriptEngine(
       rawValue: UserDefaults.standard.string(forKey: "transcriptEngine") ?? ""
     ) ?? .appleSpeech
 
@@ -179,6 +189,38 @@ class TranscriptManager {
 
       // MARK: Apple Speech path
       case .appleSpeech:
+        // Check speech recognition permission
+        let authStatus = SFSpeechRecognizer.authorizationStatus()
+        switch authStatus {
+        case .denied:
+          throw NSError(
+            domain: "TranscriptManager", code: 5,
+            userInfo: [NSLocalizedDescriptionKey: "Speech recognition permission denied. Enable in Settings > Privacy > Speech Recognition."]
+          )
+        case .restricted:
+          throw NSError(
+            domain: "TranscriptManager", code: 6,
+            userInfo: [NSLocalizedDescriptionKey: "Speech recognition is restricted on this device."]
+          )
+        case .notDetermined:
+          // Request permission
+          let granted = await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+              continuation.resume(returning: status == .authorized)
+            }
+          }
+          if !granted {
+            throw NSError(
+              domain: "TranscriptManager", code: 5,
+              userInfo: [NSLocalizedDescriptionKey: "Speech recognition permission denied. Enable in Settings > Privacy > Speech Recognition."]
+            )
+          }
+        case .authorized:
+          break
+        @unknown default:
+          break
+        }
+
         let transcriptService = TranscriptService(language: job.language)
 
         let modelReady = await transcriptService.isModelReady()
@@ -191,9 +233,11 @@ class TranscriptManager {
         }
 
         guard await transcriptService.isInitialized() else {
+          let setupError = await transcriptService.getSetupError()
+          let detail = setupError?.localizedDescription ?? "Unknown error"
           throw NSError(
             domain: "TranscriptManager", code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "Failed to initialize Apple Speech service"]
+            userInfo: [NSLocalizedDescriptionKey: "Failed to initialize Apple Speech service: \(detail)"]
           )
         }
 
@@ -254,7 +298,8 @@ class TranscriptManager {
 
         for try await progressUpdate in await whisperService.audioToSRTWithProgress(
           inputFile: audioURL,
-          modelVariant: modelVariant)
+          modelVariant: modelVariant,
+          language: job.language)
         {
           activeJobs[job.id]?.status = .transcribing(progress: progressUpdate.progress)
           if progressUpdate.isComplete {

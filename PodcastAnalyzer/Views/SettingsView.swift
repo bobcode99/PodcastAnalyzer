@@ -47,6 +47,21 @@ struct SettingsView: View {
           }
           .disabled(!syncManager.isBackgroundSyncEnabled)
 
+          Toggle(isOn: Binding(get: { viewModel.autoDownloadNewEpisodes }, set: { viewModel.setAutoDownloadNewEpisodes($0) })) {
+            HStack {
+              Image(systemName: "arrow.down.circle")
+                .foregroundStyle(.purple)
+                .frame(width: 24)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Auto-Download New Episodes")
+                Text("Automatically download new episodes from subscribed podcasts")
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+              }
+            }
+          }
+          .disabled(!syncManager.isBackgroundSyncEnabled)
+
           if syncManager.isBackgroundSyncEnabled {
             Button(action: {
               Task {
@@ -102,6 +117,23 @@ struct SettingsView: View {
               }
             }
           }
+
+          Toggle(isOn: Binding(
+            get: { viewModel.showTrendingEpisodes },
+            set: { viewModel.setShowTrendingEpisodes($0) }
+          )) {
+            HStack {
+              Image(systemName: "chart.line.uptrend.xyaxis")
+                .foregroundStyle(.orange)
+                .frame(width: 24)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Trending Episodes")
+                Text("Show trending episodes from top podcasts on Home")
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+              }
+            }
+          }
         } header: {
           Text("Appearance")
         } footer: {
@@ -135,7 +167,7 @@ struct SettingsView: View {
         Section {
           Picker(selection: $viewModel.defaultPlaybackSpeed) {
             ForEach(playbackSpeeds, id: \.self) { speed in
-              Text(formatSpeed(speed)).tag(speed)
+              Text(Formatters.formatSpeed(speed)).tag(speed)
             }
           } label: {
             HStack {
@@ -497,344 +529,6 @@ struct SettingsView: View {
     }
   }
 
-  private func formatSpeed(_ speed: Float) -> String {
-    if speed == 1.0 {
-      return "1x"
-    } else if speed.truncatingRemainder(dividingBy: 1) == 0 {
-      return "\(Int(speed))x"
-    } else {
-      return String(format: "%.2gx", speed)
-    }
-  }
-}
-
-// MARK: - Whisper Models Section
-
-/// Settings section for downloading / managing WhisperKit models.
-/// Shown inline inside the List when the user selects the Whisper engine.
-struct WhisperModelsSection: View {
-  private var manager: WhisperModelManager { .shared }
-
-  var body: some View {
-    Section {
-      ForEach(WhisperModelVariant.allCases.filter { $0.isSuitableForCurrentPlatform }) { variant in
-        WhisperModelRow(variant: variant)
-      }
-
-      // On macOS, also show the larger models (they're hidden on iOS via isSuitableForCurrentPlatform)
-      #if os(macOS)
-      // Already included via allCases filter above
-      #endif
-    } header: {
-      Text("Whisper Models")
-    } footer: {
-      Text("Download a model to enable Whisper transcription. \(WhisperModelVariant.platformDefault.displayName) is recommended for this device.")
-    }
-  }
-}
-
-struct WhisperModelRow: View {
-  let variant: WhisperModelVariant
-  private var manager: WhisperModelManager { .shared }
-
-  var body: some View {
-    let status = manager.status(for: variant)
-    let isSelected = manager.selectedModel == variant
-
-    HStack(spacing: 12) {
-      // Selected indicator
-      Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-        .foregroundStyle(isSelected ? .blue : .secondary)
-        .frame(width: 20)
-        .onTapGesture {
-          if status.isReady {
-            manager.setSelectedModel(variant)
-          }
-        }
-
-      VStack(alignment: .leading, spacing: 2) {
-        HStack(spacing: 6) {
-          Text(variant.displayName)
-            .fontWeight(isSelected ? .semibold : .regular)
-          Text(variant.approximateSize)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          if variant == .platformDefault {
-            Text("Recommended")
-              .font(.caption2)
-              .padding(.horizontal, 5)
-              .padding(.vertical, 2)
-              .background(Color.blue.opacity(0.15))
-              .foregroundStyle(.blue)
-              .clipShape(Capsule())
-          }
-        }
-        Text(variant.accuracyNote)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-      }
-
-      Spacer()
-
-      // Status / action
-      whisperModelAction(for: variant, status: status)
-    }
-    .padding(.vertical, 2)
-    .contentShape(Rectangle())
-    .onTapGesture {
-      if status.isReady {
-        manager.setSelectedModel(variant)
-      }
-    }
-  }
-
-  @ViewBuilder
-  private func whisperModelAction(
-    for variant: WhisperModelVariant,
-    status: WhisperModelStatus
-  ) -> some View {
-    switch status {
-    case .notDownloaded:
-      Button("Download") {
-        manager.downloadModel(variant)
-      }
-      .buttonStyle(.borderedProminent)
-      .controlSize(.small)
-
-    case .downloading(let progress):
-      HStack(spacing: 8) {
-        VStack(alignment: .trailing, spacing: 2) {
-          ProgressView(value: progress)
-            .frame(width: 60)
-          Text("\(Int(progress * 100))%")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-        }
-        Button {
-          manager.cancelDownload(variant)
-        } label: {
-          Image(systemName: "xmark.circle.fill")
-            .foregroundStyle(.secondary)
-        }
-        .buttonStyle(.plain)
-      }
-
-    case .ready:
-      HStack(spacing: 8) {
-        Image(systemName: "checkmark.circle.fill")
-          .foregroundStyle(.green)
-        Button {
-          manager.deleteModel(variant)
-        } label: {
-          Image(systemName: "trash")
-            .foregroundStyle(.red)
-            .font(.caption)
-        }
-        .buttonStyle(.plain)
-      }
-
-    case .error(let message):
-      VStack(alignment: .trailing, spacing: 2) {
-        Text("Failed")
-          .font(.caption)
-          .foregroundStyle(.red)
-        Button("Retry") {
-          manager.downloadModel(variant)
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.mini)
-      }
-      .help(message)
-    }
-  }
-}
-
-// MARK: - Feed Row View
-struct FeedRowView: View {
-  let feed: PodcastInfoModel
-
-  var body: some View {
-    HStack(spacing: 12) {
-      // Podcast artwork
-      if let urlString = feed.podcastInfo.imageURL.isEmpty ? nil : feed.podcastInfo.imageURL,
-        let url = URL(string: urlString)
-      {
-        AsyncImage(url: url) { phase in
-          switch phase {
-          case .empty:
-            ZStack {
-              Color.gray.opacity(0.2)
-              ProgressView().scaleEffect(0.5)
-            }
-          case .success(let image):
-            image.resizable().scaledToFill()
-          case .failure:
-            Image(systemName: "mic.fill")
-              .foregroundStyle(.purple)
-          @unknown default:
-            EmptyView()
-          }
-        }
-        .frame(width: 50, height: 50)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-      } else {
-        RoundedRectangle(cornerRadius: 8)
-          .fill(Color.purple.opacity(0.2))
-          .frame(width: 50, height: 50)
-          .overlay(
-            Image(systemName: "mic.fill")
-              .foregroundStyle(.purple)
-          )
-      }
-
-      VStack(alignment: .leading, spacing: 4) {
-        Text(feed.podcastInfo.title)
-          .font(.body)
-          .fontWeight(.medium)
-          .lineLimit(1)
-
-        Text("\(feed.podcastInfo.episodes.count) episodes")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-    }
-    .padding(.vertical, 4)
-  }
-}
-
-// MARK: - Add Feed Sheet View
-struct AddFeedView: View {
-  @Bindable var viewModel: SettingsViewModel
-  var modelContext: ModelContext
-  var onDismiss: () -> Void
-
-  @FocusState private var isTextFieldFocused: Bool
-
-  var body: some View {
-    NavigationStack {
-      VStack(spacing: 24) {
-        // Icon
-        Image(systemName: "antenna.radiowaves.left.and.right")
-          .font(.system(size: 60))
-          .foregroundStyle(.blue)
-          .padding(.top, 40)
-
-        // Title and description
-        VStack(spacing: 8) {
-          Text("Add Podcast")
-            .font(.title2)
-            .fontWeight(.bold)
-
-          Text("Enter the RSS feed URL to subscribe")
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-        }
-
-        // Input field
-        VStack(spacing: 12) {
-          TextField("https://example.com/feed.xml", text: $viewModel.rssUrlInput)
-            .textFieldStyle(.plain)
-            .padding(16)
-            .background(Color.platformSystemGray6)
-            .clipShape(.rect(cornerRadius: 12))
-            .autocorrectionDisabled()
-            #if os(iOS)
-            .textInputAutocapitalization(.never)
-            .keyboardType(.URL)
-            #endif
-            .disabled(viewModel.isValidating)
-            .focused($isTextFieldFocused)
-
-          // Status messages
-          if viewModel.isValidating {
-            HStack(spacing: 8) {
-              ProgressView()
-                .scaleEffect(0.8)
-              Text("Validating feed...")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-          } else if !viewModel.successMessage.isEmpty {
-            HStack(spacing: 6) {
-              Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-              Text(viewModel.successMessage)
-                .font(.caption)
-                .foregroundStyle(.green)
-            }
-          } else if !viewModel.errorMessage.isEmpty {
-            HStack(spacing: 6) {
-              Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
-              Text(viewModel.errorMessage)
-                .font(.caption)
-                .foregroundStyle(.red)
-            }
-          }
-        }
-        .padding(.horizontal, 24)
-
-        Spacer()
-
-        // Add button
-        Button(action: {
-          viewModel.addRssLink(modelContext: modelContext) {
-            // Dismiss on success
-            Task {
-              try? await Task.sleep(for: .seconds(1.5))
-              onDismiss()
-            }
-          }
-        }) {
-          HStack {
-            if viewModel.isValidating {
-              ProgressView()
-                .tint(.white)
-            } else {
-              Image(systemName: "plus.circle.fill")
-              Text("Add Podcast")
-            }
-          }
-          .font(.headline)
-          .foregroundStyle(.white)
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 16)
-          .background(
-            RoundedRectangle(cornerRadius: 14)
-              .fill(
-                viewModel.rssUrlInput.trimmingCharacters(in: .whitespaces).isEmpty
-                  || viewModel.isValidating ? Color.gray : Color.blue)
-          )
-        }
-        .disabled(
-          viewModel.rssUrlInput.trimmingCharacters(in: .whitespaces).isEmpty
-            || viewModel.isValidating
-        )
-        .padding(.horizontal, 24)
-        .padding(.bottom, 24)
-      }
-      #if os(iOS)
-      .navigationBarTitleDisplayMode(.inline)
-      #endif
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel") {
-            viewModel.clearMessages()
-            onDismiss()
-          }
-        }
-      }
-      .onAppear {
-        isTextFieldFocused = true
-      }
-      .onDisappear {
-        viewModel.clearMessages()
-      }
-    }
-    .presentationDetents([.medium])
-    .presentationDragIndicator(.visible)
-  }
 }
 
 #Preview {

@@ -85,10 +85,8 @@ struct VTTParser: Sendable {
 
       // Collect text lines (everything after timestamp line)
       let textLines = Array(lines[(tsIndex + 1)...])
-      let text =
-        textLines
-        .map { stripVTTTags($0) }  // Remove VTT tags like <v Speaker>
-        .joined(separator: " ")
+      let strippedLines = textLines.map { stripVTTTags($0) }
+      let text = CJKTextUtils.joinTexts(strippedLines)
         .trimmingCharacters(in: .whitespaces)
 
       guard !text.isEmpty else { continue }
@@ -132,7 +130,7 @@ struct VTTParser: Sendable {
   /// - Returns: Plain text transcript
   nonisolated static func extractPlainText(from vttContent: String) -> String {
     let segments = parseSegments(from: vttContent)
-    return segments.map { $0.text }.joined(separator: " ")
+    return CJKTextUtils.joinTexts(segments.map { $0.text })
   }
 
   // MARK: - Private Helpers

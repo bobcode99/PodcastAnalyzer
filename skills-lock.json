@@ -11,6 +11,11 @@
       "sourceType": "github",
       "computedHash": "0c4029813d8085be2337ddef76cfa8b932b9c33a95f1a592e5e1926054ffc319"
     },
+    "swiftui-pro": {
+      "source": "twostraws/swiftui-agent-skill",
+      "sourceType": "github",
+      "computedHash": "ce653d19fd00a4874489003025e9235be542e7134ff3c543e20afeb53fc3bc9a"
+    },
     "swiftui-ui-patterns": {
       "source": "dimillian/skills",
       "sourceType": "github",

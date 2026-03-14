@@ -102,7 +102,7 @@ struct MacMiniPlayerBar: View {
         // Right: Time, speed, and controls
         HStack(spacing: 12) {
           // Current time / Duration
-          Text("\(formatTime(audioManager.currentTime)) / \(formatTime(audioManager.duration))")
+          Text("\(Formatters.formatPlaybackTime(audioManager.currentTime)) / \(Formatters.formatPlaybackTime(audioManager.duration))")
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
             .monospacedDigit()
@@ -113,7 +113,7 @@ struct MacMiniPlayerBar: View {
             ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { speed in
               Button(action: { audioManager.setPlaybackRate(Float(speed)) }) {
                 HStack {
-                  Text(formatSpeed(Float(speed)))
+                  Text(Formatters.formatSpeed(Float(speed)))
                   if abs(audioManager.playbackRate - Float(speed)) < 0.01 {
                     Image(systemName: "checkmark")
                   }
@@ -121,7 +121,7 @@ struct MacMiniPlayerBar: View {
               }
             }
           } label: {
-            Text(formatSpeed(audioManager.playbackRate))
+            Text(Formatters.formatSpeed(audioManager.playbackRate))
               .font(.system(size: 11, weight: .medium))
               .padding(.horizontal, 8)
               .padding(.vertical, 4)
@@ -182,26 +182,6 @@ struct MacMiniPlayerBar: View {
     }
   }
 
-  private func formatTime(_ time: TimeInterval) -> String {
-    guard time.isFinite && time >= 0 else { return "0:00" }
-    let hours = Int(time) / 3600
-    let minutes = (Int(time) % 3600) / 60
-    let seconds = Int(time) % 60
-    if hours > 0 {
-      return String(format: "%d:%02d:%02d", hours, minutes, seconds)
-    }
-    return String(format: "%d:%02d", minutes, seconds)
-  }
-
-  private func formatSpeed(_ speed: Float) -> String {
-    if speed == 1.0 {
-      return "1x"
-    } else if speed.truncatingRemainder(dividingBy: 1) == 0 {
-      return "\(Int(speed))x"
-    } else {
-      return String(format: "%.2gx", speed)
-    }
-  }
 }
 
 // MARK: - macOS Expanded Player View
@@ -251,14 +231,14 @@ struct MacExpandedPlayerView: View {
         .tint(.accentColor)
 
         HStack {
-          Text(formatTime(audioManager.currentTime))
+          Text(Formatters.formatPlaybackTime(audioManager.currentTime))
             .font(.caption)
             .foregroundStyle(.secondary)
             .monospacedDigit()
 
           Spacer()
 
-          Text("-\(formatTime(audioManager.duration - audioManager.currentTime))")
+          Text("-\(Formatters.formatPlaybackTime(audioManager.duration - audioManager.currentTime))")
             .font(.caption)
             .foregroundStyle(.secondary)
             .monospacedDigit()
@@ -267,32 +247,7 @@ struct MacExpandedPlayerView: View {
       .padding(.horizontal, 40)
 
       // Playback controls
-      HStack(spacing: 40) {
-        Button(action: { audioManager.skipBackward(seconds: 15) }) {
-          Image(systemName: "gobackward.15")
-            .font(.title)
-        }
-        .buttonStyle(.plain)
-
-        Button(action: {
-          if audioManager.isPlaying {
-            audioManager.pause()
-          } else {
-            audioManager.resume()
-          }
-        }) {
-          Image(systemName: audioManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-            .font(.system(size: 64))
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut(.space, modifiers: [])
-
-        Button(action: { audioManager.skipForward(seconds: 30) }) {
-          Image(systemName: "goforward.30")
-            .font(.title)
-        }
-        .buttonStyle(.plain)
-      }
+      expandedPlaybackControls
 
       // Speed control
       HStack {
@@ -305,7 +260,7 @@ struct MacExpandedPlayerView: View {
           set: { audioManager.setPlaybackRate(Float($0)) }
         )) {
           ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { speed in
-            Text(formatSpeed(Float(speed))).tag(speed)
+            Text(Formatters.formatSpeed(Float(speed))).tag(speed)
           }
         }
         .pickerStyle(.segmented)
@@ -324,28 +279,49 @@ struct MacExpandedPlayerView: View {
     }
   }
 
-  private func formatTime(_ time: TimeInterval) -> String {
-    guard time.isFinite && time >= 0 else { return "0:00" }
-    let hours = Int(time) / 3600
-    let minutes = (Int(time) % 3600) / 60
-    let seconds = Int(time) % 60
+  // MARK: - Playback Controls (Liquid Glass on macOS 26+)
 
-    if hours > 0 {
-      return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+  @ViewBuilder
+  private var expandedPlaybackControls: some View {
+    let skipBack = Button(action: { audioManager.skipBackward(seconds: 15) }) {
+      Image(systemName: "gobackward.15")
+        .font(.title)
+    }
+
+    let playPause = Button(action: {
+      if audioManager.isPlaying {
+        audioManager.pause()
+      } else {
+        audioManager.resume()
+      }
+    }) {
+      Image(systemName: audioManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+        .font(.system(size: 64))
+    }
+    .keyboardShortcut(.space, modifiers: [])
+
+    let skipForward = Button(action: { audioManager.skipForward(seconds: 30) }) {
+      Image(systemName: "goforward.30")
+        .font(.title)
+    }
+
+    if #available(macOS 26, *) {
+      GlassEffectContainer(spacing: 20) {
+        HStack(spacing: 40) {
+          skipBack.buttonStyle(.glass)
+          playPause.buttonStyle(.glass)
+          skipForward.buttonStyle(.glass)
+        }
+      }
     } else {
-      return String(format: "%d:%02d", minutes, seconds)
+      HStack(spacing: 40) {
+        skipBack.buttonStyle(.plain)
+        playPause.buttonStyle(.plain)
+        skipForward.buttonStyle(.plain)
+      }
     }
   }
 
-  private func formatSpeed(_ speed: Float) -> String {
-    if speed == 1.0 {
-      return "1x"
-    } else if speed.truncatingRemainder(dividingBy: 1) == 0 {
-      return "\(Int(speed))x"
-    } else {
-      return String(format: "%.2gx", speed)
-    }
-  }
 }
 
 #Preview {

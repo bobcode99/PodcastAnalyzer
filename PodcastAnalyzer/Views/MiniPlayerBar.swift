@@ -40,7 +40,7 @@ struct MiniPlayerBar: View {
 
   private var progress: Double {
     guard audioManager.duration > 0 else { return 0 }
-    return audioManager.currentTime / audioManager.duration
+    return min(max(audioManager.currentTime / audioManager.duration, 0), 1)
   }
 
   var body: some View {
@@ -122,6 +122,14 @@ struct MiniPlayerBar: View {
           pendingNavigation = .podcastEpisodeList(podcast)
         }
       )
+    }
+    .onChange(of: NotificationNavigationManager.shared.shouldExpandPlayer) { _, shouldExpand in
+      if shouldExpand {
+        NotificationNavigationManager.shared.shouldExpandPlayer = false
+        if audioManager.currentEpisode != nil {
+          showExpandedPlayer = true
+        }
+      }
     }
   }
 

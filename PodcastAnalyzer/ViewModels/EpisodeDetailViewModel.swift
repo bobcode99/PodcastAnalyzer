@@ -140,12 +140,16 @@ final class EpisodeDetailViewModel {
   var isModelReady: Bool = false
   /// Language override for transcript generation (nil = use podcast RSS language)
   var selectedTranscriptLanguage: String?
+  /// Engine override for transcript generation (nil = use global Settings default)
+  var selectedTranscriptEngine: TranscriptEngine?
 
   @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
 
   // Parsed transcript segments for live captions
   var transcriptSegments: [TranscriptSegment] = []
+  // Raw (unmerged) segments for sentence highlight mode's per-segment granularity
+  var rawTranscriptSegments: [TranscriptSegment] = []
   var transcriptSearchQuery: String = ""
 
   // Sentence grouping (precomputed, not per-render)
@@ -263,7 +267,28 @@ final class EpisodeDetailViewModel {
   /// Checks if there's an active transcript job and starts observing
   private func checkAndObserveTranscriptJob() {
     if TranscriptManager.shared.activeJobs[episodeKey] != nil {
+      syncTranscriptState()
       observeTranscriptManager()
+    }
+  }
+
+  /// Immediately syncs transcriptState from current job status to avoid flash of 0%
+  private func syncTranscriptState() {
+    guard let job = TranscriptManager.shared.activeJobs[episodeKey] else { return }
+    switch job.status {
+    case .queued:
+      transcriptState = .transcribing(progress: 0)
+    case .downloadingModel(let progress):
+      transcriptState = .downloadingModel(progress: progress)
+    case .transcribing(let progress):
+      transcriptState = .transcribing(progress: progress)
+    case .completed:
+      loadExistingTranscriptTask?.cancel()
+      loadExistingTranscriptTask = Task {
+        await loadExistingTranscript()
+      }
+    case .failed(let error):
+      transcriptState = .error(error)
     }
   }
 
@@ -1179,7 +1204,8 @@ final class EpisodeDetailViewModel {
       episodeTitle: episode.title,
       podcastTitle: podcastTitle,
       audioPath: audioPath,
-      language: language
+      language: language,
+      engine: selectedTranscriptEngine
     )
 
     // Start observing TranscriptManager state
@@ -1220,29 +1246,7 @@ final class EpisodeDetailViewModel {
   }
 
   private func handleTranscriptJobUpdate() {
-    // Use Unit Separator (U+001F) as delimiter - same as TranscriptManager
-    let delimiter = "\u{1F}"
-    let jobId = "\(podcastTitle)\(delimiter)\(episode.title)"
-
-    if let job = TranscriptManager.shared.activeJobs[jobId] {
-      // Update local state based on job status
-      switch job.status {
-      case .queued:
-        transcriptState = .transcribing(progress: 0)
-      case .downloadingModel(let progress):
-        transcriptState = .downloadingModel(progress: progress)
-      case .transcribing(let progress):
-        transcriptState = .transcribing(progress: progress)
-      case .completed:
-        // Load the transcript from disk
-        loadExistingTranscriptTask?.cancel()
-        loadExistingTranscriptTask = Task {
-          await loadExistingTranscript()
-        }
-      case .failed(let error):
-        transcriptState = .error(error)
-      }
-    }
+    syncTranscriptState()
   }
 
   func copyTranscriptToClipboard() {
@@ -1285,6 +1289,9 @@ final class EpisodeDetailViewModel {
       }
     } catch {
       logger.error("Failed to load transcript: \(error.localizedDescription)")
+      await MainActor.run {
+        transcriptState = .error("Failed to load transcript: \(error.localizedDescription)")
+      }
     }
   }
 
@@ -1335,7 +1342,7 @@ final class EpisodeDetailViewModel {
     for startIndex in stride(from: 0, to: sentences.count, by: sentencesPerParagraph) {
       let endIndex = min(startIndex + sentencesPerParagraph, sentences.count)
       let chunk = sentences[startIndex..<endIndex]
-      let paragraphText = chunk.map { $0.text }.joined(separator: " ")
+      let paragraphText = CJKTextUtils.joinTexts(chunk.map { $0.text })
       paragraphs.append(paragraphText)
     }
 
@@ -1377,6 +1384,7 @@ final class EpisodeDetailViewModel {
   func parseTranscriptSegments() {
     guard !transcriptText.isEmpty else {
       transcriptSegments = []
+      rawTranscriptSegments = []
       return
     }
 
@@ -1476,6 +1484,9 @@ final class EpisodeDetailViewModel {
         ))
     }
 
+    // Always store raw segments for sentence highlight mode
+    rawTranscriptSegments = segments
+
     // Apply sentence grouping if enabled
     if subtitleSettings.groupSegmentsIntoSentences {
       let grouped = groupSegmentsIntoSentences(segments)
@@ -1537,13 +1548,15 @@ final class EpisodeDetailViewModel {
   private func mergeSegments(_ segments: [TranscriptSegment]) -> TranscriptSegment? {
     guard let first = segments.first, let last = segments.last else { return nil }
 
-    // Combine text with spaces
-    let combinedText = segments.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+    // Combine text with CJK-aware spacing
+    let texts = segments.map { $0.text.trimmingCharacters(in: .whitespaces) }
+    let combinedText = CJKTextUtils.joinTexts(texts)
 
     // Combine translated text if all segments have translations
     let translatedText: String?
     if segments.allSatisfy({ $0.translatedText != nil }) {
-      translatedText = segments.compactMap { $0.translatedText?.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+      let translations = segments.compactMap { $0.translatedText?.trimmingCharacters(in: .whitespaces) }
+      translatedText = CJKTextUtils.joinTexts(translations)
     } else {
       translatedText = nil
     }
@@ -1695,6 +1708,16 @@ final class EpisodeDetailViewModel {
     if !transcriptSearchQuery.isEmpty {
       updateSearchMatches(query: transcriptSearchQuery)
     }
+  }
+
+  /// Paragraph-grouped sentences for sentence highlight mode (larger grouping: up to 8 segments)
+  /// Uses raw (unmerged) segments for per-segment highlight granularity.
+  /// Falls back to merged segments when translations exist (translations are on merged segments).
+  var paragraphGroupedSentences: [TranscriptSentence] {
+    let hasTranslations = transcriptSegments.contains { $0.translatedText != nil }
+    let segments = (!rawTranscriptSegments.isEmpty && !hasTranslations)
+      ? rawTranscriptSegments : transcriptSegments
+    return TranscriptGrouping.groupIntoParagraphSentences(segments)
   }
 
   /// Regroup filtered segments into sentences (for search-filtered view)
@@ -1894,7 +1917,9 @@ final class EpisodeDetailViewModel {
           analysisType: type,
           podcastLanguage: podcastLanguage,
           onChunk: { [weak self] text in
-            self?.streamingText = text
+            Task { @MainActor in
+              self?.streamingText = text
+            }
           },
           progressCallback: { [weak self] message, progress in
             Task { @MainActor in

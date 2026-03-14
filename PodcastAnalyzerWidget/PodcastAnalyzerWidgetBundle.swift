@@ -11,7 +11,6 @@ import SwiftUI
 @main
 struct PodcastAnalyzerWidgetBundle: WidgetBundle {
     var body: some Widget {
-        PodcastAnalyzerWidget()
         NowPlayingWidget()
     }
 }

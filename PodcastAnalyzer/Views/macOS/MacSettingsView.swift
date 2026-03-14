@@ -48,7 +48,8 @@ struct MacSettingsView: View {
         }
       }
     }
-    .frame(width: 560, height: 500)
+    .frame(maxWidth: 560, minHeight: 300)
+    .scenePadding()
   }
 
   @ViewBuilder
@@ -68,19 +69,78 @@ struct MacSettingsView: View {
 // MARK: - General Settings Tab
 
 struct GeneralSettingsTab: View {
+  @State private var viewModel = SettingsViewModel()
+  @State private var showAddFeedSheet = false
+  @State private var showListeningStats = false
+  @Environment(\.modelContext) private var modelContext
+
   var body: some View {
     Form {
       Section {
-        HStack {
-          Text("Version")
-          Spacer()
-          Text("1.0.0")
+        Button("Add RSS Feed") {
+          showAddFeedSheet = true
+        }
+      } header: {
+        Text("Subscriptions")
+      } footer: {
+        Text("Add podcasts by pasting their RSS feed URL.")
+      }
+
+      Section {
+        Picker("Default Region", selection: $viewModel.selectedRegion) {
+          ForEach(Constants.podcastRegions, id: \.code) { region in
+            Text(region.name).tag(region.code)
+          }
+        }
+        .onChange(of: viewModel.selectedRegion) { _, newValue in
+          viewModel.setSelectedRegion(newValue)
+        }
+      } header: {
+        Text("Discovery")
+      } footer: {
+        Text("Region for browsing top podcasts on Home.")
+      }
+
+      Section {
+        Button("Listening Stats") {
+          showListeningStats = true
+        }
+      } header: {
+        Text("Insights")
+      } footer: {
+        Text("View your listening history, top shows, and trends.")
+      }
+
+      Section {
+        LabeledContent("Version") {
+          Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0")
             .foregroundStyle(.secondary)
         }
+      } header: {
+        Text("About")
       }
     }
     .formStyle(.grouped)
     .padding()
+    .sheet(isPresented: $showAddFeedSheet) {
+      AddFeedView(viewModel: viewModel, modelContext: modelContext) {
+        showAddFeedSheet = false
+      }
+    }
+    .sheet(isPresented: $showListeningStats) {
+      NavigationStack {
+        ListeningStatsView()
+          .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+              Button("Close") { showListeningStats = false }
+            }
+          }
+      }
+      .frame(minWidth: 500, minHeight: 400)
+    }
+    .onAppear {
+      viewModel.loadFeeds(modelContext: modelContext)
+    }
   }
 }
 
@@ -96,10 +156,20 @@ struct AppearanceSettingsTab: View {
           get: { viewModel.showEpisodeArtwork },
           set: { viewModel.setShowEpisodeArtwork($0) }
         ))
+
+        Toggle("For You Recommendations", isOn: Binding(
+          get: { viewModel.showForYouRecommendations },
+          set: { viewModel.setShowForYouRecommendations($0) }
+        ))
+
+        Toggle("Trending Episodes", isOn: Binding(
+          get: { viewModel.showTrendingEpisodes },
+          set: { viewModel.setShowTrendingEpisodes($0) }
+        ))
       } header: {
         Text("Episode Lists")
       } footer: {
-        Text("Hide artwork in episode lists to reduce memory usage.")
+        Text("Show AI-powered episode suggestions and trending episodes on Home. Hide artwork to reduce memory usage.")
       }
     }
     .formStyle(.grouped)
@@ -111,6 +181,7 @@ struct AppearanceSettingsTab: View {
 
 struct SyncSettingsTab: View {
   private var syncManager: BackgroundSyncManager { .shared }
+  @State private var viewModel = SettingsViewModel()
 
   var body: some View {
     Form {
@@ -120,10 +191,10 @@ struct SyncSettingsTab: View {
         if syncManager.isBackgroundSyncEnabled {
           Toggle("New Episode Notifications", isOn: Binding(get: { syncManager.isNotificationsEnabled }, set: { syncManager.isNotificationsEnabled = $0 }))
 
+          Toggle("Auto-Download New Episodes", isOn: Binding(get: { viewModel.autoDownloadNewEpisodes }, set: { viewModel.setAutoDownloadNewEpisodes($0) }))
+
           if let lastSync = syncManager.lastSyncDate {
-            HStack {
-              Text("Last Sync")
-              Spacer()
+            LabeledContent("Last Sync") {
               Text(lastSync.formatted(date: .abbreviated, time: .shortened))
                 .foregroundStyle(.secondary)
             }
@@ -158,7 +229,7 @@ struct PlaybackSettingsTab: View {
       Section {
         Picker("Default Playback Speed", selection: $viewModel.defaultPlaybackSpeed) {
           ForEach(playbackSpeeds, id: \.self) { speed in
-            Text(formatSpeed(speed)).tag(speed)
+            Text(Formatters.formatSpeed(speed)).tag(speed)
           }
         }
         .onChange(of: viewModel.defaultPlaybackSpeed) { _, newValue in
@@ -179,15 +250,6 @@ struct PlaybackSettingsTab: View {
     .padding()
   }
 
-  private func formatSpeed(_ speed: Float) -> String {
-    if speed == 1.0 {
-      return "1x"
-    } else if speed.truncatingRemainder(dividingBy: 1) == 0 {
-      return "\(Int(speed))x"
-    } else {
-      return String(format: "%.2gx", speed)
-    }
-  }
 }
 
 // MARK: - Transcript Settings Tab
@@ -220,9 +282,7 @@ struct TranscriptSettingsTab: View {
 
         // Apple Speech model status row
         if viewModel.selectedTranscriptEngine == .appleSpeech {
-          HStack {
-            Text("Speech Model Status")
-            Spacer()
+          LabeledContent("Speech Model Status") {
             appleSpeechStatusView
           }
         }
@@ -233,6 +293,39 @@ struct TranscriptSettingsTab: View {
           ? "\(viewModel.selectedTranscriptEngine.description)"
           : "Download the Apple Speech model for your preferred language. Each podcast uses its own language from the RSS feed."
         )
+      }
+
+      // MARK: Translation
+      Section {
+        Picker("Default Translation Language", selection: Binding(
+          get: { SubtitleSettingsManager.shared.targetLanguage },
+          set: { SubtitleSettingsManager.shared.targetLanguage = $0 }
+        )) {
+          ForEach(TranslationTargetLanguage.allCases, id: \.self) { language in
+            Text(language.displayName).tag(language)
+          }
+        }
+
+        Toggle("Auto-Translate on Load", isOn: Binding(
+          get: { SubtitleSettingsManager.shared.autoTranslateOnLoad },
+          set: { SubtitleSettingsManager.shared.autoTranslateOnLoad = $0 }
+        ))
+      } header: {
+        Text("Translation")
+      } footer: {
+        Text("Default target language for translating transcripts and episode descriptions.")
+      }
+
+      // MARK: Auto-generate
+      Section {
+        Toggle("Auto-Generate Transcripts", isOn: Binding(
+          get: { SubtitleSettingsManager.shared.autoGenerateTranscripts },
+          set: { SubtitleSettingsManager.shared.autoGenerateTranscripts = $0 }
+        ))
+      } header: {
+        Text("Automation")
+      } footer: {
+        Text("Automatically generate transcripts when episodes are downloaded.")
       }
 
       // MARK: Whisper models list
@@ -384,15 +477,13 @@ struct MacWhisperModelRow: View {
 // MARK: - AI Settings Tab
 
 struct AISettingsTab: View {
+  @State private var showAISettings = false
+
   var body: some View {
     Form {
       Section {
-        NavigationLink {
-          AISettingsView()
-        } label: {
-          HStack {
-            Text("Configure AI Providers")
-            Spacer()
+        Button(action: { showAISettings = true }) {
+          LabeledContent("Configure AI Providers") {
             if AISettingsManager.shared.hasConfiguredProvider {
               Text(AISettingsManager.shared.selectedProvider.displayName)
                 .foregroundStyle(.secondary)
@@ -402,6 +493,7 @@ struct AISettingsTab: View {
             }
           }
         }
+        .buttonStyle(.plain)
       } header: {
         Text("AI Analysis")
       } footer: {
@@ -410,6 +502,17 @@ struct AISettingsTab: View {
     }
     .formStyle(.grouped)
     .padding()
+    .sheet(isPresented: $showAISettings) {
+      NavigationStack {
+        AISettingsView()
+          .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+              Button("Close") { showAISettings = false }
+            }
+          }
+      }
+      .frame(minWidth: 500, minHeight: 400)
+    }
   }
 }
 
