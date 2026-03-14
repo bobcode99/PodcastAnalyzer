@@ -367,7 +367,9 @@ final class HomeViewModel {
     EnhancedAudioManager.shared.play(
       episode: playbackEpisode,
       audioURL: audioURL,
-      imageURL: episode.imageURL
+      startTime: episode.lastPlaybackPosition,
+      imageURL: episode.imageURL,
+      useDefaultSpeed: episode.lastPlaybackPosition == 0
     )
   }
 
