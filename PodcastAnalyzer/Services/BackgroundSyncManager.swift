@@ -23,6 +23,9 @@ extension Notification.Name {
 
   /// Posted when a podcast is updated (from any source)
   static let podcastDataChanged = Notification.Name("podcastDataChanged")
+
+  /// Posted when an episode's completion state changes (played/unplayed)
+  static let episodeCompletionChanged = Notification.Name("episodeCompletionChanged")
 }
 
 @MainActor

@@ -96,6 +96,14 @@ final class HomeViewModel {
   @ObservationIgnored
   private var regionObserverTask: Task<Void, Never>?
 
+  // Task for episode completion observation
+  @ObservationIgnored
+  private var completionObserverTask: Task<Void, Never>?
+
+  // Track current playing episode to detect changes
+  @ObservationIgnored
+  private var lastCurrentEpisodeId: String?
+
   // Use Unit Separator (U+001F) as delimiter
   private static let episodeKeyDelimiter = "\u{1F}"
 
@@ -139,6 +147,35 @@ final class HomeViewModel {
         if let newRegion = notification.object as? String {
           selectedRegion = newRegion
         }
+      }
+    }
+
+    // Refresh Up Next when an episode is marked played/unplayed
+    completionObserverTask = Task {
+      for await _ in NotificationCenter.default.notifications(named: .episodeCompletionChanged) {
+        await loadUpNextEpisodes()
+      }
+    }
+
+    // Refresh Up Next when the currently playing episode changes
+    startCurrentEpisodeObserver()
+  }
+
+  /// Observe EnhancedAudioManager.currentEpisode for changes and reload Up Next
+  private func startCurrentEpisodeObserver() {
+    // Use withObservationTracking to detect when currentEpisode changes
+    withObservationTracking {
+      _ = EnhancedAudioManager.shared.currentEpisode
+    } onChange: { [weak self] in
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        let newId = EnhancedAudioManager.shared.currentEpisode?.id
+        if newId != self.lastCurrentEpisodeId {
+          self.lastCurrentEpisodeId = newId
+          await self.loadUpNextEpisodes()
+        }
+        // Re-register for next change
+        self.startCurrentEpisodeObserver()
       }
     }
   }
@@ -253,7 +290,48 @@ final class HomeViewModel {
         return (ep1.episodeInfo.pubDate ?? .distantPast) > (ep2.episodeInfo.pubDate ?? .distantPast)
       }
     }
-    upNextEpisodes = Array(allEpisodes.prefix(20))
+    var result = Array(allEpisodes.prefix(20))
+
+    // Ensure the currently playing episode is at the top of Up Next
+    if let currentEpisode = EnhancedAudioManager.shared.currentEpisode {
+      let currentKey = Self.makeEpisodeKey(podcastTitle: currentEpisode.podcastTitle, episodeTitle: currentEpisode.title)
+      let currentModel = modelsByKey[currentKey]
+
+      // Don't add if already completed
+      if currentModel?.isCompleted != true {
+        if let existingIndex = result.firstIndex(where: { $0.id == currentKey }) {
+          // Already in list — move to top
+          let episode = result.remove(at: existingIndex)
+          result.insert(episode, at: 0)
+        } else {
+          // Not in list (non-subscribed podcast or beyond prefix limit) — create and insert at top
+          let episodeInfo = PodcastEpisodeInfo(
+            title: currentEpisode.title,
+            podcastEpisodeDescription: currentEpisode.episodeDescription,
+            pubDate: currentEpisode.pubDate,
+            audioURL: currentEpisode.audioURL,
+            imageURL: currentEpisode.imageURL,
+            duration: currentEpisode.duration,
+            guid: currentEpisode.guid
+          )
+          let libraryEpisode = LibraryEpisode(
+            id: currentKey,
+            podcastTitle: currentEpisode.podcastTitle,
+            imageURL: currentEpisode.imageURL,
+            language: "",
+            episodeInfo: episodeInfo,
+            isStarred: currentModel?.isStarred ?? false,
+            isDownloaded: currentModel?.localAudioPath != nil,
+            isCompleted: false,
+            lastPlaybackPosition: currentModel?.lastPlaybackPosition ?? 0,
+            savedDuration: currentModel?.duration ?? 0
+          )
+          result.insert(libraryEpisode, at: 0)
+        }
+      }
+    }
+
+    upNextEpisodes = result
     logger.info("Loaded \(self.upNextEpisodes.count) up next episodes")
 
     // Populate auto-play candidates from up next episodes
@@ -325,10 +403,8 @@ final class HomeViewModel {
       context.insert(model)
       try? context.save()
     }
-    // Reload to reflect changes (episode will disappear from Up Next when marked as played)
-    Task {
-      await loadUpNextEpisodes()
-    }
+    // Post notification — the completion observer will reload Up Next
+    NotificationCenter.default.post(name: .episodeCompletionChanged, object: nil)
   }
 
   // MARK: - Load Top Podcasts
@@ -689,6 +765,8 @@ final class HomeViewModel {
     loadTask = nil
     subscribeTask?.cancel()
     subscribeTask = nil
+    completionObserverTask?.cancel()
+    completionObserverTask = nil
   }
 
   // MARK: - Find Podcast Model
@@ -752,9 +830,7 @@ final class HomeViewModel {
       try? context.save()
     }
 
-    // Reload to reflect changes
-    Task {
-      await loadUpNextEpisodes()
-    }
+    // Post notification — the completion observer will reload Up Next
+    NotificationCenter.default.post(name: .episodeCompletionChanged, object: nil)
   }
 }

@@ -154,8 +154,14 @@ class PlaybackStateCoordinator {
       }
 
       // Mark as completed if within 30 seconds of end
+      let wasCompleted = model.isCompleted
       if update.duration > 0 && (update.duration - update.position) < 30 {
         model.isCompleted = true
+      }
+
+      // Notify when completion state changes so UI (e.g. Up Next) can refresh
+      if model.isCompleted != wasCompleted {
+        NotificationCenter.default.post(name: .episodeCompletionChanged, object: nil)
       }
 
       try context.save()

@@ -179,7 +179,7 @@ struct HomeView: View {
         Spacer()
 
         if !viewModel.upNextEpisodes.isEmpty {
-          NavigationLink(destination: UpNextListView(episodes: viewModel.upNextEpisodes)) {
+          NavigationLink(destination: UpNextListView(viewModel: viewModel)) {
             Text("See All")
               .font(.subheadline)
               .foregroundStyle(.blue)
@@ -224,6 +224,7 @@ struct HomeView: View {
           .padding(.horizontal)
         }
         .scrollIndicators(.hidden)
+        .animation(.default, value: viewModel.upNextEpisodes.map(\.id))
       }
     }
   }
@@ -968,15 +969,14 @@ struct PodcastPreviewSheet: View {
 // MARK: - Up Next List View
 
 struct UpNextListView: View {
-  let episodes: [LibraryEpisode]
+  var viewModel: HomeViewModel
   @Environment(\.modelContext) private var modelContext
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
   @State private var episodeModels: [String: EpisodeDownloadModel] = [:]
-  @State private var lastEpisodeIDs: [String] = []
 
   var body: some View {
-    List(episodes) { episode in
+    List(viewModel.upNextEpisodes) { episode in
       EpisodeRowView(
         libraryEpisode: episode,
         episodeModel: episodeModels[episode.id],
@@ -992,13 +992,10 @@ struct UpNextListView: View {
     }
     .listStyle(.plain)
     .onAppear { batchFetchEpisodeModels() }
-    .onChange(of: episodes.count) { _, _ in
-      let currentIDs = episodes.map(\.id)
-      if currentIDs != lastEpisodeIDs {
-        lastEpisodeIDs = currentIDs
-        batchFetchEpisodeModels()
-      }
+    .onChange(of: viewModel.upNextEpisodes.count) { _, _ in
+      batchFetchEpisodeModels()
     }
+    .animation(.default, value: viewModel.upNextEpisodes.map(\.id))
     .navigationTitle("Up Next")
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
@@ -1054,25 +1051,8 @@ struct UpNextListView: View {
   }
 
   private func togglePlayed(_ episode: LibraryEpisode) {
-    if let model = episodeModels[episode.id] {
-      model.isCompleted.toggle()
-      if !model.isCompleted {
-        model.lastPlaybackPosition = 0
-      }
-      try? modelContext.save()
-    } else if let audioURL = episode.episodeInfo.audioURL {
-      let model = EpisodeDownloadModel(
-        episodeTitle: episode.episodeInfo.title,
-        podcastTitle: episode.podcastTitle,
-        audioURL: audioURL,
-        imageURL: episode.imageURL ?? "",
-        pubDate: episode.episodeInfo.pubDate
-      )
-      model.isCompleted = true
-      modelContext.insert(model)
-      try? modelContext.save()
-      episodeModels[episode.id] = model
-    }
+    viewModel.togglePlayed(for: episode)
+    batchFetchEpisodeModels()
   }
 
   private func downloadEpisode(_ episode: LibraryEpisode) {
