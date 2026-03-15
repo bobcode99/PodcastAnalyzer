@@ -127,7 +127,7 @@ struct MacContentView: View {
       // Mini player at absolute bottom, fixed-width and centered for floating feel
         if hasCurrentEpisode {
           MacMiniPlayerBar()
-            .frame(width: 800)
+            .frame(maxWidth: 840)
             .padding(.bottom, 20)
             .modifier(MiniPlayerMaterialModifier())
             .shadow(radius: 8)
@@ -280,11 +280,7 @@ struct MacHomeContentView: View {
               .font(.title2)
               .fontWeight(.bold)
             Spacer()
-            if !viewModel.upNextEpisodes.isEmpty {
-              Button("See All") {}
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
-            }
+            // "See All" removed — no destination implemented yet
           }
 
           if viewModel.upNextEpisodes.isEmpty {
@@ -1327,6 +1323,15 @@ private struct MiniPlayerMaterialModifier: ViewModifier {
     if #available(macOS 26, *) {
       content
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+    } else {
+      content
+        .background(.ultraThinMaterial, in: .rect(cornerRadius: 12))
+    }
+  }
+}
+
+#endif
+12))
     } else {
       content
         .background(.ultraThinMaterial, in: .rect(cornerRadius: 12))

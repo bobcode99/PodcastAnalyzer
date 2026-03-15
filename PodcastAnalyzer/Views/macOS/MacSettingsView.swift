@@ -150,22 +150,24 @@ struct AppearanceSettingsTab: View {
   @State private var viewModel = SettingsViewModel()
 
   var body: some View {
+    @Bindable var viewModel = viewModel
+
     Form {
       Section {
-        Toggle("Show Episode Artwork", isOn: Binding(
-          get: { viewModel.showEpisodeArtwork },
-          set: { viewModel.setShowEpisodeArtwork($0) }
-        ))
+        Toggle("Show Episode Artwork", isOn: $viewModel.showEpisodeArtwork)
+          .onChange(of: viewModel.showEpisodeArtwork) { _, newValue in
+            viewModel.setShowEpisodeArtwork(newValue)
+          }
 
-        Toggle("For You Recommendations", isOn: Binding(
-          get: { viewModel.showForYouRecommendations },
-          set: { viewModel.setShowForYouRecommendations($0) }
-        ))
+        Toggle("For You Recommendations", isOn: $viewModel.showForYouRecommendations)
+          .onChange(of: viewModel.showForYouRecommendations) { _, newValue in
+            viewModel.setShowForYouRecommendations(newValue)
+          }
 
-        Toggle("Trending Episodes", isOn: Binding(
-          get: { viewModel.showTrendingEpisodes },
-          set: { viewModel.setShowTrendingEpisodes($0) }
-        ))
+        Toggle("Trending Episodes", isOn: $viewModel.showTrendingEpisodes)
+          .onChange(of: viewModel.showTrendingEpisodes) { _, newValue in
+            viewModel.setShowTrendingEpisodes(newValue)
+          }
       } header: {
         Text("Episode Lists")
       } footer: {
@@ -180,18 +182,23 @@ struct AppearanceSettingsTab: View {
 // MARK: - Sync Settings Tab
 
 struct SyncSettingsTab: View {
-  private var syncManager: BackgroundSyncManager { .shared }
   @State private var viewModel = SettingsViewModel()
 
   var body: some View {
+    @Bindable var syncManager = BackgroundSyncManager.shared
+    @Bindable var viewModel = viewModel
+
     Form {
       Section {
-          Toggle("Enable Background Sync", isOn: Binding(get: { syncManager.isBackgroundSyncEnabled }, set: { syncManager.isBackgroundSyncEnabled = $0 }))
+        Toggle("Enable Background Sync", isOn: $syncManager.isBackgroundSyncEnabled)
 
         if syncManager.isBackgroundSyncEnabled {
-          Toggle("New Episode Notifications", isOn: Binding(get: { syncManager.isNotificationsEnabled }, set: { syncManager.isNotificationsEnabled = $0 }))
+          Toggle("New Episode Notifications", isOn: $syncManager.isNotificationsEnabled)
 
-          Toggle("Auto-Download New Episodes", isOn: Binding(get: { viewModel.autoDownloadNewEpisodes }, set: { viewModel.setAutoDownloadNewEpisodes($0) }))
+          Toggle("Auto-Download New Episodes", isOn: $viewModel.autoDownloadNewEpisodes)
+            .onChange(of: viewModel.autoDownloadNewEpisodes) { _, newValue in
+              viewModel.setAutoDownloadNewEpisodes(newValue)
+            }
 
           if let lastSync = syncManager.lastSyncDate {
             LabeledContent("Last Sync") {
@@ -225,6 +232,8 @@ struct PlaybackSettingsTab: View {
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
   var body: some View {
+    @Bindable var viewModel = viewModel
+
     Form {
       Section {
         Picker("Default Playback Speed", selection: $viewModel.defaultPlaybackSpeed) {
@@ -236,10 +245,10 @@ struct PlaybackSettingsTab: View {
           viewModel.setDefaultPlaybackSpeed(newValue)
         }
 
-        Toggle("Auto-Play Random Episode", isOn: Binding(
-          get: { viewModel.autoPlayNextEpisode },
-          set: { viewModel.setAutoPlayNextEpisode($0) }
-        ))
+        Toggle("Auto-Play Random Episode", isOn: $viewModel.autoPlayNextEpisode)
+          .onChange(of: viewModel.autoPlayNextEpisode) { _, newValue in
+            viewModel.setAutoPlayNextEpisode(newValue)
+          }
       } header: {
         Text("Playback")
       } footer: {
@@ -256,19 +265,21 @@ struct PlaybackSettingsTab: View {
 
 struct TranscriptSettingsTab: View {
   @State private var viewModel = SettingsViewModel()
-  private var whisperManager: WhisperModelManager { .shared }
 
   var body: some View {
+    @Bindable var viewModel = viewModel
+    @Bindable var subtitleSettings = SubtitleSettingsManager.shared
+
     Form {
       // MARK: Engine selection
       Section {
-        Picker("Engine", selection: Binding(
-          get: { viewModel.selectedTranscriptEngine },
-          set: { viewModel.setTranscriptEngine($0) }
-        )) {
+        Picker("Engine", selection: $viewModel.selectedTranscriptEngine)  {
           ForEach(TranscriptEngine.allCases) { engine in
             Text(engine.displayName).tag(engine)
           }
+        }
+        .onChange(of: viewModel.selectedTranscriptEngine) { _, newValue in
+          viewModel.setTranscriptEngine(newValue)
         }
 
         Picker("Language", selection: $viewModel.selectedTranscriptLocale) {
@@ -283,7 +294,7 @@ struct TranscriptSettingsTab: View {
         // Apple Speech model status row
         if viewModel.selectedTranscriptEngine == .appleSpeech {
           LabeledContent("Speech Model Status") {
-            appleSpeechStatusView
+            AppleSpeechStatusView(viewModel: viewModel)
           }
         }
       } header: {
@@ -297,19 +308,13 @@ struct TranscriptSettingsTab: View {
 
       // MARK: Translation
       Section {
-        Picker("Default Translation Language", selection: Binding(
-          get: { SubtitleSettingsManager.shared.targetLanguage },
-          set: { SubtitleSettingsManager.shared.targetLanguage = $0 }
-        )) {
+        Picker("Default Translation Language", selection: $subtitleSettings.targetLanguage) {
           ForEach(TranslationTargetLanguage.allCases, id: \.self) { language in
             Text(language.displayName).tag(language)
           }
         }
 
-        Toggle("Auto-Translate on Load", isOn: Binding(
-          get: { SubtitleSettingsManager.shared.autoTranslateOnLoad },
-          set: { SubtitleSettingsManager.shared.autoTranslateOnLoad = $0 }
-        ))
+        Toggle("Auto-Translate on Load", isOn: $subtitleSettings.autoTranslateOnLoad)
       } header: {
         Text("Translation")
       } footer: {
@@ -318,10 +323,7 @@ struct TranscriptSettingsTab: View {
 
       // MARK: Auto-generate
       Section {
-        Toggle("Auto-Generate Transcripts", isOn: Binding(
-          get: { SubtitleSettingsManager.shared.autoGenerateTranscripts },
-          set: { SubtitleSettingsManager.shared.autoGenerateTranscripts = $0 }
-        ))
+        Toggle("Auto-Generate Transcripts", isOn: $subtitleSettings.autoGenerateTranscripts)
       } header: {
         Text("Automation")
       } footer: {
@@ -350,8 +352,14 @@ struct TranscriptSettingsTab: View {
     }
   }
 
-  @ViewBuilder
-  private var appleSpeechStatusView: some View {
+}
+
+// MARK: - Apple Speech Status View
+
+struct AppleSpeechStatusView: View {
+  let viewModel: SettingsViewModel
+
+  var body: some View {
     switch viewModel.transcriptModelStatus {
     case .checking:
       HStack(spacing: 8) {
@@ -368,9 +376,10 @@ struct TranscriptSettingsTab: View {
       HStack(spacing: 8) {
         ProgressView(value: progress).frame(width: 80)
         Text("\(Int(progress * 100))%").foregroundStyle(.secondary)
-        Button { viewModel.cancelTranscriptDownload() } label: {
-          Image(systemName: "xmark.circle.fill")
+        Button("Cancel download", systemImage: "xmark.circle.fill") {
+          viewModel.cancelTranscriptDownload()
         }
+        .labelStyle(.iconOnly)
         .buttonStyle(.plain)
       }
     case .ready:
@@ -400,40 +409,39 @@ struct MacWhisperModelRow: View {
     let status = manager.status(for: variant)
     let isSelected = manager.selectedModel == variant
 
-    HStack(spacing: 10) {
-      Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-        .foregroundStyle(isSelected ? .blue : .secondary)
-        .onTapGesture {
-          if status.isReady { manager.setSelectedModel(variant) }
-        }
-
-      VStack(alignment: .leading, spacing: 2) {
-        HStack(spacing: 6) {
-          Text(variant.displayName)
-            .fontWeight(isSelected ? .semibold : .regular)
-          Text(variant.approximateSize)
-            .font(.caption).foregroundStyle(.secondary)
-          if variant == .platformDefault {
-            Text("Recommended")
-              .font(.caption2)
-              .padding(.horizontal, 5).padding(.vertical, 2)
-              .background(Color.blue.opacity(0.15))
-              .foregroundStyle(.blue)
-              .clipShape(Capsule())
-          }
-        }
-        Text(variant.accuracyNote)
-          .font(.caption2).foregroundStyle(.secondary)
-      }
-
-      Spacer()
-
-      macWhisperAction(for: variant, status: status)
-    }
-    .contentShape(Rectangle())
-    .onTapGesture {
+    Button(action: {
       if status.isReady { manager.setSelectedModel(variant) }
+    }) {
+      HStack(spacing: 10) {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+          .foregroundStyle(isSelected ? .blue : .secondary)
+
+        VStack(alignment: .leading, spacing: 2) {
+          HStack(spacing: 6) {
+            Text(variant.displayName)
+              .fontWeight(isSelected ? .semibold : .regular)
+            Text(variant.approximateSize)
+              .font(.caption).foregroundStyle(.secondary)
+            if variant == .platformDefault {
+              Text("Recommended")
+                .font(.caption2)
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(Color.blue.opacity(0.15))
+                .foregroundStyle(.blue)
+                .clipShape(Capsule())
+            }
+          }
+          Text(variant.accuracyNote)
+            .font(.caption2).foregroundStyle(.secondary)
+        }
+
+        Spacer()
+
+        macWhisperAction(for: variant, status: status)
+      }
+      .contentShape(Rectangle())
     }
+    .buttonStyle(.plain)
   }
 
   @ViewBuilder
@@ -449,9 +457,10 @@ struct MacWhisperModelRow: View {
       HStack(spacing: 8) {
         ProgressView(value: progress).frame(width: 80)
         Text("\(Int(progress * 100))%").font(.caption).foregroundStyle(.secondary)
-        Button { manager.cancelDownload(variant) } label: {
-          Image(systemName: "xmark.circle.fill")
+        Button("Cancel download", systemImage: "xmark.circle.fill") {
+          manager.cancelDownload(variant)
         }
+        .labelStyle(.iconOnly)
         .buttonStyle(.plain)
       }
     case .ready:
@@ -815,6 +824,38 @@ struct StorageSettingsTab: View {
 
 #Preview {
   MacSettingsView()
+}
+
+#endif
+
+}
+
+#endif
+modelContext.delete(tag)
+        }
+        try? modelContext.save()
+      }
+
+      await MainActor.run {
+        isClearingData = false
+        clearingMessage = ""
+        aiAnalysisCount = 0
+      }
+    }
+  }
+}
+
+#Preview {
+  MacSettingsView()
+}
+
+#endif
+
+}
+
+#endif
+dif
+
 }
 
 #endif

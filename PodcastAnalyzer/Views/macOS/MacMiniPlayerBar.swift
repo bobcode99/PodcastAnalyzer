@@ -70,13 +70,7 @@ struct MacMiniPlayerBar: View {
           .help("Skip back 15 seconds")
 
           // Play/Pause (larger, prominent)
-          Button(action: {
-            if audioManager.isPlaying {
-              audioManager.pause()
-            } else {
-              audioManager.resume()
-            }
-          }) {
+          Button(action: togglePlayback) {
             Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
               .font(.system(size: 24))
               .foregroundStyle(.primary)
@@ -148,6 +142,16 @@ struct MacMiniPlayerBar: View {
     }
     .sheet(isPresented: $showExpandedPlayer) {
       MacExpandedPlayerView()
+    }
+  }
+
+  // MARK: - Actions
+
+  private func togglePlayback() {
+    if audioManager.isPlaying {
+      audioManager.pause()
+    } else {
+      audioManager.resume()
     }
   }
 
@@ -279,6 +283,16 @@ struct MacExpandedPlayerView: View {
     }
   }
 
+  // MARK: - Actions
+
+  private func togglePlayback() {
+    if audioManager.isPlaying {
+      audioManager.pause()
+    } else {
+      audioManager.resume()
+    }
+  }
+
   // MARK: - Playback Controls (Liquid Glass on macOS 26+)
 
   @ViewBuilder
@@ -288,13 +302,7 @@ struct MacExpandedPlayerView: View {
         .font(.title)
     }
 
-    let playPause = Button(action: {
-      if audioManager.isPlaying {
-        audioManager.pause()
-      } else {
-        audioManager.resume()
-      }
-    }) {
+    let playPause = Button(action: togglePlayback) {
       Image(systemName: audioManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
         .font(.system(size: 64))
     }
@@ -317,6 +325,20 @@ struct MacExpandedPlayerView: View {
       HStack(spacing: 40) {
         skipBack.buttonStyle(.plain)
         playPause.buttonStyle(.plain)
+        skipForward.buttonStyle(.plain)
+      }
+    }
+  }
+
+}
+
+#Preview {
+  MacMiniPlayerBar()
+    .frame(width: 800)
+}
+
+#endif
+ttonStyle(.plain)
         skipForward.buttonStyle(.plain)
       }
     }
