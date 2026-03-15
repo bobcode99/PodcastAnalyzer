@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "swift-concurrency-pro": {
+      "source": "twostraws/swift-concurrency-agent-skill",
+      "sourceType": "github",
+      "computedHash": "dec65531b4bd37d15e6243dbb0d2d1f554b4f4087bcb2e8deb7273f570fa4069"
+    },
     "swiftui-liquid-glass": {
       "source": "dimillian/skills",
       "sourceType": "github",
