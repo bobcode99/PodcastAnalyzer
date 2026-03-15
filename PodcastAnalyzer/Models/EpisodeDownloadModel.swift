@@ -17,11 +17,11 @@ import SwiftData
 
 @Model
 class EpisodeDownloadModel {
-  @Attribute(.unique) var id: String
+  var id: String = ""
 
-  var episodeTitle: String
-  var podcastTitle: String
-  var audioURL: String
+  var episodeTitle: String = ""
+  var podcastTitle: String = ""
+  var audioURL: String = ""
   var localAudioPath: String?
   var captionPath: String?
 

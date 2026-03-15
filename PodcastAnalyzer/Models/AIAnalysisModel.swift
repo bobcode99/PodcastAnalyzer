@@ -13,9 +13,9 @@ import SwiftData
 @Model
 final class EpisodeAIAnalysis {
     // Link to episode
-    var episodeAudioURL: String
-    var episodeTitle: String
-    var podcastTitle: String
+    var episodeAudioURL: String = ""
+    var episodeTitle: String = ""
+    var podcastTitle: String = ""
 
     // Summary analysis
     var summaryText: String?
@@ -57,8 +57,8 @@ final class EpisodeAIAnalysis {
     var qaHistoryJSON: String?
 
     // Timestamps
-    var createdAt: Date
-    var updatedAt: Date
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
 
     init(
         episodeAudioURL: String,
@@ -166,21 +166,21 @@ struct QAEntry: Codable, Sendable {
 @Model
 final class EpisodeQuickTagsModel {
     // Link to episode
-    var episodeAudioURL: String
-    var episodeTitle: String
+    var episodeAudioURL: String = ""
+    var episodeTitle: String = ""
 
     // Tags data
-    var tags: [String]
-    var primaryCategory: String
+    var tags: [String] = []
+    var primaryCategory: String = ""
     var secondaryCategory: String?
-    var contentType: String
-    var difficulty: String
+    var contentType: String = ""
+    var difficulty: String = ""
 
     // Brief summary
     var briefSummary: String?
 
     // Timestamps
-    var generatedAt: Date
+    var generatedAt: Date = Date()
 
     init(
         episodeAudioURL: String,

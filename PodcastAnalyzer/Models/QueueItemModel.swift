@@ -10,11 +10,11 @@ import SwiftData
 
 @Model
 class QueueItemModel {
-  @Attribute(.unique) var id: String
-  var position: Int
-  var episodeTitle: String
-  var podcastTitle: String
-  var audioURL: String
+  var id: String = ""
+  var position: Int = 0
+  var episodeTitle: String = ""
+  var podcastTitle: String = ""
+  var audioURL: String = ""
   var imageURL: String?
   var episodeDescription: String?
   var pubDate: Date?

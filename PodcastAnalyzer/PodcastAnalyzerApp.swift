@@ -23,36 +23,17 @@ struct PodcastAnalyzerApp: App {
       EpisodeQuickTagsModel.self,
       QueueItemModel.self,
     ])
-    let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+    let modelConfiguration = ModelConfiguration(
+      schema: schema,
+      isStoredInMemoryOnly: false,
+      cloudKitDatabase: .automatic
+    )
 
     do {
       return try ModelContainer(for: schema, configurations: [modelConfiguration])
     } catch {
-      // Migration failed - delete old store and create fresh one
-      logger.error(
-        "Migration failed, attempting to recreate database: \(error.localizedDescription)")
-
-      // Get the default store URL
-      let url = URL.applicationSupportDirectory.appending(path: "default.store")
-
-      // Delete old store files
-      let fileManager = FileManager.default
-      let storeFiles = [
-        url,
-        url.appendingPathExtension("shm"),
-        url.appendingPathExtension("wal"),
-      ]
-
-      for file in storeFiles {
-        try? fileManager.removeItem(at: file)
-      }
-
-      // Try again with fresh database
-      do {
-        return try ModelContainer(for: schema, configurations: [modelConfiguration])
-      } catch {
-        fatalError("Could not create ModelContainer after reset: \(error)")
-      }
+      logger.error("ModelContainer init failed: \(error.localizedDescription)")
+      fatalError("Could not create ModelContainer: \(error)")
     }
   }()
 
