@@ -33,6 +33,7 @@ struct PodcastSearchView: View {
     @State private var filteredEpisodes: [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
     @State private var subscribeTask: Task<Void, Never>?
     @State private var debounceTask: Task<Void, Never>?
+    @State private var subscribeError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -75,6 +76,15 @@ struct PodcastSearchView: View {
                     updateLibraryFilters()
                 }
             }
+        }
+        .onDisappear {
+            subscribeTask?.cancel()
+            debounceTask?.cancel()
+        }
+        .alert("Subscription Failed", isPresented: Binding(get: { subscribeError != nil }, set: { if !$0 { subscribeError = nil } })) {
+            Button("OK", role: .cancel) { subscribeError = nil }
+        } message: {
+            Text(subscribeError ?? "")
         }
         .onChange(of: selectedTab) { _, newTab in
             if newTab == .applePodcasts && !searchText.isEmpty {
@@ -233,7 +243,7 @@ struct PodcastSearchView: View {
                 modelContext.insert(podcastInfoModel)
                 try? modelContext.save()
             } catch {
-                print("Failed to subscribe: \(error)")
+                subscribeError = error.localizedDescription
             }
         }
     }
@@ -331,7 +341,7 @@ struct ApplePodcastRow: View {
                 ProgressView()
                     .scaleEffect(0.8)
             } else {
-                Button(action: {
+                Button("Subscribe", systemImage: "plus") {
                     isSubscribing = true
                     onSubscribe()
                     // Reset after a delay (subscription will update via @Query)
@@ -339,11 +349,10 @@ struct ApplePodcastRow: View {
                         try? await Task.sleep(for: .seconds(2))
                         isSubscribing = false
                     }
-                }) {
-                    Image(systemName: "plus")
-                        .font(.title3)
-                        .foregroundStyle(.blue)
                 }
+                .labelStyle(.iconOnly)
+                .font(.title3)
+                .foregroundStyle(.blue)
                 .buttonStyle(.plain)
             }
 

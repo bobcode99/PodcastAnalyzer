@@ -147,14 +147,14 @@ struct ExpandedPlayerView: View {
           artworkPlaceholder
         }
         .frame(width: baseSize, height: baseSize)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(.rect(cornerRadius: 16))
         .shadow(color: .black.opacity(isPlaying ? 0.4 : 0.25), radius: isPlaying ? 25 : 15, x: 0, y: isPlaying ? 12 : 8)
         .scaleEffect(isPlaying ? playingScale : 1.0)
         .animation(.spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0), value: isPlaying)
       } else {
         artworkPlaceholder
           .frame(width: baseSize, height: baseSize)
-          .clipShape(RoundedRectangle(cornerRadius: 16))
+          .clipShape(.rect(cornerRadius: 16))
           .scaleEffect(isPlaying ? playingScale : 1.0)
           .animation(.spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0), value: isPlaying)
       }
@@ -162,8 +162,8 @@ struct ExpandedPlayerView: View {
   }
 
   private var artworkPlaceholder: some View {
-    RoundedRectangle(cornerRadius: 16)
-      .fill(Color.gray.opacity(0.3))
+    Color.gray.opacity(0.3)
+      .clipShape(.rect(cornerRadius: 16))
       .overlay(
         Image(systemName: "music.note")
           .font(.system(size: 60))
@@ -369,6 +369,7 @@ struct ExpandedPlayerView: View {
           .foregroundStyle(.primary)
       }
       .frame(width: 60)
+      .accessibilityLabel("Skip back 15 seconds")
 
       Button(action: { viewModel.togglePlayPause() }) {
         Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -376,6 +377,7 @@ struct ExpandedPlayerView: View {
           .foregroundStyle(.primary)
       }
       .frame(width: 80)
+      .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
 
       Button(action: { viewModel.skipForward() }) {
         Image(systemName: "goforward.30")
@@ -383,6 +385,7 @@ struct ExpandedPlayerView: View {
           .foregroundStyle(.primary)
       }
       .frame(width: 60)
+      .accessibilityLabel("Skip forward 30 seconds")
 
       Spacer()
 
@@ -589,18 +592,21 @@ struct TranscriptFullScreenView: View {
             .font(.system(size: 20))
             .foregroundStyle(.primary)
         }
+        .accessibilityLabel("Skip back 15 seconds")
 
         Button(action: { viewModel.togglePlayPause() }) {
           Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
             .font(.system(size: 24))
             .foregroundStyle(.primary)
         }
+        .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
 
         Button(action: { viewModel.skipForward() }) {
           Image(systemName: "goforward.30")
             .font(.system(size: 20))
             .foregroundStyle(.primary)
         }
+        .accessibilityLabel("Skip forward 30 seconds")
       }
     }
     .padding(12)

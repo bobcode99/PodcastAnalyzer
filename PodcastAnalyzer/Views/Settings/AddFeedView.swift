@@ -36,10 +36,10 @@ struct FeedRowView: View {
           }
         }
         .frame(width: 50, height: 50)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(.rect(cornerRadius: 8))
       } else {
-        RoundedRectangle(cornerRadius: 8)
-          .fill(Color.purple.opacity(0.2))
+        Color.purple.opacity(0.2)
+          .clipShape(.rect(cornerRadius: 8))
           .frame(width: 50, height: 50)
           .overlay(
             Image(systemName: "mic.fill")
@@ -70,6 +70,7 @@ struct AddFeedView: View {
   var onDismiss: () -> Void
 
   @FocusState private var isTextFieldFocused: Bool
+  @State private var dismissTask: Task<Void, Never>?
 
   var body: some View {
     NavigationStack {
@@ -141,10 +142,11 @@ struct AddFeedView: View {
         // Add button
         Button(action: {
           viewModel.addRssLink(modelContext: modelContext) {
-            // Dismiss on success
-            Task {
+            // Dismiss on success after a short delay
+            dismissTask?.cancel()
+            dismissTask = Task {
               try? await Task.sleep(for: .seconds(1.5))
-              onDismiss()
+              if !Task.isCancelled { onDismiss() }
             }
           }
         }) {
@@ -190,6 +192,7 @@ struct AddFeedView: View {
         isTextFieldFocused = true
       }
       .onDisappear {
+        dismissTask?.cancel()
         viewModel.clearMessages()
       }
     }

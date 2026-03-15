@@ -7,10 +7,6 @@
 
 import SwiftUI
 
-#if os(iOS)
-import UIKit
-#endif
-
 // MARK: - Speed Picker Overlay (Apple Podcasts Style with Slider)
 
 struct SpeedPickerOverlay: View {
@@ -23,6 +19,7 @@ struct SpeedPickerOverlay: View {
   @State private var showAllSpeeds = false
   @State private var sliderValue: Float
   @State private var lastHapticSpeed: Float = 0
+  @State private var hapticTrigger = false
 
   private let speedStops: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
@@ -89,11 +86,12 @@ struct SpeedPickerOverlay: View {
               let crossedForward = oldValue < stop && newValue >= stop
               let crossedBackward = oldValue > stop && newValue <= stop
               if crossedForward || crossedBackward {
-                triggerHaptic()
+                hapticTrigger.toggle()
                 break
               }
             }
           }
+          .sensoryFeedback(.impact(weight: .light), trigger: hapticTrigger)
 
           // Speed stop markers
           HStack {
@@ -134,7 +132,7 @@ struct SpeedPickerOverlay: View {
                   withAnimation(.easeInOut(duration: 0.2)) {
                     sliderValue = speed
                   }
-                  triggerHaptic()
+                  hapticTrigger.toggle()
                   onSelectSpeed(speed)
                 }
               )
@@ -181,12 +179,6 @@ struct SpeedPickerOverlay: View {
     }
   }
 
-  private func triggerHaptic() {
-    #if os(iOS)
-    let generator = UIImpactFeedbackGenerator(style: .light)
-    generator.impactOccurred()
-    #endif
-  }
 }
 
 // MARK: - Speed Button

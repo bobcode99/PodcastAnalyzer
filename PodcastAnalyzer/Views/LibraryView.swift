@@ -29,6 +29,7 @@ struct LibraryView: View {
 
   @State private var podcastToUnsubscribe: PodcastInfoModel?
   @State private var showUnsubscribeConfirmation = false
+  @State private var errorMessage: String?
 
   var body: some View {
     ZStack {
@@ -68,12 +69,12 @@ struct LibraryView: View {
     }
     .task {
       // Modernized notification observers using async sequences
-      for await _ in NotificationCenter.default.notifications(named: .podcastSyncCompleted).map({ $0 }) {
+      for await _ in NotificationCenter.default.notifications(named: .podcastSyncCompleted) {
         viewModel.refreshData()
       }
     }
     .task {
-      for await _ in NotificationCenter.default.notifications(named: .episodeDownloadCompleted).map({ $0 }) {
+      for await _ in NotificationCenter.default.notifications(named: .episodeDownloadCompleted) {
         viewModel.refreshData()
       }
     }
@@ -87,6 +88,11 @@ struct LibraryView: View {
     }
     .onDisappear {
       viewModel.cleanup()
+    }
+    .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+      Button("OK", role: .cancel) { errorMessage = nil }
+    } message: {
+      Text(errorMessage ?? "")
     }
     .confirmationDialog(
       "Unsubscribe from Podcast",
@@ -249,7 +255,7 @@ struct LibraryView: View {
       podcast.lastUpdated = Date()
       try modelContext.save()
     } catch {
-      // Silently fail refresh
+      errorMessage = "Failed to refresh: \(error.localizedDescription)"
     }
   }
 
@@ -259,7 +265,7 @@ struct LibraryView: View {
       try modelContext.save()
       viewModel.setModelContext(modelContext)
     } catch {
-      // Silently fail
+      errorMessage = "Failed to unsubscribe: \(error.localizedDescription)"
     }
   }
 

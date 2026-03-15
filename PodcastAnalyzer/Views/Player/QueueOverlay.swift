@@ -16,9 +16,14 @@ struct QueueOverlay: View {
 
   var body: some View {
     ZStack {
-      Color.black.opacity(0.4)
-        .ignoresSafeArea()
-        .onTapGesture { onDismiss() }
+      Button {
+        onDismiss()
+      } label: {
+        Color.black.opacity(0.4)
+          .ignoresSafeArea()
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Dismiss")
 
       VStack(spacing: 0) {
         // Header
@@ -26,11 +31,10 @@ struct QueueOverlay: View {
           Text("Up Next")
             .font(.headline)
           Spacer()
-          Button(action: onDismiss) {
-            Image(systemName: "xmark.circle.fill")
-              .font(.title2)
-              .foregroundStyle(.secondary)
-          }
+          Button("Dismiss", systemImage: "xmark.circle.fill", action: onDismiss)
+            .labelStyle(.iconOnly)
+            .font(.title2)
+            .foregroundStyle(.secondary)
         }
         .padding()
 
@@ -52,7 +56,8 @@ struct QueueOverlay: View {
           .padding()
         } else {
           List {
-            ForEach(Array(queue.enumerated()), id: \.element.id) { index, episode in
+            ForEach(queue.indices, id: \.self) { index in
+              let episode = queue[index]
               HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                   Text(episode.title)
@@ -72,6 +77,7 @@ struct QueueOverlay: View {
                     .foregroundStyle(.blue)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Play \(episode.title)")
               }
               .padding(.vertical, 4)
               .swipeActions(edge: .trailing) {

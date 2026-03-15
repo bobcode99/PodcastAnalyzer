@@ -113,7 +113,9 @@ struct PodcastAnalyzerApp: App {
     .onChange(of: scenePhase) { _, newPhase in
       switch newPhase {
       case .active:
-        // App became active - start foreground sync
+        // App became active - handle widget play request (covers cold launch from widget)
+        EnhancedAudioManager.shared.handleWidgetToggleOnActive()
+        // Start foreground sync
         if BackgroundSyncManager.shared.isBackgroundSyncEnabled {
           BackgroundSyncManager.shared.startForegroundSync()
         }

@@ -15,6 +15,7 @@ struct SavedEpisodesView: View {
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
   @State private var episodeModels: [String: EpisodeDownloadModel] = [:]
+  @State private var refreshTask: Task<Void, Never>?
 
   var body: some View {
     Group {
@@ -28,7 +29,8 @@ struct SavedEpisodesView: View {
             showArtwork: showEpisodeArtwork,
             onToggleStar: {
               LibraryEpisodeActions.toggleStar(episode, episodeModels: &episodeModels, context: modelContext)
-              Task { await viewModel.refreshSavedEpisodes() }
+              refreshTask?.cancel()
+              refreshTask = Task { await viewModel.refreshSavedEpisodes() }
             },
             onDownload: { LibraryEpisodeActions.downloadEpisode(episode) },
             onDeleteRequested: {
@@ -37,14 +39,15 @@ struct SavedEpisodesView: View {
             },
             onTogglePlayed: {
               LibraryEpisodeActions.togglePlayed(episode, episodeModels: &episodeModels, context: modelContext)
-              Task { await viewModel.refreshSavedEpisodes() }
+              refreshTask?.cancel()
+              refreshTask = Task { await viewModel.refreshSavedEpisodes() }
             }
           )
           .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         }
         .listStyle(.plain)
         .refreshable {
-          viewModel.setModelContext(modelContext)
+          await viewModel.refreshSavedEpisodes()
         }
       }
     }
@@ -60,6 +63,9 @@ struct SavedEpisodesView: View {
     .task {
       await viewModel.refreshSavedEpisodes()
     }
+    .onDisappear {
+      refreshTask?.cancel()
+    }
     .confirmationDialog(
       "Delete Download",
       isPresented: $showDeleteConfirmation,
@@ -68,7 +74,8 @@ struct SavedEpisodesView: View {
       Button("Delete", role: .destructive) {
         if let episode = episodeToDelete {
           LibraryEpisodeActions.deleteDownload(episode, episodeModels: episodeModels, context: modelContext)
-          Task { await viewModel.refreshSavedEpisodes() }
+          refreshTask?.cancel()
+          refreshTask = Task { await viewModel.refreshSavedEpisodes() }
         }
         episodeToDelete = nil
       }

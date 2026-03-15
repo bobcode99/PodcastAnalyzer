@@ -110,6 +110,7 @@ struct DownloadedEpisodesView: View {
   @State private var episodeToDelete: LibraryEpisode?
   @State private var showDeleteConfirmation = false
   @State private var episodeModels: [String: EpisodeDownloadModel] = [:]
+  @State private var refreshTask: Task<Void, Never>?
 
   var body: some View {
     Group {
@@ -143,7 +144,8 @@ struct DownloadedEpisodesView: View {
                   showArtwork: showEpisodeArtwork,
                   onToggleStar: {
                     LibraryEpisodeActions.toggleStar(episode, episodeModels: &episodeModels, context: modelContext)
-                    Task { await viewModel.refreshDownloadedEpisodes() }
+                    refreshTask?.cancel()
+                    refreshTask = Task { await viewModel.refreshDownloadedEpisodes() }
                   },
                   onDownload: { LibraryEpisodeActions.downloadEpisode(episode) },
                   onDeleteRequested: {
@@ -152,7 +154,8 @@ struct DownloadedEpisodesView: View {
                   },
                   onTogglePlayed: {
                     LibraryEpisodeActions.togglePlayed(episode, episodeModels: &episodeModels, context: modelContext)
-                    Task { await viewModel.refreshDownloadedEpisodes() }
+                    refreshTask?.cancel()
+                    refreshTask = Task { await viewModel.refreshDownloadedEpisodes() }
                   }
                 )
                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
@@ -186,6 +189,9 @@ struct DownloadedEpisodesView: View {
     .task {
       await viewModel.refreshDownloadedEpisodes()
     }
+    .onDisappear {
+      refreshTask?.cancel()
+    }
     .confirmationDialog(
       "Delete Download",
       isPresented: $showDeleteConfirmation,
@@ -194,7 +200,8 @@ struct DownloadedEpisodesView: View {
       Button("Delete", role: .destructive) {
         if let episode = episodeToDelete {
           LibraryEpisodeActions.deleteDownload(episode, episodeModels: episodeModels, context: modelContext)
-          Task { await viewModel.refreshDownloadedEpisodes() }
+          refreshTask?.cancel()
+          refreshTask = Task { await viewModel.refreshDownloadedEpisodes() }
         }
         episodeToDelete = nil
       }

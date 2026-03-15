@@ -1020,6 +1020,32 @@ private func handleAudioInterruption(_ notification: Notification) {
     }
   }
 
+  /// Called when the app becomes active (e.g. launched from widget button tap).
+  /// Handles the widget toggle flag — resumes or starts playback from saved state
+  /// when the app was previously quit.
+  func handleWidgetToggleOnActive() {
+    guard let defaults = WidgetDataManager.sharedDefaults,
+          defaults.bool(forKey: "widgetTogglePlayback") else { return }
+    defaults.set(false, forKey: "widgetTogglePlayback")
+
+    if isPlaying {
+      pause()
+    } else if player != nil {
+      // App was backgrounded but player exists — just resume
+      resume()
+    } else {
+      // App was quit — load last saved state and start playing
+      guard let state = loadLastPlaybackState() else { return }
+      play(
+        episode: state.episode,
+        audioURL: state.episode.audioURL,
+        startTime: state.time,
+        imageURL: state.imageURL,
+        useDefaultSpeed: false
+      )
+    }
+  }
+
   // MARK: - State Persistence
 
   /// Posts a notification with current playback position for SwiftData persistence

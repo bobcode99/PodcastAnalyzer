@@ -35,51 +35,48 @@ struct WhisperModelRow: View {
     let status = manager.status(for: variant)
     let isSelected = manager.selectedModel == variant
 
-    HStack(spacing: 12) {
-      // Selected indicator
-      Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-        .foregroundStyle(isSelected ? .blue : .secondary)
-        .frame(width: 20)
-        .onTapGesture {
-          if status.isReady {
-            manager.setSelectedModel(variant)
-          }
-        }
-
-      VStack(alignment: .leading, spacing: 2) {
-        HStack(spacing: 6) {
-          Text(variant.displayName)
-            .fontWeight(isSelected ? .semibold : .regular)
-          Text(variant.approximateSize)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          if variant == .platformDefault {
-            Text("Recommended")
-              .font(.caption2)
-              .padding(.horizontal, 5)
-              .padding(.vertical, 2)
-              .background(Color.blue.opacity(0.15))
-              .foregroundStyle(.blue)
-              .clipShape(Capsule())
-          }
-        }
-        Text(variant.accuracyNote)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-      }
-
-      Spacer()
-
-      // Status / action
-      whisperModelAction(for: variant, status: status)
-    }
-    .padding(.vertical, 2)
-    .contentShape(Rectangle())
-    .onTapGesture {
+    Button {
       if status.isReady {
         manager.setSelectedModel(variant)
       }
+    } label: {
+      HStack(spacing: 12) {
+        // Selected indicator
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+          .foregroundStyle(isSelected ? .blue : .secondary)
+          .frame(width: 20)
+
+        VStack(alignment: .leading, spacing: 2) {
+          HStack(spacing: 6) {
+            Text(variant.displayName)
+              .fontWeight(isSelected ? .semibold : .regular)
+            Text(variant.approximateSize)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            if variant == .platformDefault {
+              Text("Recommended")
+                .font(.caption2)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.blue.opacity(0.15))
+                .foregroundStyle(.blue)
+                .clipShape(Capsule())
+            }
+          }
+          Text(variant.accuracyNote)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+
+        Spacer()
+
+        // Status / action
+        whisperModelAction(for: variant, status: status)
+      }
+      .padding(.vertical, 2)
+      .contentShape(Rectangle())
     }
+    .buttonStyle(.plain)
   }
 
   @ViewBuilder
@@ -111,6 +108,7 @@ struct WhisperModelRow: View {
             .foregroundStyle(.secondary)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Cancel download")
       }
 
     case .ready:
@@ -125,6 +123,7 @@ struct WhisperModelRow: View {
             .font(.caption)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Delete \(variant.displayName)")
       }
 
     case .error(let message):
