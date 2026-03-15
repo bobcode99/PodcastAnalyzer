@@ -215,10 +215,12 @@ final class LibraryViewModel {
 
   private var syncCompletionObserver: NSObjectProtocol?
 
+  @ObservationIgnored private var initTask: Task<Void, Never>?
+
   init(modelContext: ModelContext?) {
     self.modelContext = modelContext
     if modelContext != nil {
-      Task {
+      initTask = Task {
         await loadAll()
       }
     }
@@ -228,6 +230,8 @@ final class LibraryViewModel {
 
   /// Clean up resources. Call this from onDisappear.
   func cleanup() {
+    initTask?.cancel()
+    initTask = nil
     if let observer = downloadCompletionObserver {
       NotificationCenter.default.removeObserver(observer)
       downloadCompletionObserver = nil

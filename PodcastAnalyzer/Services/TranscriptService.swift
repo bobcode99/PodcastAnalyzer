@@ -123,13 +123,10 @@ public actor TranscriptService {
 
   // 2. The main setup function that returns an AsyncStream of progress
   func setupAndInstallAssets() -> AsyncStream<Double> {
-    return AsyncStream { continuation in
-      // Create a task that will call the actor method
-      // The await ensures we're properly isolated to the actor
-      Task {
-        await self.setupAndInstallAssetsInternal(continuation: continuation)
-      }
-    }
+    let (stream, continuation) = AsyncStream.makeStream(of: Double.self)
+    let setupTask = Task { await self.setupAndInstallAssetsInternal(continuation: continuation) }
+    continuation.onTermination = { _ in setupTask.cancel() }
+    return stream
   }
 
   // Internal setup method that runs on the actor (isolated to this actor)
@@ -358,129 +355,131 @@ public actor TranscriptService {
   public func audioToSRTWithProgress(inputFile: URL, maxLength: Int? = nil) -> AsyncThrowingStream<
     TranscriptionProgress, Error
   > {
-    return AsyncThrowingStream { continuation in
-      // Use Task.detached to ensure CPU-intensive transcription runs on a background thread
-      // This prevents blocking the actor and allows better parallelization
-      Task.detached(priority: .userInitiated) {
-        do {
-          // Access actor-isolated properties - need to await actor access
-          let (transcriber, analyzer, needsAudioTimeRange) = await (
-            self.transcriber,
-            self.analyzer,
-            self.needsAudioTimeRange
-          )
-          let isCJK = await self.isCJKLocale
-          let defaultMaxLen = await self.defaultMaxLength
+    let (stream, continuation) = AsyncThrowingStream.makeStream(of: TranscriptionProgress.self)
+    // Use Task.detached to ensure CPU-intensive transcription runs on a background thread
+    // This prevents blocking the actor and allows better parallelization
+    let task = Task.detached(priority: .userInitiated) { [weak self] in
+      guard let self else { continuation.finish(); return }
+      do {
+        // Access actor-isolated properties - need to await actor access
+        let (transcriber, analyzer, needsAudioTimeRange) = await (
+          self.transcriber,
+          self.analyzer,
+          self.needsAudioTimeRange
+        )
+        let isCJK = await self.isCJKLocale
+        let defaultMaxLen = await self.defaultMaxLength
 
-          // Ensure transcriber and analyzer are initialized
-          guard let transcriber = transcriber, let analyzer = analyzer else {
-            throw NSError(
-              domain: "TranscriptService", code: 1,
-              userInfo: [
-                NSLocalizedDescriptionKey:
-                  "Transcriber or analyzer not initialized. Call setupAndInstallAssets() first."
-              ])
-          }
+        // Ensure transcriber and analyzer are initialized
+        guard let transcriber = transcriber, let analyzer = analyzer else {
+          throw NSError(
+            domain: "TranscriptService", code: 1,
+            userInfo: [
+              NSLocalizedDescriptionKey:
+                "Transcriber or analyzer not initialized. Call setupAndInstallAssets() first."
+            ])
+        }
 
-          guard needsAudioTimeRange else {
-            throw NSError(
-              domain: "TranscriptService", code: 2,
-              userInfo: [
-                NSLocalizedDescriptionKey:
-                  "audioTimeRange must be enabled to generate SRT subtitles."
-              ])
-          }
+        guard needsAudioTimeRange else {
+          throw NSError(
+            domain: "TranscriptService", code: 2,
+            userInfo: [
+              NSLocalizedDescriptionKey:
+                "audioTimeRange must be enabled to generate SRT subtitles."
+            ])
+        }
 
-          // Download if remote URL, otherwise use local file
-          let audioURL = try await self.resolveAudioURL(inputFile)
-          let audioFile = try AVAudioFile(forReading: audioURL)
-          let audioFileDuration: TimeInterval =
-            Double(audioFile.length) / audioFile.processingFormat.sampleRate
+        // Download if remote URL, otherwise use local file
+        let audioURL = try await self.resolveAudioURL(inputFile)
+        let audioFile = try AVAudioFile(forReading: audioURL)
+        let audioFileDuration: TimeInterval =
+          Double(audioFile.length) / audioFile.processingFormat.sampleRate
 
-          // Logger is nonisolated, no need to await
-          self.logger.info(
-            "Audio file duration for SRT with progress: \(audioFileDuration) seconds")
+        // Logger is nonisolated, no need to await
+        self.logger.info(
+          "Audio file duration for SRT with progress: \(audioFileDuration) seconds")
 
-          // Send initial progress
-          continuation.yield(
-            TranscriptionProgress(
-              progress: 0.0,
-              currentTimeSeconds: 0,
-              totalDurationSeconds: audioFileDuration,
-              isComplete: false,
-              srtContent: nil
-            ))
+        // Send initial progress
+        continuation.yield(
+          TranscriptionProgress(
+            progress: 0.0,
+            currentTimeSeconds: 0,
+            totalDurationSeconds: audioFileDuration,
+            isComplete: false,
+            srtContent: nil
+          ))
 
-          // Start the analyzer
-          try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+        // Start the analyzer
+        try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
 
-          // Collect transcript results with progress
-          var transcript: AttributedString = ""
-          var lastReportedTime: TimeInterval = 0
+        // Collect transcript results with progress
+        var transcript: AttributedString = ""
+        var lastReportedTime: TimeInterval = 0
 
-          for try await result in transcriber.results {
-            transcript += result.text
+        for try await result in transcriber.results {
+          transcript += result.text
 
-            // Extract the latest time from the result to calculate progress
-            for run in result.text.runs {
-              if let timeRange = run.audioTimeRange {
-                let currentTime = timeRange.end.seconds
-                if currentTime > lastReportedTime {
-                  lastReportedTime = currentTime
-                  let progress = min(currentTime / audioFileDuration, 0.99)  // Cap at 99% until complete
+          // Extract the latest time from the result to calculate progress
+          for run in result.text.runs {
+            if let timeRange = run.audioTimeRange {
+              let currentTime = timeRange.end.seconds
+              if currentTime > lastReportedTime {
+                lastReportedTime = currentTime
+                let progress = min(currentTime / audioFileDuration, 0.99)  // Cap at 99% until complete
 
-                  continuation.yield(
-                    TranscriptionProgress(
-                      progress: progress,
-                      currentTimeSeconds: currentTime,
-                      totalDurationSeconds: audioFileDuration,
-                      isComplete: false,
-                      srtContent: nil
-                    ))
-                }
+                continuation.yield(
+                  TranscriptionProgress(
+                    progress: progress,
+                    currentTimeSeconds: currentTime,
+                    totalDurationSeconds: audioFileDuration,
+                    isComplete: false,
+                    srtContent: nil
+                  ))
               }
             }
           }
-
-          // Check if we actually got any transcript content
-          guard !transcript.characters.isEmpty else {
-            throw NSError(
-              domain: "TranscriptService", code: 3,
-              userInfo: [
-                NSLocalizedDescriptionKey:
-                  "Transcription produced no content. The audio may be silent or in an unsupported format."
-              ])
-          }
-
-          // Apply Chinese punctuation restoration for CJK locales
-          var processedTranscript = transcript
-          if isCJK {
-            let restorer = ChinesePunctuationRestorer()
-            processedTranscript = restorer.restore(transcript: transcript)
-          }
-
-          // Convert transcript to SRT format
-          let effectiveMaxLength = maxLength ?? defaultMaxLen
-          let segmenter = TranscriptSegmenter(isCJK: isCJK, maxLength: effectiveMaxLength)
-          let segments = segmenter.splitTranscriptIntoSegments(transcript: processedTranscript)
-          let srtContent = SRTFormatter.format(segments: segments)
-
-          // Send final progress with completed content
-          continuation.yield(
-            TranscriptionProgress(
-              progress: 1.0,
-              currentTimeSeconds: audioFileDuration,
-              totalDurationSeconds: audioFileDuration,
-              isComplete: true,
-              srtContent: srtContent
-            ))
-
-          continuation.finish()
-        } catch {
-          continuation.finish(throwing: error)
         }
+
+        // Check if we actually got any transcript content
+        guard !transcript.characters.isEmpty else {
+          throw NSError(
+            domain: "TranscriptService", code: 3,
+            userInfo: [
+              NSLocalizedDescriptionKey:
+                "Transcription produced no content. The audio may be silent or in an unsupported format."
+            ])
+        }
+
+        // Apply Chinese punctuation restoration for CJK locales
+        var processedTranscript = transcript
+        if isCJK {
+          let restorer = ChinesePunctuationRestorer()
+          processedTranscript = restorer.restore(transcript: transcript)
+        }
+
+        // Convert transcript to SRT format
+        let effectiveMaxLength = maxLength ?? defaultMaxLen
+        let segmenter = TranscriptSegmenter(isCJK: isCJK, maxLength: effectiveMaxLength)
+        let segments = segmenter.splitTranscriptIntoSegments(transcript: processedTranscript)
+        let srtContent = SRTFormatter.format(segments: segments)
+
+        // Send final progress with completed content
+        continuation.yield(
+          TranscriptionProgress(
+            progress: 1.0,
+            currentTimeSeconds: audioFileDuration,
+            totalDurationSeconds: audioFileDuration,
+            isComplete: true,
+            srtContent: srtContent
+          ))
+
+        continuation.finish()
+      } catch {
+        continuation.finish(throwing: error)
       }
     }
+    continuation.onTermination = { _ in task.cancel() }
+    return stream
   }
 
   /// Converts audio to SRT format with additional JSON file containing word timings
@@ -549,9 +548,10 @@ public actor TranscriptService {
     maxLength: Int? = nil,
     chunkDuration: TimeInterval = 60
   ) -> AsyncThrowingStream<TranscriptionProgress, Error> {
-    return AsyncThrowingStream { continuation in
-      Task.detached(priority: .userInitiated) { [self] in
-        do {
+    let (stream, continuation) = AsyncThrowingStream.makeStream(of: TranscriptionProgress.self)
+    let task = Task.detached(priority: .userInitiated) { [weak self] in
+      guard let self else { continuation.finish(); return }
+      do {
           // Capture actor-isolated state upfront so chunk tasks don't need the actor
           let locale = await self.targetLocale
           let censor = await self.censor
@@ -638,6 +638,7 @@ public actor TranscriptService {
                   maxSegmentLength: effectiveMaxLength,
                   onProgress: { chunkProgress in
                     Task {
+                      guard !Task.isCancelled else { return }
                       let overall = await progressTracker.updateProgress(
                         chunkIndex: chunk.index, progress: chunkProgress
                       )
@@ -723,6 +724,7 @@ public actor TranscriptService {
           continuation.finish(throwing: error)
         }
       }
-    }
+    continuation.onTermination = { _ in task.cancel() }
+    return stream
   }
 }

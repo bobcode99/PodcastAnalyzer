@@ -132,6 +132,19 @@ class TranscriptManager {
     return activeJobs[jobId]?.status
   }
 
+  /// Cancels all pending and running transcript jobs.
+  func cancelAll() {
+    for task in processingTasks.values {
+      task.cancel()
+    }
+    processingTasks.removeAll()
+    runningJobIds.removeAll()
+    pendingJobs.removeAll()
+    activeJobs.removeAll()
+    isProcessing = false
+    logger.info("All transcript jobs cancelled")
+  }
+
   /// Cancels a pending or active transcript job
   func cancelJob(episodeTitle: String, podcastTitle: String) {
     let jobId = makeJobId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)

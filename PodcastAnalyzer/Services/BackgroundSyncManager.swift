@@ -100,9 +100,7 @@ class BackgroundSyncManager {
 
       // Schedule background refresh if enabled (especially important on first launch)
       if isBackgroundSyncEnabled {
-        await MainActor.run {
-          scheduleBackgroundRefresh()
-        }
+        scheduleBackgroundRefresh()
       }
     }
   }
@@ -352,15 +350,13 @@ class BackgroundSyncManager {
         let granted = try await UNUserNotificationCenter.current().requestAuthorization(
           options: [.alert, .sound, .badge]
         )
-        await MainActor.run {
-          if granted {
-            notificationPermissionStatus = .authorized
-            logger.info("Notification permission granted")
-          } else {
-            notificationPermissionStatus = .denied
-            isNotificationsEnabled = false
-            logger.info("Notification permission denied")
-          }
+        if granted {
+          notificationPermissionStatus = .authorized
+          logger.info("Notification permission granted")
+        } else {
+          notificationPermissionStatus = .denied
+          isNotificationsEnabled = false
+          logger.info("Notification permission denied")
         }
       } catch {
         logger.error("Failed to request notification permission: \(error.localizedDescription)")
@@ -429,9 +425,11 @@ class BackgroundSyncManager {
 
     stopForegroundSync()
     foregroundSyncTask = Task { [weak self] in
+      guard let self else { return }
+      await self.syncNow()                                    // first sync on startup
       while !Task.isCancelled {
         try? await Task.sleep(for: .seconds(4 * 60 * 60))
-        guard let self, !Task.isCancelled else { return }
+        if Task.isCancelled { return }
         await self.syncNow()
       }
     }

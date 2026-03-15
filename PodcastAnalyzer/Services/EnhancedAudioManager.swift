@@ -121,6 +121,7 @@ class EnhancedAudioManager: NSObject {
   private var playerEndedTask: Task<Void, Never>?
   private var playerStalledTask: Task<Void, Never>?
   private var artworkFetchTask: Task<Void, Never>?
+  private var captionLoadTask: Task<Void, Never>?
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "AudioManager")
 
   // Use Unit Separator (U+001F) as delimiter - same as EpisodeDownloadModel
@@ -750,7 +751,8 @@ private func handleAudioInterruption(_ notification: Notification) {
   // MARK: - Caption Management
 
   private func loadCaptions(episode: PlaybackEpisode) {
-    Task {
+    captionLoadTask?.cancel()
+    captionLoadTask = Task {
       let fileStorage = FileStorageManager.shared
 
       if await fileStorage.captionFileExists(for: episode.title, podcastTitle: episode.podcastTitle)
@@ -762,10 +764,9 @@ private func handleAudioInterruption(_ notification: Notification) {
           )
           let segments = parseSRT(srtContent)
 
-          await MainActor.run {
-            self.captionSegments = segments
-            logger.info("Loaded \(segments.count) caption segments")
-          }
+          guard !Task.isCancelled else { return }
+          self.captionSegments = segments
+          logger.info("Loaded \(segments.count) caption segments")
         } catch {
           logger.error("Failed to load captions: \(error.localizedDescription)")
         }
@@ -1287,6 +1288,8 @@ private func handleAudioInterruption(_ notification: Notification) {
     playerStalledTask = nil
     artworkFetchTask?.cancel()
     artworkFetchTask = nil
+    captionLoadTask?.cancel()
+    captionLoadTask = nil
 
     player?.pause()
     player = nil

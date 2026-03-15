@@ -417,6 +417,17 @@ final class DownloadManager {
   func downloadEpisode(episode: PodcastEpisodeInfo, podcastTitle: String, language: String = "en") {
     let episodeKey = sessionDelegate.makeKey(episode: episode.title, podcast: podcastTitle)
 
+    // Fast-path: skip if already in-flight or done
+    switch downloadStates[episodeKey] {
+    case .downloading, .finishing:
+      logger.info("Download already in progress for: \(episode.title)")
+      return
+    case .downloaded:
+      return
+    default:
+      break
+    }
+
     guard let audioURLString = episode.audioURL,
           let url = URL(string: audioURLString)
     else {
