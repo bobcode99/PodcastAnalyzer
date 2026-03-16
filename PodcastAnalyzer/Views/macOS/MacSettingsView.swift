@@ -827,35 +827,3 @@ struct StorageSettingsTab: View {
 }
 
 #endif
-
-}
-
-#endif
-modelContext.delete(tag)
-        }
-        try? modelContext.save()
-      }
-
-      await MainActor.run {
-        isClearingData = false
-        clearingMessage = ""
-        aiAnalysisCount = 0
-      }
-    }
-  }
-}
-
-#Preview {
-  MacSettingsView()
-}
-
-#endif
-
-}
-
-#endif
-dif
-
-}
-
-#endif

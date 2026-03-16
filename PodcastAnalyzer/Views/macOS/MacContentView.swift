@@ -1331,12 +1331,3 @@ private struct MiniPlayerMaterialModifier: ViewModifier {
 }
 
 #endif
-12))
-    } else {
-      content
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: 12))
-    }
-  }
-}
-
-#endif

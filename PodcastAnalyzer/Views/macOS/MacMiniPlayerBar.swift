@@ -338,17 +338,3 @@ struct MacExpandedPlayerView: View {
 }
 
 #endif
-ttonStyle(.plain)
-        skipForward.buttonStyle(.plain)
-      }
-    }
-  }
-
-}
-
-#Preview {
-  MacMiniPlayerBar()
-    .frame(width: 800)
-}
-
-#endif
