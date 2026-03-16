@@ -28,6 +28,8 @@ struct iOSContentView: View {
   private var notificationManager: NotificationNavigationManager { .shared }
   @Environment(\.modelContext) private var modelContext
 
+  @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+
   // Navigation state for notification-triggered navigation
   @State private var notificationEpisode: PodcastEpisodeInfo?
   @State private var notificationPodcastTitle: String = ""
@@ -135,6 +137,12 @@ struct iOSContentView: View {
     }
         .sheet(isPresented: $importManager.showImportSheet) {
             PodcastImportSheet()
+        }
+        .fullScreenCover(isPresented: Binding(
+          get: { !hasCompletedOnboarding },
+          set: { if !$0 { hasCompletedOnboarding = true } }
+        )) {
+          OnboardingView()
         }
         .onChange(of: notificationManager.shouldNavigate) { _, shouldNavigate in
             if shouldNavigate, let target = notificationManager.navigationTarget {

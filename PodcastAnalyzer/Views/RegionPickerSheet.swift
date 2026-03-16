@@ -9,7 +9,9 @@
 import NukeUI
 import SwiftData
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 
 struct RegionPickerSheet: View {
   @Binding var selectedRegion: String

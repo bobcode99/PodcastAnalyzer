@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 import UserNotifications
 
 #if os(iOS)
@@ -11,6 +12,8 @@ struct SettingsView: View {
   private var syncManager: BackgroundSyncManager { .shared }
   @Environment(\.modelContext) private var modelContext
   @State private var showAddFeedSheet = false
+  @State private var showImportPicker = false
+  @State private var importPickerError: String?
 
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
@@ -142,9 +145,7 @@ struct SettingsView: View {
 
         // MARK: - Subscriptions Section
         Section {
-          Button(action: {
-            showAddFeedSheet = true
-          }) {
+          Button(action: { showAddFeedSheet = true }) {
             HStack {
               Image(systemName: "plus.circle.fill")
                 .foregroundStyle(.blue)
@@ -157,10 +158,24 @@ struct SettingsView: View {
                 .font(.caption)
             }
           }
+
+          Button(action: { showImportPicker = true }) {
+            HStack {
+              Image(systemName: "square.and.arrow.down.fill")
+                .foregroundStyle(.green)
+                .font(.title2)
+              Text("Import Podcasts")
+                .foregroundStyle(.primary)
+              Spacer()
+              Image(systemName: "chevron.right")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+            }
+          }
         } header: {
           Text("Subscriptions")
         } footer: {
-          Text("Add podcasts by pasting their RSS feed URL")
+          Text("Add by RSS URL or import an OPML file exported from Apple Podcasts")
         }
 
         // MARK: - Playback Section
@@ -432,11 +447,54 @@ struct SettingsView: View {
           showAddFeedSheet = false
         }
       }
+      .fileImporter(
+        isPresented: $showImportPicker,
+        allowedContentTypes: [.xml, .data],
+        allowsMultipleSelection: false
+      ) { result in
+        handleOPMLImport(result)
+      }
+      .alert(
+        "Import Error",
+        isPresented: Binding(
+          get: { importPickerError != nil },
+          set: { if !$0 { importPickerError = nil } }
+        )
+      ) {
+        Button("OK") { importPickerError = nil }
+      } message: {
+        if let message = importPickerError {
+          Text(message)
+        }
+      }
       .onAppear {
         viewModel.loadFeeds(modelContext: modelContext)
         viewModel.checkTranscriptModelStatus()
         WhisperModelManager.shared.checkAllModelStatuses()
       }
+  }
+
+  private func handleOPMLImport(_ result: Result<[URL], Error>) {
+    switch result {
+    case .failure(let error):
+      importPickerError = "Couldn't open the file: \(error.localizedDescription)"
+    case .success(let urls):
+      guard let url = urls.first else { return }
+      let accessing = url.startAccessingSecurityScopedResource()
+      defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+      guard let data = try? Data(contentsOf: url) else {
+        importPickerError = "Couldn't read the selected file."
+        return
+      }
+      let rssURLs = OPMLParser.parse(data: data)
+      guard !rssURLs.isEmpty else {
+        importPickerError = "No podcast subscriptions found. Export an OPML file from Apple Podcasts (Library → ··· → Export Subscriptions)."
+        return
+      }
+      Task {
+        await PodcastImportManager.shared.importPodcasts(from: rssURLs)
+      }
+    }
   }
 
   // MARK: - Notification Status Text
