@@ -129,6 +129,20 @@ struct PodcastAnalyzerApp: App {
     if url.scheme == "podcastanalyzer" {
       Task { @MainActor in
         switch url.host {
+        case "import-podcasts":
+          // Callback from "ApplePodcast To PodcastAnalyzer" shortcut.
+          // Expected format: podcastanalyzer://import-podcasts?rssURLs=url1,url2,...
+          if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+             let rawValue = components.queryItems?.first(where: { $0.name == "rssURLs" })?.value {
+            let rssURLs = rawValue
+              .components(separatedBy: CharacterSet(charactersIn: ",\n"))
+              .map { $0.trimmingCharacters(in: .whitespaces) }
+              .filter { !$0.isEmpty }
+            if !rssURLs.isEmpty {
+              await PodcastImportManager.shared.importPodcasts(from: rssURLs)
+            }
+          }
+
         case "episode":
           // Widget tap with audio URL: podcastanalyzer://episode?audio=<encoded_url>
           if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),

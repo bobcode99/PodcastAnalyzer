@@ -8,7 +8,6 @@
 #if os(macOS)
 import SwiftData
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct MacSettingsView: View {
   private enum SettingsTab: Hashable, CaseIterable {
@@ -73,9 +72,8 @@ struct GeneralSettingsTab: View {
   @State private var viewModel = SettingsViewModel()
   @State private var showAddFeedSheet = false
   @State private var showListeningStats = false
-  @State private var showImportPicker = false
-  @State private var importPickerError: String?
   @Environment(\.modelContext) private var modelContext
+  @Environment(\.openURL) private var openURL
 
   var body: some View {
     Form {
@@ -84,7 +82,9 @@ struct GeneralSettingsTab: View {
           showAddFeedSheet = true
         }
         Button("Import Podcasts…") {
-          showImportPicker = true
+          if let url = URL(string: "shortcuts://run-shortcut?name=ApplePodcast%20To%20PodcastAnalyzer") {
+            openURL(url)
+          }
         }
       } header: {
         Text("Subscriptions")
@@ -144,51 +144,8 @@ struct GeneralSettingsTab: View {
       }
       .frame(minWidth: 500, minHeight: 400)
     }
-    .fileImporter(
-      isPresented: $showImportPicker,
-      allowedContentTypes: [.xml, .data],
-      allowsMultipleSelection: false
-    ) { result in
-      handleOPMLImport(result)
-    }
-    .alert(
-      "Import Error",
-      isPresented: Binding(
-        get: { importPickerError != nil },
-        set: { if !$0 { importPickerError = nil } }
-      )
-    ) {
-      Button("OK") { importPickerError = nil }
-    } message: {
-      if let message = importPickerError {
-        Text(message)
-      }
-    }
     .onAppear {
       viewModel.loadFeeds(modelContext: modelContext)
-    }
-  }
-
-  private func handleOPMLImport(_ result: Result<[URL], Error>) {
-    switch result {
-    case .failure(let error):
-      importPickerError = "Couldn't open the file: \(error.localizedDescription)"
-    case .success(let urls):
-      guard let url = urls.first else { return }
-      let accessing = url.startAccessingSecurityScopedResource()
-      defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-      guard let data = try? Data(contentsOf: url) else {
-        importPickerError = "Couldn't read the selected file."
-        return
-      }
-      let rssURLs = OPMLParser.parse(data: data)
-      guard !rssURLs.isEmpty else {
-        importPickerError = "No podcast subscriptions found. Export an OPML file from Apple Podcasts (File → Export Subscriptions)."
-        return
-      }
-      Task {
-        await PodcastImportManager.shared.importPodcasts(from: rssURLs)
-      }
     }
   }
 }

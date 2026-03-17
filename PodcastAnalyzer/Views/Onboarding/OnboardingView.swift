@@ -9,20 +9,18 @@
 
 #if os(iOS)
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct OnboardingView: View {
   @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
   @State private var currentPage = 0
-  @State private var showFilePicker = false
-  @State private var importErrorMessage: String?
+  @Environment(\.openURL) private var openURL
 
   var body: some View {
     TabView(selection: $currentPage) {
       WelcomeOnboardingPage(onNext: { currentPage = 1 })
         .tag(0)
       ImportOnboardingPage(
-        onImport: { showFilePicker = true },
+        onImport: triggerImportShortcut,
         onSkip: { hasCompletedOnboarding = true }
       )
       .tag(1)
@@ -30,57 +28,14 @@ struct OnboardingView: View {
     .tabViewStyle(.page)
     .indexViewStyle(.page(backgroundDisplayMode: .always))
     .ignoresSafeArea()
-    .fileImporter(
-      isPresented: $showFilePicker,
-      allowedContentTypes: [.xml, .data],
-      allowsMultipleSelection: false
-    ) { result in
-      handleFileImport(result)
-    }
-    .alert(
-      "Import Error",
-      isPresented: Binding(
-        get: { importErrorMessage != nil },
-        set: { if !$0 { importErrorMessage = nil } }
-      )
-    ) {
-      Button("OK") { importErrorMessage = nil }
-    } message: {
-      if let message = importErrorMessage {
-        Text(message)
-      }
-    }
   }
 
-  private func handleFileImport(_ result: Result<[URL], Error>) {
-    switch result {
-    case .failure(let error):
-      importErrorMessage = "Couldn't open the file: \(error.localizedDescription)"
-
-    case .success(let urls):
-      guard let url = urls.first else { return }
-
-      let accessing = url.startAccessingSecurityScopedResource()
-      defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-
-      guard let data = try? Data(contentsOf: url) else {
-        importErrorMessage = "Couldn't read the selected file."
-        return
-      }
-
-      let rssURLs = OPMLParser.parse(data: data)
-      guard !rssURLs.isEmpty else {
-        importErrorMessage = "No podcast subscriptions found. Please export an OPML file from Apple Podcasts (Library → ··· → Export Subscriptions)."
-        return
-      }
-
-      // Dismiss onboarding first, then start the batch import.
-      // PodcastImportManager will show its own progress sheet in ContentView.
-      hasCompletedOnboarding = true
-      Task {
-        try? await Task.sleep(for: .milliseconds(400))
-        await PodcastImportManager.shared.importPodcasts(from: rssURLs)
-      }
+  /// Completes onboarding and hands off to the "ApplePodcast To PodcastAnalyzer" shortcut.
+  /// The shortcut is expected to call back via podcastanalyzer://import-podcasts?rssURLs=...
+  private func triggerImportShortcut() {
+    hasCompletedOnboarding = true
+    if let url = URL(string: "shortcuts://run-shortcut?name=ApplePodcast%20To%20PodcastAnalyzer") {
+      openURL(url)
     }
   }
 }
@@ -179,28 +134,6 @@ private struct ImportOnboardingPage: View {
 
       Spacer()
 
-      // How-to steps
-      VStack(alignment: .leading, spacing: 12) {
-        Text("How to export from Apple Podcasts")
-          .font(.subheadline)
-          .fontWeight(.semibold)
-
-        ForEach(exportSteps, id: \.self) { step in
-          HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "checkmark.circle.fill")
-              .foregroundStyle(.green)
-              .font(.subheadline)
-            Text(step)
-              .font(.subheadline)
-          }
-        }
-      }
-      .padding(18)
-      .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12))
-      .padding(.horizontal, 24)
-
-      Spacer()
-
       VStack(spacing: 12) {
         Button(action: onImport) {
           Label("Import from Apple Podcasts", systemImage: "square.and.arrow.down")
@@ -220,13 +153,6 @@ private struct ImportOnboardingPage: View {
       .padding(.bottom, 52)
     }
   }
-
-  private let exportSteps = [
-    "Open the Apple Podcasts app",
-    "Tap your profile → Library → Podcasts",
-    "Tap ··· → Export Subscriptions",
-    "Save the .opml file, then select it here",
-  ]
 }
 
 // MARK: - Feature Row
