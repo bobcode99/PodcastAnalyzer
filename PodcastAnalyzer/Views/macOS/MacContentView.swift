@@ -103,45 +103,31 @@ struct MacContentView: View {
     audioManager.currentEpisode != nil
   }
 
-  // Mini player height constant for consistent spacing
-  private let miniPlayerHeight: CGFloat = 72
-
   var body: some View {
-    // Create bindable references for @Observable singletons
     @Bindable var importManager = importManager
 
-    // Use ZStack to ensure mini player is ALWAYS at the absolute bottom of the window
-    ZStack(alignment: .bottom) {
+    VStack(spacing: 0) {
       NavigationSplitView(columnVisibility: $columnVisibility) {
-        // Sidebar
         sidebarContent
           .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 300)
       } detail: {
-        // Main content area
         mainContent
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
       .navigationSplitViewStyle(.balanced)
-        // Removed .padding(.bottom) - let miniplayer overlay naturally
 
-      // Mini player at absolute bottom, fixed-width and centered for floating feel
-        if hasCurrentEpisode {
-          MacMiniPlayerBar()
-            .frame(maxWidth: 840)
-            .padding(.bottom, 20)
-            .modifier(MiniPlayerMaterialModifier())
-            .shadow(radius: 8)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-        }
+      if hasCurrentEpisode {
+        Divider()
+        MacMiniPlayerBar()
+          .modifier(MiniPlayerMaterialModifier())
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+      }
     }
     .animation(.easeInOut(duration: 0.25), value: hasCurrentEpisode)
     .frame(minWidth: 900, minHeight: 600)
-    .onAppear {
-      audioManager.restoreLastEpisode()
-    }
+    .onAppear { audioManager.restoreLastEpisode() }
     .sheet(isPresented: $importManager.showImportSheet) {
-      PodcastImportSheet()
-        .frame(minWidth: 400, minHeight: 300)
+      PodcastImportSheet().frame(minWidth: 400, minHeight: 300)
     }
     .onChange(of: notificationManager.shouldNavigate) { _, shouldNavigate in
       if shouldNavigate, let target = notificationManager.navigationTarget {
@@ -1282,7 +1268,7 @@ struct MacLibraryEpisodeRow: View {
             .font(.title3)
             .foregroundStyle(.white)
             .frame(width: 32, height: 32)
-            .background(Color.purple)
+            .background(Color.accentColor)
             .clipShape(Circle())
         }
         .buttonStyle(.plain)
@@ -1320,13 +1306,8 @@ struct MacLibraryEpisodeRow: View {
 
 private struct MiniPlayerMaterialModifier: ViewModifier {
   func body(content: Content) -> some View {
-    if #available(macOS 26, *) {
-      content
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
-    } else {
-      content
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: 12))
-    }
+    content
+      .background(.ultraThinMaterial)
   }
 }
 

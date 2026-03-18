@@ -49,7 +49,7 @@ struct MacMiniPlayerBar: View {
                   .foregroundStyle(.secondary)
                   .lineLimit(1)
               }
-              .frame(maxWidth: 280, alignment: .leading)
+              .frame(maxWidth: 320, alignment: .leading)
             }
           }
         }
@@ -59,36 +59,60 @@ struct MacMiniPlayerBar: View {
         Spacer()
 
         // Center: Playback controls
-        HStack(spacing: 24) {
-          // Skip backward
-          Button(action: { audioManager.skipBackward(seconds: 15) }) {
-            Image(systemName: "gobackward.15")
-              .font(.system(size: 18))
-              .foregroundStyle(.primary)
-          }
-          .buttonStyle(.plain)
-          .help("Skip back 15 seconds")
+        Group {
+          if #available(macOS 26, *) {
+            GlassEffectContainer(spacing: 24) {
+              HStack(spacing: 24) {
+                // Skip backward
+                Button("Skip back 15 seconds", systemImage: "gobackward.15", action: { audioManager.skipBackward(seconds: 15) })
+                  .buttonStyle(.glass)
+                  .help("Skip back 15 seconds")
 
-          // Play/Pause (larger, prominent)
-          Button(action: togglePlayback) {
-            Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
-              .font(.system(size: 24))
-              .foregroundStyle(.primary)
-              .frame(width: 44, height: 44)
-              .contentShape(Rectangle())
-          }
-          .buttonStyle(.plain)
-          .help(audioManager.isPlaying ? "Pause" : "Play")
-          .keyboardShortcut(.space, modifiers: [])
+                // Play/Pause (larger, prominent)
+                Button(audioManager.isPlaying ? "Pause" : "Play", systemImage: audioManager.isPlaying ? "pause.fill" : "play.fill", action: togglePlayback)
+                  .buttonStyle(.glassProminent)
+                  .help(audioManager.isPlaying ? "Pause" : "Play")
+                  .keyboardShortcut(.space, modifiers: [])
 
-          // Skip forward
-          Button(action: { audioManager.skipForward(seconds: 30) }) {
-            Image(systemName: "goforward.30")
-              .font(.system(size: 18))
-              .foregroundStyle(.primary)
+                // Skip forward
+                Button("Skip forward 30 seconds", systemImage: "goforward.30", action: { audioManager.skipForward(seconds: 30) })
+                  .buttonStyle(.glass)
+                  .help("Skip forward 30 seconds")
+              }
+            }
+          } else {
+            HStack(spacing: 24) {
+              // Skip backward
+              Button(action: { audioManager.skipBackward(seconds: 15) }) {
+                Image(systemName: "gobackward.15")
+                  .font(.system(size: 18))
+                  .foregroundStyle(.primary)
+              }
+              .buttonStyle(.plain)
+              .help("Skip back 15 seconds")
+
+              // Play/Pause (larger, prominent)
+              Button(action: togglePlayback) {
+                Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
+                  .font(.system(size: 24))
+                  .foregroundStyle(.primary)
+                  .frame(width: 44, height: 44)
+                  .contentShape(Rectangle())
+              }
+              .buttonStyle(.plain)
+              .help(audioManager.isPlaying ? "Pause" : "Play")
+              .keyboardShortcut(.space, modifiers: [])
+
+              // Skip forward
+              Button(action: { audioManager.skipForward(seconds: 30) }) {
+                Image(systemName: "goforward.30")
+                  .font(.system(size: 18))
+                  .foregroundStyle(.primary)
+              }
+              .buttonStyle(.plain)
+              .help("Skip forward 30 seconds")
+            }
           }
-          .buttonStyle(.plain)
-          .help("Skip forward 30 seconds")
         }
 
         Spacer()
@@ -119,8 +143,7 @@ struct MacMiniPlayerBar: View {
               .font(.system(size: 11, weight: .medium))
               .padding(.horizontal, 8)
               .padding(.vertical, 4)
-              .background(Color.gray.opacity(0.15))
-              .clipShape(.rect(cornerRadius: 4))
+              .background(.ultraThinMaterial, in: .rect(cornerRadius: 4))
           }
           .menuStyle(.borderlessButton)
           .frame(width: 44)
@@ -297,35 +320,43 @@ struct MacExpandedPlayerView: View {
 
   @ViewBuilder
   private var expandedPlaybackControls: some View {
-    let skipBack = Button(action: { audioManager.skipBackward(seconds: 15) }) {
-      Image(systemName: "gobackward.15")
-        .font(.title)
-    }
-
-    let playPause = Button(action: togglePlayback) {
-      Image(systemName: audioManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-        .font(.system(size: 64))
-    }
-    .keyboardShortcut(.space, modifiers: [])
-
-    let skipForward = Button(action: { audioManager.skipForward(seconds: 30) }) {
-      Image(systemName: "goforward.30")
-        .font(.title)
-    }
-
     if #available(macOS 26, *) {
-      GlassEffectContainer(spacing: 20) {
+      GlassEffectContainer(spacing: 40) {
         HStack(spacing: 40) {
-          skipBack.buttonStyle(.glass)
-          playPause.buttonStyle(.glass)
-          skipForward.buttonStyle(.glass)
+          Button("Skip back 15 seconds", systemImage: "gobackward.15", action: { audioManager.skipBackward(seconds: 15) })
+            .font(.title)
+            .buttonStyle(.glass)
+
+          Button(audioManager.isPlaying ? "Pause" : "Play", systemImage: audioManager.isPlaying ? "pause.fill" : "play.fill", action: togglePlayback)
+            .font(.system(size: 64))
+            .buttonStyle(.glassProminent)
+            .keyboardShortcut(.space, modifiers: [])
+
+          Button("Skip forward 30 seconds", systemImage: "goforward.30", action: { audioManager.skipForward(seconds: 30) })
+            .font(.title)
+            .buttonStyle(.glass)
         }
       }
     } else {
       HStack(spacing: 40) {
-        skipBack.buttonStyle(.plain)
-        playPause.buttonStyle(.plain)
-        skipForward.buttonStyle(.plain)
+        Button(action: { audioManager.skipBackward(seconds: 15) }) {
+          Image(systemName: "gobackward.15")
+            .font(.title)
+        }
+        .buttonStyle(.plain)
+
+        Button(action: togglePlayback) {
+          Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
+            .font(.system(size: 64))
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(.space, modifiers: [])
+
+        Button(action: { audioManager.skipForward(seconds: 30) }) {
+          Image(systemName: "goforward.30")
+            .font(.title)
+        }
+        .buttonStyle(.plain)
       }
     }
   }

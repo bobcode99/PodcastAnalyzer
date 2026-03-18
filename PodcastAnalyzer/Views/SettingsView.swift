@@ -73,7 +73,14 @@ struct SettingsView: View {
                 Image(systemName: "arrow.clockwise")
                   .foregroundStyle(.green)
                   .frame(width: 24)
-                Text("Sync Now")
+                VStack(alignment: .leading, spacing: 2) {
+                  Text("Sync Now")
+                  if syncManager.isSyncing && syncManager.syncProgressTotal > 0 {
+                    Text("Syncing \(syncManager.syncProgressCurrent) of \(syncManager.syncProgressTotal)…")
+                      .font(.caption2)
+                      .foregroundStyle(.secondary)
+                  }
+                }
                 Spacer()
                 if syncManager.isSyncing {
                   ProgressView()
@@ -86,7 +93,12 @@ struct SettingsView: View {
         } header: {
           Text("Sync & Notifications")
         } footer: {
-          Text("Automatically check for new episodes every 4 hours")
+          if let error = syncManager.lastSyncError {
+            Text("Last sync failed: \(error)")
+              .foregroundStyle(.red)
+          } else {
+            Text("Automatically check for new episodes every 4 hours")
+          }
         }
 
         // MARK: - Appearance Section
