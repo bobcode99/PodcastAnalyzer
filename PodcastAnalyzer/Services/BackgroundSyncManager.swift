@@ -60,6 +60,14 @@ class BackgroundSyncManager {
   var notificationPermissionStatus: UNAuthorizationStatus = .notDetermined
   var lastSyncDate: Date?
   var isSyncing: Bool = false
+  // Progress during an active sync (both are 0 when not syncing)
+  var syncProgressCurrent: Int = 0
+  var syncProgressTotal: Int = 0
+  // Non-nil when the last sync finished with an error
+  var lastSyncError: String?
+
+  // Minimum elapsed time before firing an immediate sync on app-foreground (30 min)
+  private let minimumSyncInterval: TimeInterval = 30 * 60
 
   @ObservationIgnored
   private let rssService = PodcastRssService()
@@ -145,18 +153,19 @@ class BackgroundSyncManager {
   }
 
   private func handleBackgroundRefresh(task: BGAppRefreshTask) async {
-    // Schedule next refresh
     scheduleBackgroundRefresh()
 
-    // Set expiration handler
+    // Wrap sync in a child Task so the expiration handler can cooperatively cancel it.
+    // setTaskCompleted is called exactly once after syncTask resolves.
+    let syncTask = Task { await self.performSync() }
+
     task.expirationHandler = { [weak self] in
-      self?.logger.warning("Background refresh expired")
-      task.setTaskCompleted(success: false)
+      self?.logger.warning("Background refresh expired — cancelling sync")
+      syncTask.cancel()
     }
 
-    // Perform sync
-    let success = await performSync()
-    task.setTaskCompleted(success: success)
+    let success = await syncTask.value
+    task.setTaskCompleted(success: success && !syncTask.isCancelled)
   }
 
   #else
@@ -194,12 +203,18 @@ class BackgroundSyncManager {
     }
 
     isSyncing = true
-    defer { isSyncing = false }
+    lastSyncError = nil
+    syncProgressCurrent = 0
+    syncProgressTotal = 0
+    defer {
+      isSyncing = false
+      syncProgressCurrent = 0
+      syncProgressTotal = 0
+    }
 
     logger.info("Starting podcast sync...")
 
     let context = ModelContext(container)
-    // Only sync subscribed podcasts (not browsed/cached ones)
     let descriptor = FetchDescriptor<PodcastInfoModel>(
       predicate: #Predicate { $0.isSubscribed == true }
     )
@@ -208,6 +223,8 @@ class BackgroundSyncManager {
       let podcasts = try context.fetch(descriptor)
       logger.info("Found \(podcasts.count) subscribed podcasts to sync")
 
+      syncProgressTotal = podcasts.count
+
       var totalNewEpisodes = 0
       var newEpisodeDetails: [(podcastTitle: String, episodeTitle: String, audioURL: String?, imageURL: String?, language: String)] = []
 
@@ -215,6 +232,12 @@ class BackgroundSyncManager {
       let maxConcurrent = 6
       await withTaskGroup(of: (Int, PodcastInfo?, Error?).self) { group in
         for (index, podcast) in podcasts.enumerated() {
+          // Stop enqueuing new work if the task was cancelled (e.g. BGTask expiration)
+          guard !Task.isCancelled else {
+            group.cancelAll()
+            return
+          }
+
           // Once we've launched maxConcurrent tasks, wait for one to finish before adding more
           if index >= maxConcurrent {
             if let result = await group.next() {
@@ -223,6 +246,7 @@ class BackgroundSyncManager {
                 totalNewEpisodes: &totalNewEpisodes,
                 newEpisodeDetails: &newEpisodeDetails
               )
+              syncProgressCurrent += 1
             }
           }
 
@@ -244,7 +268,14 @@ class BackgroundSyncManager {
             totalNewEpisodes: &totalNewEpisodes,
             newEpisodeDetails: &newEpisodeDetails
           )
+          syncProgressCurrent += 1
         }
+      }
+
+      // Bail out cleanly if the background task was expired mid-sync
+      guard !Task.isCancelled else {
+        logger.info("Sync cancelled mid-flight (background time expired)")
+        return false
       }
 
       // Save changes
@@ -298,6 +329,7 @@ class BackgroundSyncManager {
       return true
 
     } catch {
+      lastSyncError = error.localizedDescription
       logger.error("Sync failed: \(error.localizedDescription)")
       return false
     }
@@ -426,14 +458,25 @@ class BackgroundSyncManager {
     stopForegroundSync()
     foregroundSyncTask = Task { [weak self] in
       guard let self else { return }
-      await self.syncNow()                                    // first sync on startup
+
+      // Only sync immediately if data is stale (avoids redundant fetch every app-foreground)
+      let isStale: Bool
+      if let last = lastSyncDate {
+        isStale = Date().timeIntervalSince(last) >= minimumSyncInterval
+      } else {
+        isStale = true
+      }
+      if isStale {
+        await self.syncNow()
+      }
+
       while !Task.isCancelled {
         try? await Task.sleep(for: .seconds(4 * 60 * 60))
         if Task.isCancelled { return }
         await self.syncNow()
       }
     }
-    logger.info("Foreground sync timer started (4 hour interval)")
+    logger.info("Foreground sync timer started (4-hour interval, immediate only if stale)")
   }
 
   func stopForegroundSync() {
