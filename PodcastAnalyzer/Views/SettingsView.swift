@@ -86,7 +86,7 @@ struct SettingsView: View {
         } header: {
           Text("Sync & Notifications")
         } footer: {
-          Text("Automatically check for new episodes every 5 minutes")
+          Text("Automatically check for new episodes every 4 hours")
         }
 
         // MARK: - Appearance Section

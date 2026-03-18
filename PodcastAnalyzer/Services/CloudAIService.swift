@@ -482,6 +482,7 @@ final class CloudAIService {
             apiKey: apiKey,
             model: model,
             maxTokens: maxTokens,
+            disableThinking: provider.usesLocalServer && settings.disableThinkingForLocalModels,
             onChunk: { text in
                 onChunk(text)
                 let estimatedProgress = min(0.85, 0.2 + Double(text.count) / 5000.0 * 0.65)
@@ -564,7 +565,8 @@ final class CloudAIService {
             systemPrompt: systemPrompt,
             apiKey: apiKey,
             model: model,
-            maxTokens: 8192
+            maxTokens: 8192,
+            disableThinking: provider.usesLocalServer && settings.disableThinkingForLocalModels
         )
 
         progressCallback?("Parsing response...", 0.8)
@@ -706,7 +708,8 @@ final class CloudAIService {
             systemPrompt: systemPrompt,
             apiKey: apiKey,
             model: model,
-            maxTokens: 8192
+            maxTokens: 8192,
+            disableThinking: provider.usesLocalServer && settings.disableThinkingForLocalModels
         )
 
         progressCallback?("Parsing response...", 0.9)

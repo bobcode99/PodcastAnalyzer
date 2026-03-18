@@ -453,7 +453,7 @@ struct HomeView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
       } else {
-        LazyVStack(spacing: 0) {
+        VStack(spacing: 0) {
           ForEach(Array(viewModel.topPodcasts.prefix(25).enumerated()), id: \.element.id) { index, podcast in
             TopPodcastRow(
               podcast: podcast,

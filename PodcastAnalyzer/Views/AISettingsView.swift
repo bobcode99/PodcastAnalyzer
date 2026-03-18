@@ -202,6 +202,15 @@ struct AISettingsView: View {
 
                     modelFetchStatusView
 
+                    Toggle(isOn: $settings.disableThinkingForLocalModels) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Disable Thinking")
+                            Text("Skips chain-of-thought reasoning for faster responses. Best for DeepSeek-R1 and other reasoning models.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     // Test connection button
                     testConnectionButton
                 } header: {
@@ -651,7 +660,20 @@ struct AISettingsView: View {
         // Use fetched models if available, otherwise use hardcoded defaults
         let models = fetchedModels[provider] ?? provider.availableModels
 
-        if models.isEmpty {
+        if models.isEmpty && provider.usesLocalServer {
+            HStack {
+                Text("Model")
+                Spacer()
+                TextField("e.g. llama3.2", text: binding)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+                    .multilineTextAlignment(.trailing)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+            }
+        } else if models.isEmpty {
             HStack {
                 Text("Model")
                 Spacer()

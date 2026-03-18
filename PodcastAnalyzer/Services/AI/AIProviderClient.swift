@@ -46,12 +46,63 @@ nonisolated protocol AIProviderClient: Sendable {
         maxTokens: Int,
         onChunk: @escaping @Sendable (String) -> Void
     ) async throws -> String
+
+    /// Non-streaming completion with optional thinking/reasoning disabled
+    func sendRequest(
+        prompt: String,
+        systemPrompt: String,
+        apiKey: String,
+        model: String,
+        maxTokens: Int,
+        disableThinking: Bool
+    ) async throws -> String
+
+    /// Streaming completion with optional thinking/reasoning disabled
+    func sendStreamingRequest(
+        prompt: String,
+        systemPrompt: String,
+        apiKey: String,
+        model: String,
+        maxTokens: Int,
+        disableThinking: Bool,
+        onChunk: @escaping @Sendable (String) -> Void
+    ) async throws -> String
 }
 
 // MARK: - Default Implementations
 
 extension AIProviderClient {
     var requiresAPIKey: Bool { true }
+
+    func sendRequest(
+        prompt: String,
+        systemPrompt: String,
+        apiKey: String,
+        model: String,
+        maxTokens: Int,
+        disableThinking: Bool
+    ) async throws -> String {
+        try await sendRequest(
+            prompt: prompt, systemPrompt: systemPrompt,
+            apiKey: apiKey, model: model, maxTokens: maxTokens
+        )
+    }
+
+    func sendStreamingRequest(
+        prompt: String,
+        systemPrompt: String,
+        apiKey: String,
+        model: String,
+        maxTokens: Int,
+        disableThinking: Bool,
+        onChunk: @escaping @Sendable (String) -> Void
+    ) async throws -> String {
+        try await sendStreamingRequest(
+            prompt: prompt, systemPrompt: systemPrompt,
+            apiKey: apiKey, model: model, maxTokens: maxTokens,
+            onChunk: onChunk
+        )
+    }
 }
 
 // MARK: - Shared Helpers

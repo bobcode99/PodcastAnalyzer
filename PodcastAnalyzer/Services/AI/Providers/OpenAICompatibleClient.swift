@@ -99,6 +99,21 @@ nonisolated struct OpenAICompatibleClient: AIProviderClient {
         model: String,
         maxTokens: Int
     ) async throws -> String {
+        try await sendRequest(
+            prompt: prompt, systemPrompt: systemPrompt,
+            apiKey: apiKey, model: model, maxTokens: maxTokens,
+            disableThinking: false
+        )
+    }
+
+    func sendRequest(
+        prompt: String,
+        systemPrompt: String,
+        apiKey: String,
+        model: String,
+        maxTokens: Int,
+        disableThinking: Bool
+    ) async throws -> String {
         var request = URLRequest(url: baseURL)
         request.httpMethod = "POST"
         if !apiKey.isEmpty {
@@ -106,7 +121,7 @@ nonisolated struct OpenAICompatibleClient: AIProviderClient {
         }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model,
             "messages": [
                 ["role": "system", "content": systemPrompt],
@@ -115,6 +130,7 @@ nonisolated struct OpenAICompatibleClient: AIProviderClient {
             "temperature": 0.7,
             "max_tokens": maxTokens
         ]
+        if disableThinking { body["think"] = false }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -150,6 +166,22 @@ nonisolated struct OpenAICompatibleClient: AIProviderClient {
         maxTokens: Int,
         onChunk: @escaping @Sendable (String) -> Void
     ) async throws -> String {
+        try await sendStreamingRequest(
+            prompt: prompt, systemPrompt: systemPrompt,
+            apiKey: apiKey, model: model, maxTokens: maxTokens,
+            disableThinking: false, onChunk: onChunk
+        )
+    }
+
+    func sendStreamingRequest(
+        prompt: String,
+        systemPrompt: String,
+        apiKey: String,
+        model: String,
+        maxTokens: Int,
+        disableThinking: Bool,
+        onChunk: @escaping @Sendable (String) -> Void
+    ) async throws -> String {
         var request = URLRequest(url: baseURL)
         request.httpMethod = "POST"
         if !apiKey.isEmpty {
@@ -157,7 +189,7 @@ nonisolated struct OpenAICompatibleClient: AIProviderClient {
         }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model,
             "messages": [
                 ["role": "system", "content": systemPrompt],
@@ -167,6 +199,7 @@ nonisolated struct OpenAICompatibleClient: AIProviderClient {
             "max_tokens": maxTokens,
             "stream": true
         ]
+        if disableThinking { body["think"] = false }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

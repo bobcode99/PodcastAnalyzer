@@ -105,11 +105,24 @@ nonisolated struct OllamaClient: AIProviderClient {
         maxTokens: Int
     ) async throws -> String {
         try await openAIClient.sendRequest(
-            prompt: prompt,
-            systemPrompt: systemPrompt,
-            apiKey: "",
-            model: model,
-            maxTokens: maxTokens
+            prompt: prompt, systemPrompt: systemPrompt,
+            apiKey: "", model: model, maxTokens: maxTokens,
+            disableThinking: false
+        )
+    }
+
+    func sendRequest(
+        prompt: String,
+        systemPrompt: String,
+        apiKey: String,
+        model: String,
+        maxTokens: Int,
+        disableThinking: Bool
+    ) async throws -> String {
+        try await openAIClient.sendRequest(
+            prompt: prompt, systemPrompt: systemPrompt,
+            apiKey: "", model: model, maxTokens: maxTokens,
+            disableThinking: disableThinking
         )
     }
 
@@ -122,12 +135,25 @@ nonisolated struct OllamaClient: AIProviderClient {
         onChunk: @escaping @Sendable (String) -> Void
     ) async throws -> String {
         try await openAIClient.sendStreamingRequest(
-            prompt: prompt,
-            systemPrompt: systemPrompt,
-            apiKey: "",
-            model: model,
-            maxTokens: maxTokens,
-            onChunk: onChunk
+            prompt: prompt, systemPrompt: systemPrompt,
+            apiKey: "", model: model, maxTokens: maxTokens,
+            disableThinking: false, onChunk: onChunk
+        )
+    }
+
+    func sendStreamingRequest(
+        prompt: String,
+        systemPrompt: String,
+        apiKey: String,
+        model: String,
+        maxTokens: Int,
+        disableThinking: Bool,
+        onChunk: @escaping @Sendable (String) -> Void
+    ) async throws -> String {
+        try await openAIClient.sendStreamingRequest(
+            prompt: prompt, systemPrompt: systemPrompt,
+            apiKey: "", model: model, maxTokens: maxTokens,
+            disableThinking: disableThinking, onChunk: onChunk
         )
     }
 }

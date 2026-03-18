@@ -357,6 +357,10 @@ final class AISettingsManager {
         didSet { saveSettings() }
     }
 
+    var disableThinkingForLocalModels: Bool {
+        didSet { saveSettings() }
+    }
+
     var analysisLanguage: AnalysisLanguage {
         didSet { saveSettings() }
     }
@@ -412,6 +416,7 @@ final class AISettingsManager {
         self.selectedGroqModel = UserDefaults.standard.string(forKey: "ai_groq_model") ?? CloudAIProvider.groq.defaultModel
         self.selectedLMStudioModel = UserDefaults.standard.string(forKey: "ai_lmstudio_model") ?? ""
         self.selectedOllamaModel = UserDefaults.standard.string(forKey: "ai_ollama_model") ?? ""
+        self.disableThinkingForLocalModels = UserDefaults.standard.bool(forKey: "ai_disable_thinking")
 
         // Load analysis language setting
         if let languageString = UserDefaults.standard.string(forKey: "ai_analysis_language"),
@@ -506,6 +511,7 @@ final class AISettingsManager {
         UserDefaults.standard.set(selectedGroqModel, forKey: "ai_groq_model")
         UserDefaults.standard.set(selectedLMStudioModel, forKey: "ai_lmstudio_model")
         UserDefaults.standard.set(selectedOllamaModel, forKey: "ai_ollama_model")
+        UserDefaults.standard.set(disableThinkingForLocalModels, forKey: "ai_disable_thinking")
         UserDefaults.standard.set(analysisLanguage.rawValue, forKey: "ai_analysis_language")
         UserDefaults.standard.set(transcriptFormat.rawValue, forKey: "ai_transcript_format")
     }
