@@ -94,6 +94,7 @@ class EnhancedAudioManager: NSObject {
   var currentTime: TimeInterval = 0
   var duration: TimeInterval = 0
   var playbackRate: Float = 1.0
+  var volume: Float = 1.0
 
   var currentCaption: String = ""
   var captionSegments: [CaptionSegment] = []
@@ -370,6 +371,7 @@ private func handleAudioInterruption(_ notification: Notification) {
 
     let playerItem = AVPlayerItem(url: url)
     player = AVPlayer(playerItem: playerItem)
+    player?.volume = volume
     currentEpisode = episode
 
     // Update Now Playing info with cached duration (will be refined when AVPlayer reports actual duration)
@@ -471,6 +473,11 @@ private func handleAudioInterruption(_ notification: Notification) {
     UserDefaults.standard.set(rate, forKey: Keys.playbackRate)
     updateNowPlayingPlaybackRate()
     logger.info("Playback rate set to \(rate)x")
+  }
+
+  func setVolume(_ vol: Float) {
+    volume = max(0, min(1, vol))
+    player?.volume = volume
   }
 
   // MARK: - Queue Management
