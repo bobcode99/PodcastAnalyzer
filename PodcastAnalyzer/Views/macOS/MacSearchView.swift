@@ -223,10 +223,8 @@ struct MacSearchView: View {
         let podcastInfo = try await rssService.fetchPodcast(from: feedUrl)
         let podcastInfoModel = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date.now)
 
-        await MainActor.run {
-          modelContext.insert(podcastInfoModel)
-          try? modelContext.save()
-        }
+        modelContext.insert(podcastInfoModel)
+        try? modelContext.save()
       } catch {
         print("Failed to subscribe: \(error)")
       }

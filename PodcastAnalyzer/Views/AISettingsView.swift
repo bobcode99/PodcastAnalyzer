@@ -708,48 +708,44 @@ struct AISettingsView: View {
                 let service = CloudAIService.shared
                 let models = try await service.fetchAvailableModels(for: provider, apiKey: apiKey)
 
-                await MainActor.run {
-                    fetchedModels[provider] = models
-                    isFetchingModels = false
+                fetchedModels[provider] = models
+                isFetchingModels = false
 
-                    // If current model is not in the list, select the first available
-                    let currentModel: String
+                // If current model is not in the list, select the first available
+                let currentModel: String
+                switch provider {
+                case .applePCC: currentModel = "Shortcuts"
+                case .openai: currentModel = settings.selectedOpenAIModel
+                case .claude: currentModel = settings.selectedClaudeModel
+                case .gemini: currentModel = settings.selectedGeminiModel
+                case .groq: currentModel = settings.selectedGroqModel
+                case .grok: currentModel = settings.selectedGrokModel
+                case .lmstudio: currentModel = settings.selectedLMStudioModel
+                case .ollama: currentModel = settings.selectedOllamaModel
+                }
+
+                if !models.contains(currentModel), let firstModel = models.first {
                     switch provider {
-                    case .applePCC: currentModel = "Shortcuts"
-                    case .openai: currentModel = settings.selectedOpenAIModel
-                    case .claude: currentModel = settings.selectedClaudeModel
-                    case .gemini: currentModel = settings.selectedGeminiModel
-                    case .groq: currentModel = settings.selectedGroqModel
-                    case .grok: currentModel = settings.selectedGrokModel
-                    case .lmstudio: currentModel = settings.selectedLMStudioModel
-                    case .ollama: currentModel = settings.selectedOllamaModel
-                    }
-
-                    if !models.contains(currentModel), let firstModel = models.first {
-                        switch provider {
-                        case .applePCC: break
-                        case .openai: settings.selectedOpenAIModel = firstModel
-                        case .claude: settings.selectedClaudeModel = firstModel
-                        case .gemini: settings.selectedGeminiModel = firstModel
-                        case .groq: settings.selectedGroqModel = firstModel
-                        case .grok: settings.selectedGrokModel = firstModel
-                        case .lmstudio: settings.selectedLMStudioModel = firstModel
-                        case .ollama: settings.selectedOllamaModel = firstModel
-                        }
+                    case .applePCC: break
+                    case .openai: settings.selectedOpenAIModel = firstModel
+                    case .claude: settings.selectedClaudeModel = firstModel
+                    case .gemini: settings.selectedGeminiModel = firstModel
+                    case .groq: settings.selectedGroqModel = firstModel
+                    case .grok: settings.selectedGrokModel = firstModel
+                    case .lmstudio: settings.selectedLMStudioModel = firstModel
+                    case .ollama: settings.selectedOllamaModel = firstModel
                     }
                 }
             } catch {
-                await MainActor.run {
-                    let fallback = provider.availableModels
-                    if provider.usesLocalServer {
-                        modelFetchError = "Cannot connect to \(provider.displayName). Is it running?"
-                        fetchedModels[provider] = nil
-                    } else {
-                        modelFetchError = "Could not fetch models. Using defaults."
-                        fetchedModels[provider] = fallback
-                    }
-                    isFetchingModels = false
+                let fallback = provider.availableModels
+                if provider.usesLocalServer {
+                    modelFetchError = "Cannot connect to \(provider.displayName). Is it running?"
+                    fetchedModels[provider] = nil
+                } else {
+                    modelFetchError = "Could not fetch models. Using defaults."
+                    fetchedModels[provider] = fallback
                 }
+                isFetchingModels = false
             }
         }
     }
@@ -762,19 +758,15 @@ struct AISettingsView: View {
                 let service = CloudAIService.shared
                 _ = try await service.testConnection()
 
-                await MainActor.run {
-                    testResultSuccess = true
-                    testResultMessage = "Connection successful!\n\nProvider: \(settings.selectedProvider.displayName)\nModel: \(settings.currentModel)"
-                    showingTestResult = true
-                    isTesting = false
-                }
+                testResultSuccess = true
+                testResultMessage = "Connection successful!\n\nProvider: \(settings.selectedProvider.displayName)\nModel: \(settings.currentModel)"
+                showingTestResult = true
+                isTesting = false
             } catch {
-                await MainActor.run {
-                    testResultSuccess = false
-                    testResultMessage = "Connection failed: \(error.localizedDescription)"
-                    showingTestResult = true
-                    isTesting = false
-                }
+                testResultSuccess = false
+                testResultMessage = "Connection failed: \(error.localizedDescription)"
+                showingTestResult = true
+                isTesting = false
             }
         }
     }
@@ -835,9 +827,7 @@ struct AISettingsView: View {
                 let service = AppleFoundationModelsService()
                 let availability = await service.checkAvailability()
 
-                await MainActor.run {
-                    onDeviceAvailability = availability
-                }
+                onDeviceAvailability = availability
             }
         } else {
             onDeviceAvailability = .unavailable(reason: "Requires iOS 26+ / macOS 26+")

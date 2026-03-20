@@ -745,23 +745,19 @@ final class EpisodeDetailViewModel {
         podcastTitle: podcastTitle,
         targetLanguage: targetLang
       ) {
-        await MainActor.run {
-          self.transcriptSegments = translated
-          self.regroupSentences()
-          self.translationStatus = .completed
-          // Auto-switch display mode so translated text is visible
-          if self.subtitleSettings.displayMode == .originalOnly {
-            self.subtitleSettings.displayMode = .dualTranslatedFirst
-          }
-          logger.info("Loaded cached translation for \(self.episode.title) in \(language.displayName)")
+        self.transcriptSegments = translated
+        self.regroupSentences()
+        self.translationStatus = .completed
+        // Auto-switch display mode so translated text is visible
+        if self.subtitleSettings.displayMode == .originalOnly {
+          self.subtitleSettings.displayMode = .dualTranslatedFirst
         }
+        logger.info("Loaded cached translation for \(self.episode.title) in \(language.displayName)")
         return
       }
 
       // No cached translation, trigger the transcript translation task
-      await MainActor.run {
-        self.transcriptTranslationTrigger.toggle()
-      }
+      self.transcriptTranslationTrigger.toggle()
     }
   }
 
@@ -774,10 +770,8 @@ final class EpisodeDetailViewModel {
         podcastTitle: podcastTitle
       )
 
-      await MainActor.run {
-        self.availableTranslationLanguages = available
-        logger.info("Found \(available.count) cached translations: \(available)")
-      }
+      self.availableTranslationLanguages = available
+      logger.info("Found \(available.count) cached translations: \(available)")
     }
   }
 
@@ -800,19 +794,15 @@ final class EpisodeDetailViewModel {
         podcastTitle: podcastTitle,
         targetLanguage: targetLang
       ) {
-        await MainActor.run {
-          self.transcriptSegments = translated
-          self.translationStatus = .completed
-          logger.info("Loaded cached translation for \(self.episode.title)")
-        }
+        self.transcriptSegments = translated
+        self.translationStatus = .completed
+        logger.info("Loaded cached translation for \(self.episode.title)")
         return
       }
 
       // No cached translation, trigger the translation task
-      await MainActor.run {
-        self.translationStatus = .preparingSession
-        self.transcriptTranslationTrigger.toggle()
-      }
+      self.translationStatus = .preparingSession
+      self.transcriptTranslationTrigger.toggle()
     }
   }
 
@@ -820,19 +810,15 @@ final class EpisodeDetailViewModel {
   @available(iOS 17.4, macOS 14.4, *)
   func performTranscriptTranslation(using session: TranslationSession) async {
     #if canImport(Translation)
-    let segments = await MainActor.run { self.transcriptSegments }
+    let segments = self.transcriptSegments
     let total = segments.count
 
     guard total > 0 else {
-      await MainActor.run {
-        self.translationStatus = .failed("No segments to translate")
-      }
+      self.translationStatus = .failed("No segments to translate")
       return
     }
 
-    await MainActor.run {
-      self.translationStatus = .translating(progress: 0, completed: 0, total: total)
-    }
+    self.translationStatus = .translating(progress: 0, completed: 0, total: total)
 
     var translatedSegments = segments
 
@@ -843,22 +829,16 @@ final class EpisodeDetailViewModel {
         translatedSegments[index].translatedText = response.targetText
 
         let progress = Double(index + 1) / Double(total)
-        await MainActor.run {
-          self.translationStatus = .translating(progress: progress, completed: index + 1, total: total)
-        }
+        self.translationStatus = .translating(progress: progress, completed: index + 1, total: total)
       } catch {
         logger.error("Translation failed for segment \(index): \(error.localizedDescription)")
-        await MainActor.run {
-          self.translationStatus = .failed(error.localizedDescription)
-        }
+        self.translationStatus = .failed(error.localizedDescription)
         return
       }
     }
 
     // Save translated segments using selected language or settings default
-    let targetLang = await MainActor.run {
-      (self.selectedTranslationLanguage ?? self.subtitleSettings.targetLanguage).languageIdentifier
-    }
+    let targetLang = (self.selectedTranslationLanguage ?? self.subtitleSettings.targetLanguage).languageIdentifier
 
     do {
       try await translationService.saveTranslatedSRT(
@@ -871,16 +851,14 @@ final class EpisodeDetailViewModel {
       logger.error("Failed to save translation: \(error.localizedDescription)")
     }
 
-    await MainActor.run {
-      self.transcriptSegments = translatedSegments
-      self.regroupSentences()
-      self.translationStatus = .completed
-      // Update available translations
-      self.availableTranslationLanguages.insert(targetLang)
-      // Auto-switch display mode so translated text is visible
-      if self.subtitleSettings.displayMode == .originalOnly {
-        self.subtitleSettings.displayMode = .dualTranslatedFirst
-      }
+    self.transcriptSegments = translatedSegments
+    self.regroupSentences()
+    self.translationStatus = .completed
+    // Update available translations
+    self.availableTranslationLanguages.insert(targetLang)
+    // Auto-switch display mode so translated text is visible
+    if self.subtitleSettings.displayMode == .originalOnly {
+      self.subtitleSettings.displayMode = .dualTranslatedFirst
     }
 
     logger.info("Completed translation for \(self.episode.title)")
@@ -900,9 +878,7 @@ final class EpisodeDetailViewModel {
 
     do {
       let response = try await session.translate(plainText)
-      await MainActor.run {
-        self.translatedDescription = response.targetText
-      }
+      self.translatedDescription = response.targetText
       logger.info("Translated description for \(self.episode.title)")
     } catch {
       logger.error("Description translation failed: \(error.localizedDescription)")
@@ -919,9 +895,7 @@ final class EpisodeDetailViewModel {
 
     do {
       let response = try await session.translate(title)
-      await MainActor.run {
-        self.translatedEpisodeTitle = response.targetText
-      }
+      self.translatedEpisodeTitle = response.targetText
       logger.info("Translated title for \(self.episode.title)")
     } catch {
       logger.error("Title translation failed: \(error.localizedDescription)")
@@ -938,9 +912,7 @@ final class EpisodeDetailViewModel {
 
     do {
       let response = try await session.translate(title)
-      await MainActor.run {
-        self.translatedPodcastTitle = response.targetText
-      }
+      self.translatedPodcastTitle = response.targetText
       logger.info("Translated podcast title: \(title)")
     } catch {
       logger.error("Podcast title translation failed: \(error.localizedDescription)")
@@ -973,15 +945,13 @@ final class EpisodeDetailViewModel {
         podcastTitle: podcastTitle,
         targetLanguage: targetLang
       ) {
-        await MainActor.run {
-          self.transcriptSegments = translated
-          self.regroupSentences()
-          // Auto-switch display mode so translated text is visible
-          if self.subtitleSettings.displayMode == .originalOnly {
-            self.subtitleSettings.displayMode = .dualTranslatedFirst
-          }
-          logger.info("Loaded existing translations for \(self.episode.title)")
+        self.transcriptSegments = translated
+        self.regroupSentences()
+        // Auto-switch display mode so translated text is visible
+        if self.subtitleSettings.displayMode == .originalOnly {
+          self.subtitleSettings.displayMode = .dualTranslatedFirst
         }
+        logger.info("Loaded existing translations for \(self.episode.title)")
       }
     }
   }
@@ -1074,15 +1044,13 @@ final class EpisodeDetailViewModel {
         transcriptType: episode.transcriptType
       )
 
-      await MainActor.run {
-        rssTranscriptState = state
+      rssTranscriptState = state
 
-        // If already downloaded, load the transcript
-        if case .downloaded = state {
-          self.loadExistingTranscriptTask?.cancel()
-          self.loadExistingTranscriptTask = Task {
-            await self.loadExistingTranscript()
-          }
+      // If already downloaded, load the transcript
+      if case .downloaded = state {
+        self.loadExistingTranscriptTask?.cancel()
+        self.loadExistingTranscriptTask = Task {
+          await self.loadExistingTranscript()
         }
       }
     }
@@ -1097,9 +1065,7 @@ final class EpisodeDetailViewModel {
     }
 
     Task {
-      await MainActor.run {
-        rssTranscriptState = .downloading(progress: 0.5)
-      }
+      rssTranscriptState = .downloading(progress: 0.5)
 
       do {
         let savedURL = try await transcriptDownloadService.downloadTranscript(
@@ -1109,19 +1075,15 @@ final class EpisodeDetailViewModel {
           podcastTitle: podcastTitle
         )
 
-        await MainActor.run {
-          rssTranscriptState = .downloaded(localPath: savedURL.path)
-          logger.info("RSS transcript downloaded successfully")
-        }
+        rssTranscriptState = .downloaded(localPath: savedURL.path)
+        logger.info("RSS transcript downloaded successfully")
 
         // Load the transcript
         await loadExistingTranscript()
 
       } catch {
-        await MainActor.run {
-          rssTranscriptState = .failed(error: error.localizedDescription)
-          logger.error("RSS transcript download failed: \(error.localizedDescription)")
-        }
+        rssTranscriptState = .failed(error: error.localizedDescription)
+        logger.error("RSS transcript download failed: \(error.localizedDescription)")
       }
     }
   }
@@ -1280,18 +1242,14 @@ final class EpisodeDetailViewModel {
         }
       }
 
-      await MainActor.run {
-        transcriptText = content
-        cachedTranscriptDate = fileDate
-        wordTimingsData = timingsData
-        transcriptState = .completed
-        parseTranscriptSegments()
-      }
+      transcriptText = content
+      cachedTranscriptDate = fileDate
+      wordTimingsData = timingsData
+      transcriptState = .completed
+      parseTranscriptSegments()
     } catch {
       logger.error("Failed to load transcript: \(error.localizedDescription)")
-      await MainActor.run {
-        transcriptState = .error("Failed to load transcript: \(error.localizedDescription)")
-      }
+      transcriptState = .error("Failed to load transcript: \(error.localizedDescription)")
     }
   }
 
@@ -1317,9 +1275,7 @@ final class EpisodeDetailViewModel {
     loadTranscriptDateTask?.cancel()
     loadTranscriptDateTask = Task {
       let date = await transcriptGeneratedAt
-      await MainActor.run {
-        cachedTranscriptDate = date
-      }
+      cachedTranscriptDate = date
     }
   }
 
@@ -1808,21 +1764,17 @@ final class EpisodeDetailViewModel {
           }
         )
 
-        await MainActor.run {
-          quickTagsCache.tags = tags
-          quickTagsCache.generatedAt = Date()
-          quickTagsState = .completed
+        quickTagsCache.tags = tags
+        quickTagsCache.generatedAt = Date()
+        quickTagsState = .completed
 
-          // Save to SwiftData
-          saveQuickTagsToSwiftData(tags: tags)
+        // Save to SwiftData
+        saveQuickTagsToSwiftData(tags: tags)
 
-          logger.info("Quick tags generated successfully")
-        }
+        logger.info("Quick tags generated successfully")
       } catch {
-        await MainActor.run {
-          quickTagsState = .error("Failed: \(error.localizedDescription)")
-          logger.error("Quick tags generation failed: \(error.localizedDescription)")
-        }
+        quickTagsState = .error("Failed: \(error.localizedDescription)")
+        logger.error("Quick tags generation failed: \(error.localizedDescription)")
       }
     }
   }
@@ -1842,9 +1794,7 @@ final class EpisodeDetailViewModel {
     briefSummaryTask?.cancel()
     briefSummaryTask = Task {
       do {
-        await MainActor.run {
-          quickTagsState = .analyzing(progress: 0, message: "Creating summary...")
-        }
+        quickTagsState = .analyzing(progress: 0, message: "Creating summary...")
 
         let service = AppleFoundationModelsService()
         let summary = try await service.generateBriefSummary(
@@ -1857,17 +1807,13 @@ final class EpisodeDetailViewModel {
           }
         )
 
-        await MainActor.run {
-          quickTagsCache.briefSummary = summary
-          quickTagsCache.generatedAt = Date()
-          quickTagsState = .completed
-          logger.info("Brief summary generated successfully")
-        }
+        quickTagsCache.briefSummary = summary
+        quickTagsCache.generatedAt = Date()
+        quickTagsState = .completed
+        logger.info("Brief summary generated successfully")
       } catch {
-        await MainActor.run {
-          quickTagsState = .error("Failed: \(error.localizedDescription)")
-          logger.error("Brief summary generation failed: \(error.localizedDescription)")
-        }
+        quickTagsState = .error("Failed: \(error.localizedDescription)")
+        logger.error("Brief summary generation failed: \(error.localizedDescription)")
       }
     }
   }
@@ -1901,12 +1847,10 @@ final class EpisodeDetailViewModel {
     cloudAnalysisTask?.cancel()
     cloudAnalysisTask = Task {
       do {
-        await MainActor.run {
-          cloudAnalysisState = .analyzing(progress: 0, message: "Preparing...")
-          streamingText = ""
-          isStreaming = true
-          currentStreamingType = type
-        }
+        cloudAnalysisState = .analyzing(progress: 0, message: "Preparing...")
+        streamingText = ""
+        isStreaming = true
+        currentStreamingType = type
 
         let service = CloudAIService.shared
 
@@ -1928,37 +1872,33 @@ final class EpisodeDetailViewModel {
           }
         )
 
-        await MainActor.run {
-          isStreaming = false
-          currentStreamingType = nil
-          streamingText = ""
+        isStreaming = false
+        currentStreamingType = nil
+        streamingText = ""
 
-          // Store in cache
-          switch type {
-          case .summary:
-            cloudAnalysisCache.summary = result
-          case .entities:
-            cloudAnalysisCache.entities = result
-          case .highlights:
-            cloudAnalysisCache.highlights = result
-          case .fullAnalysis:
-            cloudAnalysisCache.fullAnalysis = result
-          }
-          cloudAnalysisState = .completed
-
-          // Save to SwiftData
-          saveCloudAnalysisToSwiftData(result: result, type: type)
-
-          logger.info("Cloud analysis (\(type.rawValue)) completed successfully")
+        // Store in cache
+        switch type {
+        case .summary:
+          cloudAnalysisCache.summary = result
+        case .entities:
+          cloudAnalysisCache.entities = result
+        case .highlights:
+          cloudAnalysisCache.highlights = result
+        case .fullAnalysis:
+          cloudAnalysisCache.fullAnalysis = result
         }
+        cloudAnalysisState = .completed
+
+        // Save to SwiftData
+        saveCloudAnalysisToSwiftData(result: result, type: type)
+
+        logger.info("Cloud analysis (\(type.rawValue)) completed successfully")
       } catch {
-        await MainActor.run {
-          isStreaming = false
-          currentStreamingType = nil
-          streamingText = ""
-          cloudAnalysisState = .error(error.localizedDescription)
-          logger.error("Cloud analysis failed: \(error.localizedDescription)")
-        }
+        isStreaming = false
+        currentStreamingType = nil
+        streamingText = ""
+        cloudAnalysisState = .error(error.localizedDescription)
+        logger.error("Cloud analysis failed: \(error.localizedDescription)")
       }
     }
   }
@@ -1984,9 +1924,7 @@ final class EpisodeDetailViewModel {
     cloudQuestionTask?.cancel()
     cloudQuestionTask = Task {
       do {
-        await MainActor.run {
-          cloudQuestionState = .analyzing(progress: 0, message: "Processing question...")
-        }
+        cloudQuestionState = .analyzing(progress: 0, message: "Processing question...")
 
         let service = CloudAIService.shared
 
@@ -2002,20 +1940,16 @@ final class EpisodeDetailViewModel {
           }
         )
 
-        await MainActor.run {
-          cloudAnalysisCache.questionAnswers.append(result)
-          cloudQuestionState = .completed
+        cloudAnalysisCache.questionAnswers.append(result)
+        cloudQuestionState = .completed
 
-          // Save Q&A to SwiftData
-          saveQAToSwiftData(result)
+        // Save Q&A to SwiftData
+        saveQAToSwiftData(result)
 
-          logger.info("Cloud Q&A completed successfully - Provider: \(result.provider.displayName), Model: \(result.model)")
-        }
+        logger.info("Cloud Q&A completed successfully - Provider: \(result.provider.displayName), Model: \(result.model)")
       } catch {
-        await MainActor.run {
-          cloudQuestionState = .error(error.localizedDescription)
-          logger.error("Cloud Q&A failed: \(error.localizedDescription)")
-        }
+        cloudQuestionState = .error(error.localizedDescription)
+        logger.error("Cloud Q&A failed: \(error.localizedDescription)")
       }
     }
   }

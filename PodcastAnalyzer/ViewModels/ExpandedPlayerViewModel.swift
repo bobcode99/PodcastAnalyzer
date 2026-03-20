@@ -454,22 +454,16 @@ final class ExpandedPlayerViewModel {
           )
           let segments = parseTranscriptSegments(from: content)
 
-          await MainActor.run {
-            self.hasTranscript = true
-            self.transcriptSegments = segments
-            self.lastLoadedEpisodeId = episodeId
-          }
+          self.hasTranscript = true
+          self.transcriptSegments = segments
+          self.lastLoadedEpisodeId = episodeId
         } catch {
-          await MainActor.run {
-            self.hasTranscript = false
-            self.transcriptSegments = []
-          }
-        }
-      } else {
-        await MainActor.run {
           self.hasTranscript = false
           self.transcriptSegments = []
         }
+      } else {
+        self.hasTranscript = false
+        self.transcriptSegments = []
       }
     }
   }

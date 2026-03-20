@@ -464,13 +464,11 @@ final class SettingsViewModel {
         let transcriptService = TranscriptService(language: selectedTranscriptLocale)
         let isReady = await transcriptService.isModelReady()
 
-        await MainActor.run {
-          if isReady {
-            transcriptModelStatus = .ready
-          } else {
-            transcriptModelStatus = .notDownloaded
-            logger.info("Transcript model not downloaded")
-          }
+        if isReady {
+          transcriptModelStatus = .ready
+        } else {
+          transcriptModelStatus = .notDownloaded
+          logger.info("Transcript model not downloaded")
         }
       }
     #endif

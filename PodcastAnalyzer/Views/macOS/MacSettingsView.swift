@@ -673,16 +673,16 @@ struct StorageSettingsTab: View {
   private func calculateStorageInfo() {
     Task {
       let cacheSize = await calculateImageCacheSize()
-      await MainActor.run { imageCacheSize = formatBytes(cacheSize) }
+      imageCacheSize = formatBytes(cacheSize)
 
       let audioSize = await calculateDownloadedAudioSize()
-      await MainActor.run { downloadedAudioSize = formatBytes(audioSize) }
+      downloadedAudioSize = formatBytes(audioSize)
 
       let captionsSize = await calculateTranscriptsSize()
-      await MainActor.run { transcriptsSize = formatBytes(captionsSize) }
+      transcriptsSize = formatBytes(captionsSize)
 
       let analysisCount = countAIAnalyses()
-      await MainActor.run { aiAnalysisCount = analysisCount }
+      aiAnalysisCount = analysisCount
     }
   }
 
@@ -764,11 +764,9 @@ struct StorageSettingsTab: View {
 
       await FileStorageManager.shared.clearAllAudioFiles()
 
-      await MainActor.run {
-        isClearingData = false
-        clearingMessage = ""
-        downloadedAudioSize = "0 bytes"
-      }
+      isClearingData = false
+      clearingMessage = ""
+      downloadedAudioSize = "0 bytes"
     }
   }
 
@@ -790,11 +788,9 @@ struct StorageSettingsTab: View {
 
       await FileStorageManager.shared.clearAllCaptionFiles()
 
-      await MainActor.run {
-        isClearingData = false
-        clearingMessage = ""
-        transcriptsSize = "0 bytes"
-      }
+      isClearingData = false
+      clearingMessage = ""
+      transcriptsSize = "0 bytes"
     }
   }
 
@@ -819,11 +815,9 @@ struct StorageSettingsTab: View {
         try? modelContext.save()
       }
 
-      await MainActor.run {
-        isClearingData = false
-        clearingMessage = ""
-        aiAnalysisCount = 0
-      }
+      isClearingData = false
+      clearingMessage = ""
+      aiAnalysisCount = 0
     }
   }
 }
