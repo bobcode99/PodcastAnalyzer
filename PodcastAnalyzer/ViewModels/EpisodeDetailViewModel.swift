@@ -1477,11 +1477,24 @@ final class EpisodeDetailViewModel {
     var grouped: [TranscriptSegment] = []
     var currentGroup: [TranscriptSegment] = []
 
+    let gapThreshold: TimeInterval = 2.0  // Force sentence break on gaps > 2s
+
     for segment in segments {
+      let trimmedText = segment.text.trimmingCharacters(in: .whitespaces)
+
+      // Force a sentence break when there's a large time gap between segments.
+      // This prevents merging across music interludes or long pauses.
+      if let lastInGroup = currentGroup.last,
+         segment.startTime - lastInGroup.endTime > gapThreshold {
+        if let merged = mergeSegments(currentGroup) {
+          grouped.append(merged)
+        }
+        currentGroup = []
+      }
+
       currentGroup.append(segment)
 
       // Check if this segment ends with sentence-ending punctuation
-      let trimmedText = segment.text.trimmingCharacters(in: .whitespaces)
       if let lastChar = trimmedText.unicodeScalars.last,
          sentenceEndings.contains(lastChar) {
         // End of sentence - merge the group

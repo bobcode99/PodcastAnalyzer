@@ -49,9 +49,27 @@ struct TranscriptSentence: Identifiable {
         segments.first?.formattedStartTime ?? "0:00"
     }
 
-    /// Check if a given time falls within this sentence
+    /// Check if a given time falls within this sentence.
+    /// Only returns true if time is within an actual segment or a small gap
+    /// (< 2s) between consecutive segments — NOT for large gaps like music interludes.
     func containsTime(_ time: TimeInterval) -> Bool {
-        time >= startTime && time <= endTime
+        // Fast path: outside overall range
+        guard time >= startTime && time <= endTime else { return false }
+
+        // Check if time is within any segment
+        if segments.contains(where: { time >= $0.startTime && time <= $0.endTime }) {
+            return true
+        }
+
+        // Allow small gaps between consecutive segments (natural speech pauses)
+        for i in 0..<(segments.count - 1) {
+            if time > segments[i].endTime && time < segments[i + 1].startTime {
+                let gap = segments[i + 1].startTime - segments[i].endTime
+                return gap <= 2.0
+            }
+        }
+
+        return false
     }
 
     /// Find the segment that contains the given time
@@ -85,15 +103,28 @@ enum TranscriptGrouping {
         return sentenceEndings.contains(lastChar)
     }
 
+    /// Time gap threshold — force a sentence break when consecutive segments
+    /// are separated by more than this many seconds (e.g. music interludes).
+    private static let gapThreshold: TimeInterval = 2.0
+
     /// Group segments into sentences
-    /// Segments are accumulated until a segment ending with sentence punctuation is found
-    /// or until maxSegmentsPerSentence is reached (handles long unpunctuated content)
+    /// Segments are accumulated until a segment ending with sentence punctuation is found,
+    /// maxSegmentsPerSentence is reached, or a large time gap is detected.
     static func groupIntoSentences(_ segments: [TranscriptSegment]) -> [TranscriptSentence] {
         var sentences: [TranscriptSentence] = []
         var currentGroup: [TranscriptSegment] = []
         var sentenceId = 0
 
         for segment in segments {
+            // Force break when there's a large time gap — prevents merging
+            // across music interludes or long pauses.
+            if let lastInGroup = currentGroup.last,
+               segment.startTime - lastInGroup.endTime > gapThreshold {
+                sentences.append(TranscriptSentence(id: sentenceId, segments: currentGroup))
+                sentenceId += 1
+                currentGroup = []
+            }
+
             currentGroup.append(segment)
 
             // Check if this segment ends the sentence OR we've reached max segments
@@ -131,6 +162,15 @@ enum TranscriptGrouping {
         var charCount = 0
 
         for segment in segments {
+            // Force break on large time gaps (music interludes, long pauses)
+            if let lastInGroup = currentGroup.last,
+               segment.startTime - lastInGroup.endTime > gapThreshold {
+                sentences.append(TranscriptSentence(id: sentenceId, segments: currentGroup))
+                sentenceId += 1
+                currentGroup = []
+                charCount = 0
+            }
+
             currentGroup.append(segment)
             charCount += segment.text.count
 
