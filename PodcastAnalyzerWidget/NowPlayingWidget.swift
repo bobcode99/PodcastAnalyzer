@@ -80,6 +80,33 @@ struct NowPlayingProvider: TimelineProvider {
   }
 }
 
+// MARK: - Artwork View
+
+struct WidgetArtworkView: View {
+  let imageURL: String?
+  let size: CGFloat
+  let cornerRadius: CGFloat
+
+  var body: some View {
+    AsyncImage(url: URL(string: imageURL ?? "")) { phase in
+      switch phase {
+      case .success(let image):
+        image.resizable().aspectRatio(contentMode: .fill)
+      default:
+        Rectangle()
+          .fill(Color.blue.opacity(0.3))
+          .overlay {
+            Image(systemName: "music.note")
+              .font(size > 60 ? .largeTitle : .title2)
+              .foregroundStyle(.blue)
+          }
+      }
+    }
+    .frame(width: size, height: size)
+    .clipShape(.rect(cornerRadius: cornerRadius))
+  }
+}
+
 // MARK: - Widget Views
 
 struct NowPlayingWidgetEntryView: View {
@@ -108,24 +135,7 @@ struct SmallWidgetView: View {
       VStack(alignment: .leading, spacing: 6) {
         HStack(spacing: 8) {
           // Artwork
-          AsyncImage(url: URL(string: data.imageURL ?? "")) { phase in
-            switch phase {
-            case .success(let image):
-              image
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-            default:
-              Rectangle()
-                .fill(Color.blue.opacity(0.3))
-                .overlay(
-                  Image(systemName: "music.note")
-                    .font(.title2)
-                    .foregroundStyle(.blue)
-                )
-            }
-          }
-          .frame(width: 50, height: 50)
-          .cornerRadius(8)
+          WidgetArtworkView(imageURL: data.imageURL, size: 50, cornerRadius: 8)
 
           // Play button with progress
           Button(intent: TogglePlaybackIntent()) {
@@ -143,7 +153,7 @@ struct SmallWidgetView: View {
 
         // Duration: current / total
         Text("\(data.formattedCurrentTime) / \(data.formattedDuration)")
-          .font(.caption2)
+          .font(.caption)
           .foregroundStyle(.secondary)
       }
       .padding(12)
@@ -164,24 +174,7 @@ struct MediumWidgetView: View {
     if let data = entry.playbackData {
       HStack(spacing: 12) {
         // Artwork
-        AsyncImage(url: URL(string: data.imageURL ?? "")) { phase in
-          switch phase {
-          case .success(let image):
-            image
-              .resizable()
-              .aspectRatio(contentMode: .fill)
-          default:
-            Rectangle()
-              .fill(Color.blue.opacity(0.3))
-              .overlay(
-                Image(systemName: "music.note")
-                  .font(.largeTitle)
-                  .foregroundStyle(.blue)
-              )
-          }
-        }
-        .frame(width: 90, height: 90)
-        .cornerRadius(12)
+        WidgetArtworkView(imageURL: data.imageURL, size: 90, cornerRadius: 12)
 
         VStack(alignment: .leading, spacing: 4) {
           // Episode title
@@ -216,7 +209,7 @@ struct MediumWidgetView: View {
             // Time labels: current / total
             HStack {
               Text("\(data.formattedCurrentTime) / \(data.formattedDuration)")
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.secondary)
               Spacer()
             }
@@ -292,7 +285,7 @@ struct EmptyWidgetView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       Text("Open app to start listening")
-        .font(.caption2)
+        .font(.caption)
         .foregroundStyle(.secondary.opacity(0.8))
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)

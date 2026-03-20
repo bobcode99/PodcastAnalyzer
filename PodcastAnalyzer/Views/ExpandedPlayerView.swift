@@ -163,7 +163,6 @@ struct ExpandedPlayerView: View {
 
   private var artworkPlaceholder: some View {
     Color.gray.opacity(0.3)
-      .clipShape(.rect(cornerRadius: 16))
       .overlay(
         Image(systemName: "music.note")
           .font(.system(size: 60))
@@ -347,11 +346,7 @@ struct ExpandedPlayerView: View {
   // MARK: - Controls Section
   private var controlsSection: some View {
     HStack(spacing: 0) {
-      Button(action: {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-          showSpeedPicker = true
-        }
-      }) {
+      Button(action: openSpeedPicker) {
         Text(Formatters.formatSpeed(viewModel.playbackSpeed))
           .font(.system(size: 16, weight: .medium))
           .foregroundStyle(.primary)
@@ -403,11 +398,7 @@ struct ExpandedPlayerView: View {
           }
         }
       } label: {
-        ZStack {
-          Circle()
-            .fill(viewModel.isSleepTimerActive ? Color.blue : Color.gray.opacity(0.2))
-            .frame(width: 48, height: 48)
-
+        Group {
           if viewModel.isSleepTimerActive {
             if viewModel.sleepTimerOption == .endOfEpisode {
               Image(systemName: "stop.circle.fill")
@@ -425,6 +416,8 @@ struct ExpandedPlayerView: View {
               .foregroundStyle(.primary)
           }
         }
+        .frame(width: 48, height: 48)
+        .glassEffect(viewModel.isSleepTimerActive ? .regular.tint(.blue) : .regular, in: .circle)
         .frame(width: 56, height: 56)
         .contentShape(Rectangle())
       }
@@ -451,11 +444,7 @@ struct ExpandedPlayerView: View {
 
       Spacer()
 
-      Button(action: {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-          showQueue = true
-        }
-      }) {
+      Button(action: openQueue) {
         HStack(spacing: 4) {
           Image(systemName: "list.bullet")
           if !viewModel.queue.isEmpty {
@@ -469,6 +458,20 @@ struct ExpandedPlayerView: View {
       }
     }
     .padding(.horizontal, 40)
+  }
+
+  // MARK: - Action Helpers
+
+  private func openSpeedPicker() {
+    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+      showSpeedPicker = true
+    }
+  }
+
+  private func openQueue() {
+    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+      showQueue = true
+    }
   }
 
   // MARK: - Navigation Helpers
