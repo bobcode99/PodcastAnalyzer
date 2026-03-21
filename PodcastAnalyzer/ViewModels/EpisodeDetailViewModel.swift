@@ -162,6 +162,10 @@ final class EpisodeDetailViewModel {
   // RSS transcript state (from podcast:transcript tag)
   var rssTranscriptState: TranscriptDownloadState = .notAvailable
 
+  // DAI offset and source tracking
+  var transcriptTimeOffset: Double = 0
+  var transcriptSource: String = ""
+
   // Translation state
   var translationStatus: TranslationStatus = .idle
   var translatedDescription: String?
@@ -519,6 +523,15 @@ final class EpisodeDetailViewModel {
     savedDuration = model.duration
     lastPlaybackPosition = model.lastPlaybackPosition
     playbackProgress = model.progress
+    transcriptTimeOffset = model.transcriptTimeOffset
+    transcriptSource = model.transcriptSource
+  }
+
+  func updateTranscriptTimeOffset(_ offset: Double) {
+    transcriptTimeOffset = offset
+    guard let model = episodeModel else { return }
+    model.transcriptTimeOffset = offset
+    try? modelContext?.save()
   }
 
   // MARK: - SwiftData Persistence
@@ -1078,6 +1091,13 @@ final class EpisodeDetailViewModel {
         rssTranscriptState = .downloaded(localPath: savedURL.path)
         logger.info("RSS transcript downloaded successfully")
 
+        // Track that this transcript came from RSS
+        if let model = episodeModel {
+          model.transcriptSource = "rss"
+          transcriptSource = "rss"
+          try? modelContext?.save()
+        }
+
         // Load the transcript
         await loadExistingTranscript()
 
@@ -1182,6 +1202,28 @@ final class EpisodeDetailViewModel {
     )
     isObservingTranscriptManager = false
     transcriptState = .idle
+  }
+
+  /// Regenerate transcript from downloaded audio, replacing any RSS transcript
+  func regenerateTranscript() {
+    // Clear current transcript
+    transcriptSegments = []
+    rawTranscriptSegments = []
+    groupedSentences = []
+    transcriptText = ""
+
+    // Reset offset since regenerated transcript will be accurate
+    updateTranscriptTimeOffset(0)
+
+    // Mark as locally generated
+    if let model = episodeModel {
+      model.transcriptSource = "local"
+      transcriptSource = "local"
+      try? modelContext?.save()
+    }
+
+    // Trigger local transcription using existing infrastructure
+    generateTranscript()
   }
 
   /// Observes TranscriptManager for job status updates
@@ -1651,8 +1693,10 @@ final class EpisodeDetailViewModel {
     }
   }
 
-  /// Seeks to the start of a transcript segment and starts playback if needed
+  /// Seeks to the start of a transcript segment and starts playback if needed.
+  /// Subtracts transcriptTimeOffset so that the audio position matches the shifted timestamps.
   func seekToSegment(_ segment: TranscriptSegment) {
+    let targetTime = segment.startTime - transcriptTimeOffset
     // If not playing this episode, start playback first
     if !isPlayingThisEpisode {
       playAction()
@@ -1661,10 +1705,10 @@ final class EpisodeDetailViewModel {
       seekTask = Task { [weak self] in
         try? await Task.sleep(for: .seconds(0.3))
         guard let self, !Task.isCancelled else { return }
-        self.audioManager.seek(to: segment.startTime)
+        self.audioManager.seek(to: targetTime)
       }
     } else {
-      audioManager.seek(to: segment.startTime)
+      audioManager.seek(to: targetTime)
     }
   }
 

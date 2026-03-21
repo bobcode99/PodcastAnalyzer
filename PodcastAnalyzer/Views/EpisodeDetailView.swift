@@ -57,6 +57,10 @@ struct EpisodeDetailView: View {
     // Scroll-to-top trigger
     @State private var scrollToTopTrigger = false
 
+    // Transcript DAI offset controls
+    @State private var showOffsetSlider = false
+    @State private var showRegenerateConfirmation = false
+
     // Transcript search focus
     @FocusState private var transcriptSearchFocused: Bool
 
@@ -93,10 +97,11 @@ struct EpisodeDetailView: View {
         }
     }
 
-    /// Current sentence ID for auto-scroll
+    /// Current sentence ID for auto-scroll.
+    /// Uses playback time shifted by the transcript offset so highlighting stays in sync.
     private var currentSentenceId: Int? {
         guard viewModel.isCurrentEpisode else { return nil }
-        let time = currentPlaybackTime
+        let time = currentPlaybackTime + viewModel.transcriptTimeOffset
         return transcriptSentences.first { $0.containsTime(time) }?.id
     }
 
@@ -204,6 +209,20 @@ struct EpisodeDetailView: View {
         } message: {
             Text(
                 "Are you sure you want to delete this downloaded episode? You can download it again later."
+            )
+        }
+        .confirmationDialog(
+            "Regenerate Transcript",
+            isPresented: $showRegenerateConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Regenerate from Audio") {
+                viewModel.regenerateTranscript()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "This will replace the current transcript with one generated from the downloaded audio. The new transcript will have accurate timestamps."
             )
         }
         .sheet(isPresented: $showSubtitleSettings) {
@@ -409,6 +428,17 @@ struct EpisodeDetailView: View {
                 .background(.ultraThinMaterial)
             Divider()
 
+            // RSS transcript warning + offset slider
+            if viewModel.transcriptSource == "rss" && viewModel.hasTranscript {
+                RSSTranscriptWarningBanner(
+                    showOffsetSlider: $showOffsetSlider,
+                    showRegenerateConfirmation: $showRegenerateConfirmation,
+                    transcriptTimeOffset: viewModel.transcriptTimeOffset,
+                    hasLocalAudio: viewModel.hasLocalAudio,
+                    onOffsetChanged: { viewModel.updateTranscriptTimeOffset($0) }
+                )
+            }
+
             // Scrollable content area
             if viewModel.hasTranscript && !viewModel.isTranscriptProcessing {
                 ScrollViewReader { proxy in
@@ -428,7 +458,7 @@ struct EpisodeDetailView: View {
 
                             SentenceBasedTranscriptView(
                                 sentences: transcriptSentences,
-                                currentTime: viewModel.isCurrentEpisode ? currentPlaybackTime : nil,
+                                currentTime: viewModel.isCurrentEpisode ? (currentPlaybackTime + viewModel.transcriptTimeOffset) : nil,
                                 searchQuery: viewModel.transcriptSearchQuery,
                                 onSegmentTap: { viewModel.seekToSegment($0) },
                                 subtitleMode: subtitleSettings.displayMode,

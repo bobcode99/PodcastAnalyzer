@@ -40,6 +40,10 @@ class EpisodeDownloadModel {
   var downloadedDate: Date?
   var fileSize: Int64 = 0
 
+  // Transcript metadata
+  var transcriptTimeOffset: Double = 0  // seconds offset for DAI correction
+  var transcriptSource: String = ""     // "" = unknown, "rss" = from RSS, "local" = generated locally
+
   // Episode metadata (cached)
   var imageURL: String?
   var pubDate: Date?
