@@ -341,6 +341,9 @@ struct SentenceBasedTranscriptView: View {
     /// Whether to show timestamps on the left
     var showTimestamps: Bool = false
 
+    /// Show a periodic timestamp every ~30 seconds (only while user is scrolling)
+    var showPeriodicTimestamps: Bool = false
+
     /// Subtitle display mode
     var subtitleMode: SubtitleDisplayMode = .originalOnly
 
@@ -353,8 +356,22 @@ struct SentenceBasedTranscriptView: View {
     /// Currently focused search match ID
     var currentSearchMatchId: Int?
 
+    /// Sentence IDs that should show a periodic timestamp (every ~30 s)
+    private var periodicTimestampIds: Set<Int> {
+        guard showPeriodicTimestamps else { return [] }
+        var ids = Set<Int>()
+        var lastShownTime: TimeInterval = -30
+        for sentence in sentences {
+            if sentence.startTime - lastShownTime >= 30 {
+                ids.insert(sentence.id)
+                lastShownTime = sentence.startTime
+            }
+        }
+        return ids
+    }
+
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: sentenceHighlightEnabled ? 2 : 12) {
+        LazyVStack(alignment: .leading, spacing: sentenceHighlightEnabled ? 4 : 14) {
             ForEach(sentences) { sentence in
                 let highlightState = TranscriptGrouping.highlightState(
                     for: sentence,
@@ -366,7 +383,7 @@ struct SentenceBasedTranscriptView: View {
                     searchQuery: searchQuery,
                     subtitleMode: subtitleMode,
                     sentenceHighlightEnabled: sentenceHighlightEnabled,
-                    showTimestamp: showTimestamps,
+                    showTimestamp: showTimestamps || periodicTimestampIds.contains(sentence.id),
                     isSearchMatch: searchMatchIds.contains(sentence.id),
                     isCurrentSearchMatch: currentSearchMatchId == sentence.id,
                     onSegmentTap: onSegmentTap
@@ -400,6 +417,7 @@ struct SentenceView: View, Equatable {
         lhs.searchQuery == rhs.searchQuery &&
         lhs.subtitleMode == rhs.subtitleMode &&
         lhs.sentenceHighlightEnabled == rhs.sentenceHighlightEnabled &&
+        lhs.showTimestamp == rhs.showTimestamp &&
         lhs.isSearchMatch == rhs.isSearchMatch &&
         lhs.isCurrentSearchMatch == rhs.isCurrentSearchMatch
     }
@@ -475,7 +493,7 @@ struct SentenceView: View, Equatable {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.vertical, sentenceHighlightEnabled ? 4 : 8)
+            .padding(.vertical, sentenceHighlightEnabled ? 6 : 10)
             .padding(.leading, sentenceHighlightEnabled ? 0 : 8)
             .padding(.trailing, 12)
             .overlay(alignment: .leading) {
@@ -491,6 +509,12 @@ struct SentenceView: View, Equatable {
             }
         }
         .buttonStyle(.plain)
+        .background {
+            if sentenceHighlightEnabled && isActive {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.blue.opacity(0.08))
+            }
+        }
     }
 
     /// Builds the sentence text with segment-level or search highlighting

@@ -162,8 +162,7 @@ final class EpisodeDetailViewModel {
   // RSS transcript state (from podcast:transcript tag)
   var rssTranscriptState: TranscriptDownloadState = .notAvailable
 
-  // DAI offset and source tracking
-  var transcriptTimeOffset: Double = 0
+  // DAI source tracking
   var transcriptSource: String = ""
 
   // Translation state
@@ -523,15 +522,7 @@ final class EpisodeDetailViewModel {
     savedDuration = model.duration
     lastPlaybackPosition = model.lastPlaybackPosition
     playbackProgress = model.progress
-    transcriptTimeOffset = model.transcriptTimeOffset
     transcriptSource = model.transcriptSource
-  }
-
-  func updateTranscriptTimeOffset(_ offset: Double) {
-    transcriptTimeOffset = offset
-    guard let model = episodeModel else { return }
-    model.transcriptTimeOffset = offset
-    try? modelContext?.save()
   }
 
   // MARK: - SwiftData Persistence
@@ -1212,9 +1203,6 @@ final class EpisodeDetailViewModel {
     groupedSentences = []
     transcriptText = ""
 
-    // Reset offset since regenerated transcript will be accurate
-    updateTranscriptTimeOffset(0)
-
     // Mark as locally generated
     if let model = episodeModel {
       model.transcriptSource = "local"
@@ -1694,9 +1682,8 @@ final class EpisodeDetailViewModel {
   }
 
   /// Seeks to the start of a transcript segment and starts playback if needed.
-  /// Subtracts transcriptTimeOffset so that the audio position matches the shifted timestamps.
   func seekToSegment(_ segment: TranscriptSegment) {
-    let targetTime = segment.startTime - transcriptTimeOffset
+    let targetTime = segment.startTime
     // If not playing this episode, start playback first
     if !isPlayingThisEpisode {
       playAction()
@@ -1720,6 +1707,19 @@ final class EpisodeDetailViewModel {
     // Recompute search matches if there's an active query
     if !transcriptSearchQuery.isEmpty {
       updateSearchMatches(query: transcriptSearchQuery)
+    }
+  }
+
+  /// Sentences to display based on display mode and search state.
+  /// Centralizes the selection logic formerly in EpisodeDetailView.
+  var transcriptSentences: [TranscriptSentence] {
+    let settings = SubtitleSettingsManager.shared
+    if !transcriptSearchQuery.isEmpty {
+      return filteredGroupedSentences
+    } else if settings.sentenceHighlightEnabled {
+      return paragraphGroupedSentences
+    } else {
+      return groupedSentences
     }
   }
 

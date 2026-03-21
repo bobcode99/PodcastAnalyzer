@@ -32,22 +32,13 @@ struct EpisodeDetailView: View {
     @Environment(\.modelContext) private var modelContext
 
     @State private var selectedTab = 0
-    @State private var showCopySuccess = false
     @State private var showDeleteConfirmation = false
     @State private var showSubtitleSettings = false
     @State private var showTranslationLanguagePicker = false
-    private var subtitleSettings: SubtitleSettingsManager { .shared }
 
     // Translation error alert
     @State private var showTranslationError = false
     @State private var translationErrorMessage = ""
-
-    // Timer state for transcript highlighting during playback (managed by .task modifier)
-    @State private var playbackTimerActive = false
-    @State private var currentPlaybackTime: TimeInterval = 0
-
-    // Auto-scroll state
-    @State private var autoScrollEnabled = true
 
     // Header collapse state
     @State private var isHeaderVisible: Bool = true
@@ -57,12 +48,8 @@ struct EpisodeDetailView: View {
     // Scroll-to-top trigger
     @State private var scrollToTopTrigger = false
 
-    // Transcript DAI offset controls
-    @State private var showOffsetSlider = false
+    // Transcript DAI regenerate
     @State private var showRegenerateConfirmation = false
-
-    // Transcript search focus
-    @FocusState private var transcriptSearchFocused: Bool
 
     // Translation configuration for .translationTask
     @State private var transcriptTranslationConfig: TranslationSession.Configuration?
@@ -84,25 +71,6 @@ struct EpisodeDetailView: View {
                 podcastLanguage: podcastLanguage
             )
         )
-    }
-
-    /// Sentences to display based on display mode and search state
-    private var transcriptSentences: [TranscriptSentence] {
-        if !viewModel.transcriptSearchQuery.isEmpty {
-            return viewModel.filteredGroupedSentences
-        } else if subtitleSettings.sentenceHighlightEnabled {
-            return viewModel.paragraphGroupedSentences
-        } else {
-            return viewModel.groupedSentences
-        }
-    }
-
-    /// Current sentence ID for auto-scroll.
-    /// Uses playback time shifted by the transcript offset so highlighting stays in sync.
-    private var currentSentenceId: Int? {
-        guard viewModel.isCurrentEpisode else { return nil }
-        let time = currentPlaybackTime + viewModel.transcriptTimeOffset
-        return transcriptSentences.first { $0.containsTime(time) }?.id
     }
 
     var body: some View {
@@ -181,11 +149,6 @@ struct EpisodeDetailView: View {
                 }
             }
         }
-        .alert("Copied", isPresented: $showCopySuccess) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Transcript copied to clipboard")
-        }
         .alert("Translation Failed", isPresented: $showTranslationError) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -248,9 +211,6 @@ struct EpisodeDetailView: View {
             viewModel.checkAvailableTranslations()
         }
         .onDisappear {
-            // Clean up subscriptions to prevent memory leaks
-            // Timer is automatically cancelled by .task modifier when view disappears
-            playbackTimerActive = false
             viewModel.cleanup()
         }
         .onChange(of: viewModel.transcriptTranslationTrigger) { _, _ in
@@ -285,7 +245,16 @@ struct EpisodeDetailView: View {
     private var tabContentView: some View {
         switch selectedTab {
         case 0: summaryTab
-        case 1: transcriptContent
+        case 1: TranscriptContentView(
+            viewModel: viewModel,
+            isHeaderVisible: $isHeaderVisible,
+            lastScrollOffset: $lastScrollOffset,
+            isUserScrolling: $isUserScrolling,
+            scrollToTopTrigger: $scrollToTopTrigger,
+            onShowTranslationPicker: { showTranslationLanguagePicker = true },
+            onShowSubtitleSettings: { showSubtitleSettings = true },
+            onShowRegenerateConfirmation: { showRegenerateConfirmation = true }
+        )
         case 2: EpisodeAIAnalysisView(viewModel: viewModel, embedsOwnScroll: true, isHeaderVisible: $isHeaderVisible, lastScrollOffset: $lastScrollOffset, isUserScrolling: $isUserScrolling, scrollToTopTrigger: $scrollToTopTrigger)
         default: Text("Unknown tab: \(selectedTab)")
             .foregroundStyle(.secondary)
@@ -418,337 +387,6 @@ struct EpisodeDetailView: View {
             }
         }
         .padding(.vertical)
-    }
-
-    // MARK: - Transcript Content (owns its own ScrollView; search bar always visible)
-    private var transcriptContent: some View {
-        VStack(spacing: 0) {
-            // Always-visible search bar
-            transcriptHeader
-                .background(.ultraThinMaterial)
-            Divider()
-
-            // RSS transcript warning + offset slider
-            if viewModel.transcriptSource == "rss" && viewModel.hasTranscript {
-                RSSTranscriptWarningBanner(
-                    showOffsetSlider: $showOffsetSlider,
-                    showRegenerateConfirmation: $showRegenerateConfirmation,
-                    transcriptTimeOffset: viewModel.transcriptTimeOffset,
-                    hasLocalAudio: viewModel.hasLocalAudio,
-                    onOffsetChanged: { viewModel.updateTranscriptTimeOffset($0) }
-                )
-            }
-
-            // Scrollable content area
-            if viewModel.hasTranscript && !viewModel.isTranscriptProcessing {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            Color.clear.frame(height: 0).id("transcriptTop")
-                            if !viewModel.transcriptSearchQuery.isEmpty,
-                               !viewModel.searchMatchIds.isEmpty {
-                                TranscriptSearchNavigationBar(
-                                    matchCount: viewModel.searchMatchIds.count,
-                                    currentIndex: viewModel.currentMatchIndex,
-                                    onPrevious: { _ = viewModel.previousMatch() },
-                                    onNext: { _ = viewModel.nextMatch() }
-                                )
-                                .padding(.vertical, 4)
-                            }
-
-                            SentenceBasedTranscriptView(
-                                sentences: transcriptSentences,
-                                currentTime: viewModel.isCurrentEpisode ? (currentPlaybackTime + viewModel.transcriptTimeOffset) : nil,
-                                searchQuery: viewModel.transcriptSearchQuery,
-                                onSegmentTap: { viewModel.seekToSegment($0) },
-                                subtitleMode: subtitleSettings.displayMode,
-                                sentenceHighlightEnabled: subtitleSettings.sentenceHighlightEnabled,
-                                searchMatchIds: Set(viewModel.searchMatchIds),
-                                currentSearchMatchId: viewModel.searchMatchIds.isEmpty
-                                    ? nil : viewModel.searchMatchIds[viewModel.currentMatchIndex]
-                            )
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                        }
-                    }
-                    .trackScrollForHeaderCollapse(
-                        isHeaderVisible: $isHeaderVisible,
-                        lastOffset: $lastScrollOffset,
-                        isUserScrolling: isUserScrolling
-                    )
-                    .onScrollPhaseChange { _, newPhase in
-                        if newPhase == .interacting { autoScrollEnabled = false }
-                        isUserScrolling = newPhase == .interacting || newPhase == .decelerating
-                    }
-                    .onChange(of: currentSentenceId) { _, newId in
-                        guard autoScrollEnabled,
-                              let id = newId,
-                              viewModel.transcriptSearchQuery.isEmpty else { return }
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            proxy.scrollTo(id, anchor: .center)
-                        }
-                    }
-                    .onChange(of: viewModel.currentMatchIndex) { _, _ in
-                        guard !viewModel.searchMatchIds.isEmpty else { return }
-                        let matchId = viewModel.searchMatchIds[viewModel.currentMatchIndex]
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            proxy.scrollTo(matchId, anchor: .center)
-                        }
-                    }
-                    .onChange(of: scrollToTopTrigger) { _, _ in
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            proxy.scrollTo("transcriptTop", anchor: .top)
-                        }
-                        isHeaderVisible = true
-                    }
-                }
-            } else {
-                transcriptStatusSection
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .onChange(of: viewModel.transcriptSearchQuery) { _, newQuery in
-            viewModel.updateSearchMatches(query: newQuery)
-        }
-        .task(id: playbackTimerActive) {
-            // Task-based timer for playback updates - automatically cancelled when view disappears
-            guard playbackTimerActive else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(250))
-                guard !Task.isCancelled else { break }
-                if viewModel.isCurrentEpisode && viewModel.audioManager.isPlaying {
-                    let newTime = viewModel.audioManager.currentTime
-                    let timeDiff = abs(newTime - currentPlaybackTime)
-
-                    if subtitleSettings.sentenceHighlightEnabled {
-                        // Sentence highlight mode: update whenever the active segment changes
-                        // (segments within a sentence are short, so check more frequently)
-                        let currentSentence = transcriptSentences.first { $0.containsTime(newTime) }
-                        let oldSentence = transcriptSentences.first { $0.containsTime(currentPlaybackTime) }
-                        let newSegIdx = currentSentence?.segments.firstIndex { newTime >= $0.startTime && newTime <= $0.endTime }
-                        let oldSegIdx = oldSentence?.segments.firstIndex { currentPlaybackTime >= $0.startTime && currentPlaybackTime <= $0.endTime }
-                        if newSegIdx != oldSegIdx || currentSentence?.id != oldSentence?.id || timeDiff >= 0.5 {
-                            currentPlaybackTime = newTime
-                        }
-                    } else {
-                        // Default mode: skip update if time diff < 0.5s and sentence unchanged
-                        if timeDiff >= 0.5 {
-                            currentPlaybackTime = newTime
-                        } else {
-                            let newSentenceId = transcriptSentences.first { $0.containsTime(newTime) }?.id
-                            let oldSentenceId = currentSentenceId
-                            if newSentenceId != oldSentenceId {
-                                currentPlaybackTime = newTime
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .onAppear {
-            playbackTimerActive = true
-            if viewModel.isCurrentEpisode {
-                currentPlaybackTime = viewModel.audioManager.currentTime
-            }
-        }
-        .onDisappear {
-            playbackTimerActive = false
-        }
-    }
-
-    // MARK: - Transcript Header
-    private var transcriptHeader: some View {
-        HStack(spacing: 12) {
-            // Search bar
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 14))
-                TextField(
-                    "Search transcript...",
-                    text: $viewModel.transcriptSearchQuery
-                )
-                .textFieldStyle(.plain)
-                .font(.subheadline)
-                .focused($transcriptSearchFocused)
-                .submitLabel(.search)
-                if !viewModel.transcriptSearchQuery.isEmpty {
-                    Button {
-                        viewModel.transcriptSearchQuery = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                            .font(.system(size: 14))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .glassEffect(.regular, in: .rect(cornerRadius: 10))
-
-            if transcriptSearchFocused || !viewModel.transcriptSearchQuery.isEmpty {
-                // Cancel search — clears query and dismisses keyboard
-                Button("Cancel") {
-                    viewModel.transcriptSearchQuery = ""
-                    transcriptSearchFocused = false
-                }
-                .font(.subheadline)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-            } else {
-            // Translate button with circular progress - shows language picker
-            Button {
-                showTranslationLanguagePicker = true
-            } label: {
-                if viewModel.translationStatus.isTranslating {
-                    TranslationProgressCircle(status: viewModel.translationStatus)
-                        .frame(width: 28, height: 28)
-                } else if case .failed = viewModel.translationStatus {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.red)
-                } else if viewModel.hasExistingTranslation {
-                    ZStack(alignment: .bottomTrailing) {
-                        Image(systemName: "translate.fill")
-                            .font(.system(size: 20))
-                            .foregroundStyle(.blue)
-                        if let lang = viewModel.selectedTranslationLanguage {
-                            Text(lang.shortName)
-                                .font(.system(size: 8, weight: .bold))
-                                .padding(.horizontal, 3)
-                                .padding(.vertical, 1)
-                                .background(.blue)
-                                .foregroundStyle(.white)
-                                .clipShape(Capsule())
-                                .offset(x: 4, y: 4)
-                        }
-                    }
-                } else {
-                    Image(systemName: "translate")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .disabled(viewModel.translationStatus.isTranslating)
-
-            // Auto-scroll toggle
-            Button {
-                autoScrollEnabled.toggle()
-            } label: {
-                Image(systemName: "arrow.up.and.down.text.horizontal")
-                    .font(.system(size: 18))
-                    .foregroundStyle(autoScrollEnabled ? .blue : .secondary)
-            }
-            .accessibilityLabel(autoScrollEnabled ? "Disable auto-scroll" : "Enable auto-scroll")
-
-            // Display mode picker (when translation exists) or settings button
-            if viewModel.hasExistingTranslation {
-                Menu {
-                    ForEach(SubtitleDisplayMode.allCases, id: \.self) { mode in
-                        Button {
-                            subtitleSettings.displayMode = mode
-                        } label: {
-                            if subtitleSettings.displayMode == mode {
-                                Label(mode.displayName, systemImage: "checkmark")
-                            } else {
-                                Label(mode.displayName, systemImage: mode.icon)
-                            }
-                        }
-                        .disabled(mode.requiresTranslation && !viewModel.hasExistingTranslation)
-                    }
-                    Divider()
-                    Toggle(isOn: Binding(
-                        get: { subtitleSettings.sentenceHighlightEnabled },
-                        set: { subtitleSettings.sentenceHighlightEnabled = $0 }
-                    )) {
-                        Label("Sentence Highlight", systemImage: "text.line.first.and.arrowtriangle.forward")
-                    }
-                    Divider()
-                    Button {
-                        showSubtitleSettings = true
-                    } label: {
-                        Label("More Settings...", systemImage: "gearshape")
-                    }
-                } label: {
-                    Image(systemName: "textformat.alt")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.blue)
-                }
-            } else {
-                Button {
-                    showSubtitleSettings = true
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityLabel("Subtitle settings")
-            }
-
-            // Options menu
-            Menu {
-                Section {
-                    if let date = viewModel.cachedTranscriptDate {
-                        Label(
-                            "Generated \(date.formatted(date: .abbreviated, time: .shortened))",
-                            systemImage: "clock"
-                        )
-                    }
-                    Label(
-                        "\(viewModel.filteredTranscriptSegments.count) segments",
-                        systemImage: "text.alignleft"
-                    )
-                }
-
-                Divider()
-
-                // Copy options section
-                Section("Copy") {
-                    Button(action: {
-                        viewModel.copyTranscriptToClipboard()
-                        showCopySuccess = true
-                    }) {
-                        Label("Copy All (with timestamps)", systemImage: "doc.on.doc")
-                    }
-
-                    Button(action: {
-                        PlatformClipboard.string = viewModel.cleanTranscriptText
-                        showCopySuccess = true
-                    }) {
-                        Label("Copy Text Only", systemImage: "text.alignleft")
-                    }
-                }
-
-                Button(
-                    role: .destructive,
-                    action: {
-                        viewModel.generateTranscript()
-                    }
-                ) {
-                    Label("Regenerate", systemImage: "arrow.clockwise")
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 22))
-                    .foregroundStyle(.secondary)
-            }
-            .accessibilityLabel("Transcript options")
-            } // end else (not searching)
-        }
-        .animation(.easeInOut(duration: 0.2), value: transcriptSearchFocused)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.transcriptSearchQuery.isEmpty)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
-
-    // MARK: - Transcript Status Section
-    @ViewBuilder
-    private var transcriptStatusSection: some View {
-        EpisodeTranscriptStatusView(viewModel: viewModel)
-            .frame(maxWidth: .infinity)
-            .padding()
-            .glassEffect(.regular, in: .rect(cornerRadius: 12))
-            .padding(.horizontal)
     }
 
 }
