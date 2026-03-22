@@ -168,27 +168,6 @@ struct EpisodeAIAnalysisView: View {
       .padding(.vertical, 12)
       .frame(minHeight: 60)
       .background(Color.blue.opacity(0.1))
-    } else {
-      // Ready to analyze
-      HStack {
-        Image(systemName: settings.selectedProvider.iconName)
-          .foregroundStyle(.green)
-
-        Text("Using \(settings.selectedProvider.displayName) (\(settings.currentModel))")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-
-        Spacer()
-
-        Button(action: { showSettingsSheet = true }) {
-          Text("Change")
-            .font(.caption)
-        }
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 12)
-      .frame(minHeight: 60)
-      .background(Color.green.opacity(0.05))
     }
   }
 
