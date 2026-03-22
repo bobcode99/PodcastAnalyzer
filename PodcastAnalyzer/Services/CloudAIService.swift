@@ -364,6 +364,13 @@ final class CloudAIService {
             """
 
         case .highlights:
+            let useTimestamps = settings.transcriptFormat == .segmentBased
+            let bestQuoteSchema = useTimestamps
+                ? #""bestQuote": {"text": "The most memorable quote from the episode", "timestamp": "MM:SS or H:MM:SS from transcript"}"#
+                : #""bestQuote": "The most memorable quote from the episode""#
+            let bestQuoteNote = useTimestamps
+                ? "\nFor bestQuote, include the timestamp where this quote appears in the transcript. Use MM:SS or H:MM:SS format."
+                : ""
             return """
             You are an expert at identifying key moments and highlights in podcast episodes. Please analyze this episode.
 
@@ -375,18 +382,24 @@ final class CloudAIService {
             Return JSON in this exact format:
             {
                 "highlights": ["highlight1", "highlight2", "highlight3"],
-                "bestQuote": {"text": "The most memorable quote from the episode", "timestamp": "MM:SS or H:MM:SS from transcript"},
+                \(bestQuoteSchema),
                 "actionItems": ["action1", "action2"],
                 "controversialPoints": ["point1"],
                 "entertainingMoments": ["moment1"]
-            }
-            For bestQuote, include the timestamp where this quote appears in the transcript. Use MM:SS or H:MM:SS format.\(languageLine)
+            }\(bestQuoteNote)\(languageLine)
 
             Transcript:
             \(transcript)
             """
 
         case .fullAnalysis:
+            let useTimestamps = settings.transcriptFormat == .segmentBased
+            let quotesSchema = useTimestamps
+                ? #""notableQuotes": [{"text": "quote 1", "timestamp": "MM:SS"}, {"text": "quote 2", "timestamp": "MM:SS"}]"#
+                : #""notableQuotes": ["quote 1", "quote 2"]"#
+            let quotesNote = useTimestamps
+                ? "\nFor each notable quote, include the timestamp where it appears in the transcript. Use MM:SS or H:MM:SS format."
+                : ""
             return """
             You are an expert podcast analyst. Provide a comprehensive analysis of this podcast episode.
 
@@ -406,11 +419,10 @@ final class CloudAIService {
                     }
                 ],
                 "keyInsights": ["insight 1", "insight 2", "insight 3"],
-                "notableQuotes": [{"text": "quote 1", "timestamp": "MM:SS"}, {"text": "quote 2", "timestamp": "MM:SS"}],
+                \(quotesSchema),
                 "actionableAdvice": ["advice 1", "advice 2"],
                 "conclusion": "Overall assessment and who would benefit from this episode"
-            }
-            For each notable quote, include the timestamp where it appears in the transcript. Use MM:SS or H:MM:SS format.\(languageLine)
+            }\(quotesNote)\(languageLine)
 
             Transcript:
             \(transcript)
@@ -781,21 +793,34 @@ final class CloudAIService {
             """
 
         case .highlights:
+            let useTimestamps = settings.transcriptFormat == .segmentBased
+            let bestQuoteSchema = useTimestamps
+                ? #""bestQuote": {"text": "The most memorable quote from the episode", "timestamp": "MM:SS or H:MM:SS"}"#
+                : #""bestQuote": "The most memorable quote from the episode""#
+            let bestQuoteNote = useTimestamps
+                ? "\nFor bestQuote, include the timestamp where this quote appears in the transcript. Use MM:SS or H:MM:SS format."
+                : ""
             return """
             You are an expert at identifying key moments and highlights in podcast episodes.
 
             Provide your response in the following JSON format:
             {
                 "highlights": ["highlight1", "highlight2", "highlight3"],
-                "bestQuote": {"text": "The most memorable quote from the episode", "timestamp": "MM:SS or H:MM:SS"},
+                \(bestQuoteSchema),
                 "actionItems": ["action1", "action2"],
                 "controversialPoints": ["point1"] or null,
                 "entertainingMoments": ["moment1"] or null
-            }
-            For bestQuote, include the timestamp where this quote appears in the transcript. Use MM:SS or H:MM:SS format.\(languageLine)
+            }\(bestQuoteNote)\(languageLine)
             """
 
         case .fullAnalysis:
+            let useTimestamps = settings.transcriptFormat == .segmentBased
+            let quotesSchema = useTimestamps
+                ? #""notableQuotes": [{"text": "quote 1", "timestamp": "MM:SS"}, {"text": "quote 2", "timestamp": "MM:SS"}]"#
+                : #""notableQuotes": ["quote 1", "quote 2"]"#
+            let quotesNote = useTimestamps
+                ? "\nFor each notable quote, include the timestamp where it appears in the transcript. Use MM:SS or H:MM:SS format."
+                : ""
             return """
             You are an expert podcast analyst. Provide a comprehensive analysis of this podcast episode.
 
@@ -812,11 +837,10 @@ final class CloudAIService {
                     }
                 ],
                 "keyInsights": ["insight 1", "insight 2", "insight 3"],
-                "notableQuotes": [{"text": "quote 1", "timestamp": "MM:SS"}, {"text": "quote 2", "timestamp": "MM:SS"}],
+                \(quotesSchema),
                 "actionableAdvice": ["advice 1", "advice 2"] or null,
                 "conclusion": "Overall assessment and who would benefit from this episode"
-            }
-            For each notable quote, include the timestamp where it appears in the transcript. Use MM:SS or H:MM:SS format.\(languageLine)
+            }\(quotesNote)\(languageLine)
             """
         }
     }
