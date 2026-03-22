@@ -1716,7 +1716,7 @@ final class EpisodeDetailViewModel {
     let settings = SubtitleSettingsManager.shared
     if !transcriptSearchQuery.isEmpty {
       return filteredGroupedSentences
-    } else if settings.sentenceHighlightEnabled {
+    } else if settings.sentenceHighlightEnabled && !hasExistingTranslation {
       return paragraphGroupedSentences
     } else {
       return groupedSentences

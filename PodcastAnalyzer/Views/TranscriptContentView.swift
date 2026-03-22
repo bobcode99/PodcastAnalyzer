@@ -102,7 +102,7 @@ struct TranscriptContentView: View {
                     let newTime = viewModel.audioManager.currentTime
                     let timeDiff = abs(newTime - currentPlaybackTime)
 
-                    if subtitleSettings.sentenceHighlightEnabled {
+                    if subtitleSettings.sentenceHighlightEnabled && !viewModel.hasExistingTranslation {
                         // Sentence highlight mode: update whenever the active segment changes
                         let currentSentence = viewModel.transcriptSentences.first { $0.containsTime(newTime) }
                         let oldSentence = viewModel.transcriptSentences.first { $0.containsTime(currentPlaybackTime) }
@@ -146,7 +146,7 @@ struct TranscriptContentView: View {
         let searchMatchIdSet = Set(viewModel.searchMatchIds)
         let currentSearchMatchId: Int? = viewModel.searchMatchIds.isEmpty
             ? nil : viewModel.searchMatchIds[viewModel.currentMatchIndex]
-        let highlightEnabled = subtitleSettings.sentenceHighlightEnabled
+        let highlightEnabled = subtitleSettings.sentenceHighlightEnabled && !viewModel.hasExistingTranslation
         let displayMode = subtitleSettings.displayMode
 
         return ScrollViewReader { proxy in
