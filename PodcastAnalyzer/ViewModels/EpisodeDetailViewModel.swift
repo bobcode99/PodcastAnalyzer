@@ -458,6 +458,50 @@ final class EpisodeDetailViewModel {
     savePlaybackPosition(time)
   }
 
+  /// Seeks to a specific time, starting playback if needed. Used by AI timestamp badges.
+  func seekToTime(_ seconds: TimeInterval) {
+    if !isPlayingThisEpisode {
+      playAction()
+      seekTask?.cancel()
+      seekTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(0.3))
+        guard let self, !Task.isCancelled else { return }
+        self.audioManager.seek(to: seconds)
+      }
+    } else {
+      audioManager.seek(to: seconds)
+    }
+  }
+
+  /// Shares an Apple Podcast link with a timestamp parameter (&t=seconds).
+  func shareTimestampedLink(seconds: TimeInterval) {
+    let totalSeconds = Int(seconds)
+    shareTask?.cancel()
+    shareTask = Task {
+      do {
+        let appleUrl = try await withTimeout(seconds: 5) {
+          try await self.applePodcastService.getAppleEpisodeLink(
+            episodeTitle: self.episode.title,
+            episodeGuid: self.episode.guid
+          )
+        }
+        guard !Task.isCancelled else { return }
+        var urlString = appleUrl ?? episode.audioURL
+        if totalSeconds > 0 {
+          urlString = (urlString ?? "") + "&t=\(totalSeconds)"
+        }
+        shareWithURL(urlString)
+      } catch {
+        guard !Task.isCancelled else { return }
+        var urlString = episode.audioURL ?? ""
+        if totalSeconds > 0 {
+          urlString += "&t=\(totalSeconds)"
+        }
+        shareWithURL(urlString)
+      }
+    }
+  }
+
   func skipForward() {
     audioManager.skipForward()
   }
@@ -2137,6 +2181,7 @@ final class EpisodeDetailViewModel {
       let parsed = ParsedHighlightsResponse(
         highlights: model.highlightsList ?? [],
         bestQuote: model.highlightsBestQuote ?? "",
+        bestQuoteTimestamp: model.highlightsBestQuoteTimestamp,
         actionItems: model.highlightsActionItems ?? [],
         controversialPoints: model.highlightsControversialPoints,
         entertainingMoments: model.highlightsEntertainingMoments
@@ -2289,7 +2334,8 @@ final class EpisodeDetailViewModel {
       case .highlights:
         if let parsed = result.parsedHighlights {
           model.highlightsList = parsed.highlights
-          model.highlightsBestQuote = parsed.bestQuote
+          model.highlightsBestQuote = parsed.bestQuote.text
+          model.highlightsBestQuoteTimestamp = parsed.bestQuote.timestamp
           model.highlightsActionItems = parsed.actionItems
           model.highlightsControversialPoints = parsed.controversialPoints
           model.highlightsEntertainingMoments = parsed.entertainingMoments
@@ -2365,7 +2411,7 @@ final class EpisodeDetailViewModel {
   private func formatHighlightsAsText(_ highlights: ParsedHighlightsResponse) -> String {
     var parts: [String] = []
     if !highlights.highlights.isEmpty { parts.append("Highlights:\n• " + highlights.highlights.joined(separator: "\n• ")) }
-    if !highlights.bestQuote.isEmpty { parts.append("Best Quote: \"\(highlights.bestQuote)\"") }
+    if !highlights.bestQuote.text.isEmpty { parts.append("Best Quote: \"\(highlights.bestQuote.text)\"") }
     if !highlights.actionItems.isEmpty { parts.append("Action Items:\n• " + highlights.actionItems.joined(separator: "\n• ")) }
     if let controversial = highlights.controversialPoints, !controversial.isEmpty {
       parts.append("Controversial Points:\n• " + controversial.joined(separator: "\n• "))

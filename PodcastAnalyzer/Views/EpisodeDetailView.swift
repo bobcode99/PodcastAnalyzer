@@ -371,6 +371,9 @@ struct EpisodeDetailView: View {
                         .font(.body)
                         .textSelection(.enabled)
 
+                    // Timestamp chips from translated text
+                    timestampChips(from: translated)
+
                     Divider()
 
                     // Original description (collapsed by default)
@@ -383,12 +386,56 @@ struct EpisodeDetailView: View {
                 .padding(.horizontal)
             } else {
                 // Original description only
-                descriptionView
-                    .textSelection(.enabled)
-                    .padding(.horizontal)
+                VStack(alignment: .leading, spacing: 8) {
+                    descriptionView
+                        .textSelection(.enabled)
+
+                    // Timestamp chips from description
+                    timestampChips(from: viewModel.episode.podcastEpisodeDescription)
+                }
+                .padding(.horizontal)
             }
         }
         .padding(.vertical)
+    }
+
+    // MARK: - Timestamp Chips
+
+    @ViewBuilder
+    private func timestampChips(from text: String?) -> some View {
+        let timestamps = TimestampUtils.findTimestamps(in: text ?? "")
+        if !timestamps.isEmpty {
+            FlowLayout(spacing: 6) {
+                ForEach(timestamps.indices, id: \.self) { i in
+                    let ts = timestamps[i]
+                    Menu {
+                        Button {
+                            viewModel.seekToTime(ts.seconds)
+                        } label: {
+                            Label("Play from \(ts.text)", systemImage: "play.fill")
+                        }
+                        Button {
+                            viewModel.shareTimestampedLink(seconds: ts.seconds)
+                        } label: {
+                            Label("Share", systemImage: "square.and.arrow.up")
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 10))
+                            Text(ts.text)
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.15))
+                        .foregroundStyle(.blue)
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+        }
     }
 
 }

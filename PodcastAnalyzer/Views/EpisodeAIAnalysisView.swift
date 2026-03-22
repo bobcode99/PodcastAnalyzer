@@ -482,9 +482,8 @@ struct EpisodeAIAnalysisView: View {
     if let parsed = result.parsedSummary {
       VStack(alignment: .leading, spacing: 16) {
         // Summary text
-        Text(parsed.summary)
+        timestampAwareText(parsed.summary)
           .font(.body)
-          .textSelection(.enabled)
 
         // Main topics as chips
         if !parsed.mainTopics.isEmpty {
@@ -615,28 +614,34 @@ struct EpisodeAIAnalysisView: View {
     if let parsed = result.parsedHighlights {
       VStack(alignment: .leading, spacing: 16) {
         // Best quote card
-        if !parsed.bestQuote.isEmpty {
+        if !parsed.bestQuote.text.isEmpty {
           VStack(alignment: .leading, spacing: 8) {
             Label("Best Quote", systemImage: "quote.opening")
               .font(.subheadline)
               .fontWeight(.semibold)
               .foregroundStyle(.purple)
 
-            Text("\"\(parsed.bestQuote)\"")
-              .font(.body)
-              .italic()
-              .padding()
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .background(
-                RoundedRectangle(cornerRadius: 8)
-                  .fill(Color.purple.opacity(0.1))
-              )
-              .overlay(
-                Rectangle()
-                  .fill(Color.purple)
-                  .frame(width: 4),
-                alignment: .leading
-              )
+            VStack(alignment: .leading, spacing: 6) {
+              Text("\"\(parsed.bestQuote.text)\"")
+                .font(.body)
+                .italic()
+
+              if let seconds = parsed.bestQuote.timeInSeconds {
+                timestampBadge(parsed.bestQuote.timestamp!, seconds: seconds)
+              }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+              RoundedRectangle(cornerRadius: 8)
+                .fill(Color.purple.opacity(0.1))
+            )
+            .overlay(
+              Rectangle()
+                .fill(Color.purple)
+                .frame(width: 4),
+              alignment: .leading
+            )
           }
         }
 
@@ -738,7 +743,7 @@ struct EpisodeAIAnalysisView: View {
             .fontWeight(.semibold)
             .foregroundStyle(.blue)
 
-          selectableText(parsed.overview)
+          timestampAwareText(parsed.overview)
         }
 
         // Main Topics
@@ -806,21 +811,27 @@ struct EpisodeAIAnalysisView: View {
               .foregroundStyle(.green)
 
             ForEach(Array(parsed.notableQuotes.enumerated()), id: \.offset) { _, quote in
-              selectableText("\"\(quote)\"")
-                .font(.subheadline)
-                .italic()
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                  RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.green.opacity(0.1))
-                )
-                .overlay(
-                  Rectangle()
-                    .fill(Color.green)
-                    .frame(width: 4),
-                  alignment: .leading
-                )
+              VStack(alignment: .leading, spacing: 6) {
+                selectableText("\"\(quote.text)\"")
+                  .font(.subheadline)
+                  .italic()
+
+                if let seconds = quote.timeInSeconds {
+                  timestampBadge(quote.timestamp!, seconds: seconds)
+                }
+              }
+              .padding()
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .background(
+                RoundedRectangle(cornerRadius: 8)
+                  .fill(Color.green.opacity(0.1))
+              )
+              .overlay(
+                Rectangle()
+                  .fill(Color.green)
+                  .frame(width: 4),
+                alignment: .leading
+              )
             }
           }
         }
@@ -851,10 +862,12 @@ struct EpisodeAIAnalysisView: View {
             .fontWeight(.semibold)
             .foregroundStyle(.indigo)
 
-          selectableText(parsed.conclusion)
-            .padding()
-            .background(Color.indigo.opacity(0.1))
-            .clipShape(.rect(cornerRadius: 8))
+          VStack(alignment: .leading, spacing: 4) {
+            timestampAwareText(parsed.conclusion)
+          }
+          .padding()
+          .background(Color.indigo.opacity(0.1))
+          .clipShape(.rect(cornerRadius: 8))
         }
       }
     } else {
@@ -915,6 +928,53 @@ struct EpisodeAIAnalysisView: View {
           Label("Share", systemImage: "square.and.arrow.up")
         }
       }
+  }
+
+  // MARK: - Timestamp Badge
+
+  /// Tappable timestamp pill with Play and Share actions
+  private func timestampBadge(_ timestamp: String, seconds: TimeInterval) -> some View {
+    Menu {
+      Button {
+        viewModel.seekToTime(seconds)
+      } label: {
+        Label("Play from \(timestamp)", systemImage: "play.fill")
+      }
+      Button {
+        viewModel.shareTimestampedLink(seconds: seconds)
+      } label: {
+        Label("Share", systemImage: "square.and.arrow.up")
+      }
+    } label: {
+      HStack(spacing: 4) {
+        Image(systemName: "play.circle.fill")
+          .font(.system(size: 10))
+        Text(timestamp)
+          .font(.caption2)
+          .fontWeight(.medium)
+      }
+      .padding(.horizontal, 8)
+      .padding(.vertical, 4)
+      .background(Color.blue.opacity(0.15))
+      .foregroundStyle(.blue)
+      .clipShape(Capsule())
+    }
+  }
+
+  // MARK: - Timestamp-Aware Text
+
+  /// Text view that detects inline timestamps and shows tappable chips below
+  @ViewBuilder
+  private func timestampAwareText(_ content: String) -> some View {
+    let timestamps = TimestampUtils.findTimestamps(in: content)
+    selectableText(content)
+    if !timestamps.isEmpty {
+      FlowLayout(spacing: 6) {
+        ForEach(timestamps.indices, id: \.self) { i in
+          timestampBadge(timestamps[i].text, seconds: timestamps[i].seconds)
+        }
+      }
+    }
   }
 
   // MARK: - Streaming Response View

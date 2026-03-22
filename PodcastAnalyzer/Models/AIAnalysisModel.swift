@@ -40,6 +40,7 @@ final class EpisodeAIAnalysis {
     // Highlights analysis
     var highlightsList: [String]?
     var highlightsBestQuote: String?
+    var highlightsBestQuoteTimestamp: String?
     var highlightsActionItems: [String]?
     var highlightsControversialPoints: [String]?
     var highlightsEntertainingMoments: [String]?
@@ -204,6 +205,19 @@ final class EpisodeQuickTagsModel {
     }
 }
 
+// MARK: - Timestamped Quote
+
+/// A quote with an optional timestamp for playback seeking
+nonisolated struct TimestampedQuote: Codable, Sendable {
+    let text: String
+    let timestamp: String?
+
+    var timeInSeconds: TimeInterval? {
+        guard let ts = timestamp else { return nil }
+        return TimestampUtils.parseToSeconds(ts)
+    }
+}
+
 // MARK: - Parsed Response Types (for JSON parsing)
 
 /// Parsed summary response from cloud AI
@@ -227,10 +241,48 @@ struct ParsedEntitiesResponse: Codable {
 /// Parsed highlights response from cloud AI
 struct ParsedHighlightsResponse: Codable {
     let highlights: [String]
-    let bestQuote: String
+    let bestQuote: TimestampedQuote
     let actionItems: [String]
     let controversialPoints: [String]?
     let entertainingMoments: [String]?
+
+    /// Backward-compatible memberwise init (SwiftData restore uses plain String)
+    init(
+        highlights: [String],
+        bestQuote: String,
+        bestQuoteTimestamp: String? = nil,
+        actionItems: [String],
+        controversialPoints: [String]?,
+        entertainingMoments: [String]?
+    ) {
+        self.highlights = highlights
+        self.bestQuote = TimestampedQuote(text: bestQuote, timestamp: bestQuoteTimestamp)
+        self.actionItems = actionItems
+        self.controversialPoints = controversialPoints
+        self.entertainingMoments = entertainingMoments
+    }
+
+    /// Decode from JSON — handles both object and plain string for bestQuote
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        highlights = try container.decode([String].self, forKey: .highlights)
+        actionItems = try container.decode([String].self, forKey: .actionItems)
+        controversialPoints = try container.decodeIfPresent([String].self, forKey: .controversialPoints)
+        entertainingMoments = try container.decodeIfPresent([String].self, forKey: .entertainingMoments)
+
+        // Try object first, fall back to plain string
+        if let quote = try? container.decode(TimestampedQuote.self, forKey: .bestQuote) {
+            bestQuote = quote
+        } else if let text = try? container.decode(String.self, forKey: .bestQuote) {
+            bestQuote = TimestampedQuote(text: text, timestamp: nil)
+        } else {
+            bestQuote = TimestampedQuote(text: "", timestamp: nil)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case highlights, bestQuote, actionItems, controversialPoints, entertainingMoments
+    }
 }
 
 /// Parsed Q&A response from cloud AI
@@ -246,7 +298,7 @@ struct ParsedFullAnalysisResponse: Codable {
     let overview: String
     let mainTopics: [TopicDetail]
     let keyInsights: [String]
-    let notableQuotes: [String]
+    let notableQuotes: [TimestampedQuote]
     let actionableAdvice: [String]?
     let conclusion: String
 
@@ -254,5 +306,28 @@ struct ParsedFullAnalysisResponse: Codable {
         let topic: String
         let summary: String
         let keyPoints: [String]
+    }
+
+    /// Decode from JSON — handles both [TimestampedQuote] and [String] for notableQuotes
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        overview = try container.decode(String.self, forKey: .overview)
+        mainTopics = try container.decode([TopicDetail].self, forKey: .mainTopics)
+        keyInsights = try container.decode([String].self, forKey: .keyInsights)
+        actionableAdvice = try container.decodeIfPresent([String].self, forKey: .actionableAdvice)
+        conclusion = try container.decode(String.self, forKey: .conclusion)
+
+        // Try [TimestampedQuote] first, fall back to [String]
+        if let quotes = try? container.decode([TimestampedQuote].self, forKey: .notableQuotes) {
+            notableQuotes = quotes
+        } else if let strings = try? container.decode([String].self, forKey: .notableQuotes) {
+            notableQuotes = strings.map { TimestampedQuote(text: $0, timestamp: nil) }
+        } else {
+            notableQuotes = []
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case overview, mainTopics, keyInsights, notableQuotes, actionableAdvice, conclusion
     }
 }

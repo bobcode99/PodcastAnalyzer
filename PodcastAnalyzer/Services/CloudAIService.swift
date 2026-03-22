@@ -375,11 +375,12 @@ final class CloudAIService {
             Return JSON in this exact format:
             {
                 "highlights": ["highlight1", "highlight2", "highlight3"],
-                "bestQuote": "The most memorable quote from the episode",
+                "bestQuote": {"text": "The most memorable quote from the episode", "timestamp": "MM:SS or H:MM:SS from transcript"},
                 "actionItems": ["action1", "action2"],
                 "controversialPoints": ["point1"],
                 "entertainingMoments": ["moment1"]
-            }\(languageLine)
+            }
+            For bestQuote, include the timestamp where this quote appears in the transcript. Use MM:SS or H:MM:SS format.\(languageLine)
 
             Transcript:
             \(transcript)
@@ -405,10 +406,11 @@ final class CloudAIService {
                     }
                 ],
                 "keyInsights": ["insight 1", "insight 2", "insight 3"],
-                "notableQuotes": ["quote 1", "quote 2"],
+                "notableQuotes": [{"text": "quote 1", "timestamp": "MM:SS"}, {"text": "quote 2", "timestamp": "MM:SS"}],
                 "actionableAdvice": ["advice 1", "advice 2"],
                 "conclusion": "Overall assessment and who would benefit from this episode"
-            }\(languageLine)
+            }
+            For each notable quote, include the timestamp where it appears in the transcript. Use MM:SS or H:MM:SS format.\(languageLine)
 
             Transcript:
             \(transcript)
@@ -785,11 +787,12 @@ final class CloudAIService {
             Provide your response in the following JSON format:
             {
                 "highlights": ["highlight1", "highlight2", "highlight3"],
-                "bestQuote": "The most memorable quote from the episode",
+                "bestQuote": {"text": "The most memorable quote from the episode", "timestamp": "MM:SS or H:MM:SS"},
                 "actionItems": ["action1", "action2"],
                 "controversialPoints": ["point1"] or null,
                 "entertainingMoments": ["moment1"] or null
-            }\(languageLine)
+            }
+            For bestQuote, include the timestamp where this quote appears in the transcript. Use MM:SS or H:MM:SS format.\(languageLine)
             """
 
         case .fullAnalysis:
@@ -809,10 +812,11 @@ final class CloudAIService {
                     }
                 ],
                 "keyInsights": ["insight 1", "insight 2", "insight 3"],
-                "notableQuotes": ["quote 1", "quote 2"],
+                "notableQuotes": [{"text": "quote 1", "timestamp": "MM:SS"}, {"text": "quote 2", "timestamp": "MM:SS"}],
                 "actionableAdvice": ["advice 1", "advice 2"] or null,
                 "conclusion": "Overall assessment and who would benefit from this episode"
-            }\(languageLine)
+            }
+            For each notable quote, include the timestamp where it appears in the transcript. Use MM:SS or H:MM:SS format.\(languageLine)
             """
         }
     }
