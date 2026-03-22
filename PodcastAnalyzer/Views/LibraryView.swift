@@ -27,8 +27,6 @@ struct LibraryView: View {
     GridItem(.flexible(), spacing: 12)
   ]
 
-  @State private var podcastToUnsubscribe: PodcastInfoModel?
-  @State private var showUnsubscribeConfirmation = false
   @State private var errorMessage: String?
 
   var body: some View {
@@ -93,25 +91,6 @@ struct LibraryView: View {
       Button("OK", role: .cancel) { errorMessage = nil }
     } message: {
       Text(errorMessage ?? "")
-    }
-    .confirmationDialog(
-      "Unsubscribe from Podcast",
-      isPresented: $showUnsubscribeConfirmation,
-      titleVisibility: .visible
-    ) {
-      Button("Unsubscribe", role: .destructive) {
-        if let podcast = podcastToUnsubscribe {
-          unsubscribePodcast(podcast)
-        }
-        podcastToUnsubscribe = nil
-      }
-      Button("Cancel", role: .cancel) {
-        podcastToUnsubscribe = nil
-      }
-    } message: {
-      if let podcast = podcastToUnsubscribe {
-        Text("Are you sure you want to unsubscribe from \"\(podcast.podcastInfo.title)\"? Downloaded episodes will remain available.")
-      }
     }
   }
 
@@ -201,36 +180,14 @@ struct LibraryView: View {
             }
             .buttonStyle(.plain)
             .contentShape(Rectangle())
-            .contextMenu {
-              NavigationLink(destination: EpisodeListView(podcastModel: podcast)) {
-                Label("View Episodes", systemImage: "list.bullet")
+            .podcastContextMenu(
+              podcast: podcast,
+              modelContext: modelContext,
+              onError: { errorMessage = $0 },
+              onUnsubscribed: {
+                viewModel.setModelContext(modelContext)
               }
-
-              Divider()
-
-              Button {
-                Task {
-                  await refreshPodcast(podcast)
-                }
-              } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-              }
-
-              Button {
-                PlatformClipboard.string = podcast.podcastInfo.rssUrl
-              } label: {
-                Label("Copy RSS URL", systemImage: "doc.on.doc")
-              }
-
-              Divider()
-
-              Button(role: .destructive) {
-                podcastToUnsubscribe = podcast
-                showUnsubscribeConfirmation = true
-              } label: {
-                Label("Unsubscribe", systemImage: "minus.circle")
-              }
-            }
+            )
           }
         }
       }
@@ -244,28 +201,6 @@ struct LibraryView: View {
       let date1 = p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
       let date2 = p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
       return date1 > date2
-    }
-  }
-
-  private func refreshPodcast(_ podcast: PodcastInfoModel) async {
-    let rssService = PodcastRssService()
-    do {
-      let updatedPodcast = try await rssService.fetchPodcast(from: podcast.podcastInfo.rssUrl)
-      podcast.podcastInfo = updatedPodcast
-      podcast.lastUpdated = Date()
-      try modelContext.save()
-    } catch {
-      errorMessage = "Failed to refresh: \(error.localizedDescription)"
-    }
-  }
-
-  private func unsubscribePodcast(_ podcast: PodcastInfoModel) {
-    podcast.isSubscribed = false
-    do {
-      try modelContext.save()
-      viewModel.setModelContext(modelContext)
-    } catch {
-      errorMessage = "Failed to unsubscribe: \(error.localizedDescription)"
     }
   }
 

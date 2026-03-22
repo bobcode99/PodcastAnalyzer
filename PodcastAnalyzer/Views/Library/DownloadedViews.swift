@@ -48,6 +48,13 @@ struct DownloadedPodcastsGridView: View {
               }
               .buttonStyle(.plain)
               .contentShape(Rectangle())
+              .podcastContextMenu(
+                podcast: item.podcast,
+                modelContext: modelContext,
+                onUnsubscribed: {
+                  Task { await viewModel.refreshDownloadedEpisodes() }
+                }
+              )
             }
           }
           .padding(.horizontal)
