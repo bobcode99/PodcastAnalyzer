@@ -8,6 +8,7 @@
 import AVFoundation
 import Foundation
 import Speech
+import Synchronization
 
 @available(iOS 17.0, *)
 nonisolated enum ChunkedTranscriptionService {
@@ -254,19 +255,23 @@ nonisolated enum ChunkedTranscriptionService {
 }
 
 /// Thread-safe progress tracker for parallel chunk processing.
-/// Tracks incremental per-chunk progress for smooth overall progress reporting.
+/// Uses Mutex instead of actor to allow synchronous access from onProgress callbacks,
+/// eliminating the need for unstructured Task {} per progress update.
 @available(iOS 17.0, *)
-actor ChunkProgressTracker {
+nonisolated final class ChunkProgressTracker: Sendable {
   private let totalChunks: Int
-  private var chunkProgresses: [Int: Double] = [:]
+  private let state: Mutex<[Int: Double]>
 
   init(totalChunks: Int) {
     self.totalChunks = totalChunks
+    self.state = Mutex([:])
   }
 
   /// Updates progress for a specific chunk and returns the overall progress (0.0–1.0)
   func updateProgress(chunkIndex: Int, progress: Double) -> Double {
-    chunkProgresses[chunkIndex] = progress
-    return chunkProgresses.values.reduce(0, +) / Double(totalChunks)
+    state.withLock { progresses in
+      progresses[chunkIndex] = progress
+      return progresses.values.reduce(0, +) / Double(totalChunks)
+    }
   }
 }

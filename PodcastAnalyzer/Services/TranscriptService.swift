@@ -412,20 +412,25 @@ public actor TranscriptService {
         // Start the analyzer
         try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
 
-        // Collect transcript results with progress
+        // Collect transcript results with progress (throttled to ~2 updates/sec)
         var transcript: AttributedString = ""
         var lastReportedTime: TimeInterval = 0
+        var lastProgressDate = Date.distantPast
 
         for try await result in transcriber.results {
           transcript += result.text
 
-          // Extract the latest time from the result to calculate progress
+          // Throttle progress reports to avoid hammering the main thread
+          let now = Date()
+          guard now.timeIntervalSince(lastProgressDate) >= 0.5 else { continue }
+
           for run in result.text.runs {
             if let timeRange = run.audioTimeRange {
               let currentTime = timeRange.end.seconds
               if currentTime > lastReportedTime {
                 lastReportedTime = currentTime
-                let progress = min(currentTime / audioFileDuration, 0.99)  // Cap at 99% until complete
+                lastProgressDate = now
+                let progress = min(currentTime / audioFileDuration, 0.99)
 
                 continuation.yield(
                   TranscriptionProgress(
@@ -435,6 +440,7 @@ public actor TranscriptService {
                     isComplete: false,
                     srtContent: nil
                   ))
+                break
               }
             }
           }
@@ -629,6 +635,7 @@ public actor TranscriptService {
             // Launch initial batch up to concurrency limit
             for i in 0..<min(maxConcurrent, chunks.count) {
               let chunk = chunks[i]
+              let chunkIndex = chunk.index
               group.addTask {
                 let segments = try await ChunkedTranscriptionService.transcribeChunkParallel(
                   chunk: chunk,
@@ -637,22 +644,19 @@ public actor TranscriptService {
                   isCJK: isCJK,
                   maxSegmentLength: effectiveMaxLength,
                   onProgress: { chunkProgress in
-                    Task {
-                      guard !Task.isCancelled else { return }
-                      let overall = await progressTracker.updateProgress(
-                        chunkIndex: chunk.index, progress: chunkProgress
-                      )
-                      continuation.yield(TranscriptionProgress(
-                        progress: min(overall, 0.99),
-                        currentTimeSeconds: overall * audioFileDuration,
-                        totalDurationSeconds: audioFileDuration,
-                        isComplete: false,
-                        srtContent: nil
-                      ))
-                    }
+                    let overall = progressTracker.updateProgress(
+                      chunkIndex: chunkIndex, progress: chunkProgress
+                    )
+                    continuation.yield(TranscriptionProgress(
+                      progress: min(overall, 0.99),
+                      currentTimeSeconds: overall * audioFileDuration,
+                      totalDurationSeconds: audioFileDuration,
+                      isComplete: false,
+                      srtContent: nil
+                    ))
                   }
                 )
-                return (chunk.index, segments)
+                return (chunkIndex, segments)
               }
               launched += 1
             }
@@ -664,6 +668,7 @@ public actor TranscriptService {
               // Launch next chunk if available
               if launched < chunks.count {
                 let chunk = chunks[launched]
+                let nextChunkIndex = chunk.index
                 group.addTask {
                   let segments = try await ChunkedTranscriptionService.transcribeChunkParallel(
                     chunk: chunk,
@@ -672,21 +677,19 @@ public actor TranscriptService {
                     isCJK: isCJK,
                     maxSegmentLength: effectiveMaxLength,
                     onProgress: { chunkProgress in
-                      Task {
-                        let overall = await progressTracker.updateProgress(
-                          chunkIndex: chunk.index, progress: chunkProgress
-                        )
-                        continuation.yield(TranscriptionProgress(
-                          progress: min(overall, 0.99),
-                          currentTimeSeconds: overall * audioFileDuration,
-                          totalDurationSeconds: audioFileDuration,
-                          isComplete: false,
-                          srtContent: nil
-                        ))
-                      }
+                      let overall = progressTracker.updateProgress(
+                        chunkIndex: nextChunkIndex, progress: chunkProgress
+                      )
+                      continuation.yield(TranscriptionProgress(
+                        progress: min(overall, 0.99),
+                        currentTimeSeconds: overall * audioFileDuration,
+                        totalDurationSeconds: audioFileDuration,
+                        isComplete: false,
+                        srtContent: nil
+                      ))
                     }
                   )
-                  return (chunk.index, segments)
+                  return (nextChunkIndex, segments)
                 }
                 launched += 1
               }

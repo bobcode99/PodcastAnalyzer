@@ -257,12 +257,19 @@ class TranscriptManager {
         activeJobs[job.id]?.status = .transcribing(progress: 0)
 
         var finalSRTContent: String?
+        var lastUIUpdate = Date.distantPast
         for try await progressUpdate in await transcriptService.audioToSRTChunkedWithProgress(
           inputFile: audioURL)
         {
-          activeJobs[job.id]?.status = .transcribing(progress: progressUpdate.progress)
           if progressUpdate.isComplete {
             finalSRTContent = progressUpdate.srtContent
+            activeJobs[job.id]?.status = .transcribing(progress: 1.0)
+          } else {
+            let now = Date()
+            if now.timeIntervalSince(lastUIUpdate) >= 0.25 {
+              activeJobs[job.id]?.status = .transcribing(progress: progressUpdate.progress)
+              lastUIUpdate = now
+            }
           }
         }
 
@@ -308,15 +315,22 @@ class TranscriptManager {
 
         let whisperService = WhisperTranscriptService()
         var finalSRTContent: String?
+        var lastUIUpdate = Date.distantPast
 
         for try await progressUpdate in await whisperService.audioToSRTWithProgress(
           inputFile: audioURL,
           modelVariant: modelVariant,
           language: job.language)
         {
-          activeJobs[job.id]?.status = .transcribing(progress: progressUpdate.progress)
           if progressUpdate.isComplete {
             finalSRTContent = progressUpdate.srtContent
+            activeJobs[job.id]?.status = .transcribing(progress: 1.0)
+          } else {
+            let now = Date()
+            if now.timeIntervalSince(lastUIUpdate) >= 0.25 {
+              activeJobs[job.id]?.status = .transcribing(progress: progressUpdate.progress)
+              lastUIUpdate = now
+            }
           }
         }
 
