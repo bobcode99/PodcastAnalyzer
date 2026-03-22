@@ -341,9 +341,6 @@ struct SentenceBasedTranscriptView: View {
     /// Whether to show timestamps on the left
     var showTimestamps: Bool = false
 
-    /// Show a periodic timestamp every ~30 seconds (only while user is scrolling)
-    var showPeriodicTimestamps: Bool = false
-
     /// Subtitle display mode
     var subtitleMode: SubtitleDisplayMode = .originalOnly
 
@@ -355,20 +352,6 @@ struct SentenceBasedTranscriptView: View {
 
     /// Currently focused search match ID
     var currentSearchMatchId: Int?
-
-    /// Sentence IDs that should show a periodic timestamp (every ~30 s)
-    private var periodicTimestampIds: Set<Int> {
-        guard showPeriodicTimestamps else { return [] }
-        var ids = Set<Int>()
-        var lastShownTime: TimeInterval = -30
-        for sentence in sentences {
-            if sentence.startTime - lastShownTime >= 30 {
-                ids.insert(sentence.id)
-                lastShownTime = sentence.startTime
-            }
-        }
-        return ids
-    }
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: sentenceHighlightEnabled ? 4 : 14) {
@@ -383,7 +366,7 @@ struct SentenceBasedTranscriptView: View {
                     searchQuery: searchQuery,
                     subtitleMode: subtitleMode,
                     sentenceHighlightEnabled: sentenceHighlightEnabled,
-                    showTimestamp: showTimestamps || periodicTimestampIds.contains(sentence.id),
+                    showTimestamp: showTimestamps,
                     isSearchMatch: searchMatchIds.contains(sentence.id),
                     isCurrentSearchMatch: currentSearchMatchId == sentence.id,
                     onSegmentTap: onSegmentTap

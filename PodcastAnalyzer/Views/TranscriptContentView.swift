@@ -140,11 +140,20 @@ struct TranscriptContentView: View {
     // MARK: - Transcript Scroll Content
 
     private var transcriptScrollContent: some View {
-        ScrollViewReader { proxy in
+        let sentences = viewModel.transcriptSentences
+        let currentTime: TimeInterval? = viewModel.isCurrentEpisode ? currentPlaybackTime : nil
+        let searchQuery = viewModel.transcriptSearchQuery
+        let searchMatchIdSet = Set(viewModel.searchMatchIds)
+        let currentSearchMatchId: Int? = viewModel.searchMatchIds.isEmpty
+            ? nil : viewModel.searchMatchIds[viewModel.currentMatchIndex]
+        let highlightEnabled = subtitleSettings.sentenceHighlightEnabled
+        let displayMode = subtitleSettings.displayMode
+
+        return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: highlightEnabled ? 4 : 14) {
                     Color.clear.frame(height: 0).id("transcriptTop")
-                    if !viewModel.transcriptSearchQuery.isEmpty,
+                    if !searchQuery.isEmpty,
                        !viewModel.searchMatchIds.isEmpty {
                         TranscriptSearchNavigationBar(
                             matchCount: viewModel.searchMatchIds.count,
@@ -155,21 +164,30 @@ struct TranscriptContentView: View {
                         .padding(.vertical, 4)
                     }
 
-                    SentenceBasedTranscriptView(
-                        sentences: viewModel.transcriptSentences,
-                        currentTime: viewModel.isCurrentEpisode ? currentPlaybackTime : nil,
-                        searchQuery: viewModel.transcriptSearchQuery,
-                        onSegmentTap: { viewModel.seekToSegment($0) },
-                        showPeriodicTimestamps: showScrollTimestamp,
-                        subtitleMode: subtitleSettings.displayMode,
-                        sentenceHighlightEnabled: subtitleSettings.sentenceHighlightEnabled,
-                        searchMatchIds: Set(viewModel.searchMatchIds),
-                        currentSearchMatchId: viewModel.searchMatchIds.isEmpty
-                            ? nil : viewModel.searchMatchIds[viewModel.currentMatchIndex]
-                    )
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 24)
+                    // Sentences inlined (not wrapped in SentenceBasedTranscriptView)
+                    // so .scrollPosition(id:) can track individual sentence IDs
+                    ForEach(sentences) { sentence in
+                        let highlightState = TranscriptGrouping.highlightState(
+                            for: sentence,
+                            currentTime: currentTime
+                        )
+                        SentenceView(
+                            sentence: sentence,
+                            highlightState: highlightState,
+                            searchQuery: searchQuery,
+                            subtitleMode: displayMode,
+                            sentenceHighlightEnabled: highlightEnabled,
+                            isSearchMatch: searchMatchIdSet.contains(sentence.id),
+                            isCurrentSearchMatch: currentSearchMatchId == sentence.id,
+                            onSegmentTap: { viewModel.seekToSegment($0) }
+                        )
+                        .equatable()
+                        .id(sentence.id)
+                    }
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+                .scrollTargetLayout()
             }
             .overlay(alignment: .topTrailing) {
                 if showScrollTimestamp, let timestamp = scrollTimestamp {
