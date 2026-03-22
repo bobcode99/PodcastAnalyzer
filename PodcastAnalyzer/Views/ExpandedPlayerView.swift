@@ -12,6 +12,7 @@ import SwiftUI
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "ExpandedPlayerView")
 
 #if os(iOS)
+import MediaPlayer
 import UIKit
 #endif
 
@@ -59,15 +60,30 @@ struct ExpandedPlayerView: View {
 
                 Spacer(minLength: 20)
 
-                // 2. Playback Group (Progress + Controls)
-                VStack(spacing: 24) {
+                // 2. Playback Group (Progress + Controls + Volume)
+                VStack(spacing: 32) {
                     progressSection
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, 32)
 
                     controlsSection
+
+                    #if os(iOS)
+                    // Volume slider (system MPVolumeView)
+                    HStack(spacing: 12) {
+                        Image(systemName: "speaker.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                        SystemVolumeSlider()
+                            .frame(height: 32)
+                        Image(systemName: "speaker.wave.3.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 32)
+                    #endif
                 }
 
-                Spacer(minLength: 20)
+                Spacer(minLength: 32)
 
                 // 3. Bottom Actions
                 bottomActionsSection
@@ -358,29 +374,31 @@ struct ExpandedPlayerView: View {
 
       Spacer()
 
-      Button(action: { viewModel.skipBackward() }) {
-        Image(systemName: "gobackward.15")
-          .font(.system(size: 32))
-          .foregroundStyle(.primary)
-      }
-      .frame(width: 60)
-      .accessibilityLabel("Skip back 15 seconds")
+      HStack(spacing: 28) {
+        Button(action: { viewModel.skipBackward() }) {
+          Image(systemName: "gobackward.15")
+            .font(.system(size: 32))
+            .foregroundStyle(.primary)
+        }
+        .frame(width: 60)
+        .accessibilityLabel("Skip back 15 seconds")
 
-      Button(action: { viewModel.togglePlayPause() }) {
-        Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-          .font(.system(size: 72))
-          .foregroundStyle(.primary)
-      }
-      .frame(width: 80)
-      .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
+        Button(action: { viewModel.togglePlayPause() }) {
+          Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+            .font(.system(size: 72))
+            .foregroundStyle(.primary)
+        }
+        .frame(width: 80)
+        .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
 
-      Button(action: { viewModel.skipForward() }) {
-        Image(systemName: "goforward.30")
-          .font(.system(size: 32))
-          .foregroundStyle(.primary)
+        Button(action: { viewModel.skipForward() }) {
+          Image(systemName: "goforward.30")
+            .font(.system(size: 32))
+            .foregroundStyle(.primary)
+        }
+        .frame(width: 60)
+        .accessibilityLabel("Skip forward 30 seconds")
       }
-      .frame(width: 60)
-      .accessibilityLabel("Skip forward 30 seconds")
 
       Spacer()
 
@@ -616,6 +634,25 @@ struct TranscriptFullScreenView: View {
     .glassEffect(.regular, in: .rect(cornerRadius: 12))
   }
 }
+
+// MARK: - System Volume Slider
+
+#if os(iOS)
+/// Wraps MPVolumeView for system volume control in SwiftUI.
+/// Route button is hidden — AirPlayButton (AVRoutePickerView) is used separately.
+struct SystemVolumeSlider: UIViewRepresentable {
+  func makeUIView(context: Context) -> MPVolumeView {
+    MPVolumeView(frame: .zero)
+  }
+
+  func updateUIView(_ uiView: MPVolumeView, context: Context) {
+    // Hide the route button subview (avoids deprecated showsRouteButton API)
+    for subview in uiView.subviews where subview is UIButton {
+      subview.isHidden = true
+    }
+  }
+}
+#endif
 
 // MARK: - Preview
 
