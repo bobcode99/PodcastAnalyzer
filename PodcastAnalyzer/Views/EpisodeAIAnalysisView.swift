@@ -217,7 +217,7 @@ struct EpisodeAIAnalysisView: View {
         )
       }
 
-      analysisStateView(for: viewModel.cloudAnalysisState)
+      analysisStateView(for: viewModel.cloudAnalysisState, type: .summary)
     }
   }
 
@@ -241,7 +241,7 @@ struct EpisodeAIAnalysisView: View {
         )
       }
 
-      analysisStateView(for: viewModel.cloudAnalysisState)
+      analysisStateView(for: viewModel.cloudAnalysisState, type: .entities)
     }
   }
 
@@ -265,7 +265,7 @@ struct EpisodeAIAnalysisView: View {
         )
       }
 
-      analysisStateView(for: viewModel.cloudAnalysisState)
+      analysisStateView(for: viewModel.cloudAnalysisState, type: .highlights)
     }
   }
 
@@ -289,7 +289,7 @@ struct EpisodeAIAnalysisView: View {
         )
       }
 
-      analysisStateView(for: viewModel.cloudAnalysisState)
+      analysisStateView(for: viewModel.cloudAnalysisState, type: .fullAnalysis)
     }
   }
 
@@ -1156,44 +1156,46 @@ struct EpisodeAIAnalysisView: View {
     }
   }
 
-  private func analysisStateView(for state: AnalysisState) -> some View {
+  private func analysisStateView(for state: AnalysisState, type: CloudAnalysisType? = nil) -> some View {
     Group {
       switch state {
-      case .idle:
+      case .idle, .completed:
         EmptyView()
 
       case .analyzing(let progress, let message):
-        VStack(spacing: 12) {
-          if progress < 0 {
-            ProgressView()
-              .scaleEffect(1.2)
-          } else {
-            ProgressView(value: progress)
-              .progressViewStyle(.linear)
-          }
+        // Only show progress on the tab that owns the current analysis
+        if let type, let streamingType = viewModel.currentStreamingType, type != streamingType {
+          EmptyView()
+        } else {
+          VStack(spacing: 12) {
+            if progress < 0 {
+              ProgressView()
+                .scaleEffect(1.2)
+            } else {
+              ProgressView(value: progress)
+                .progressViewStyle(.linear)
+            }
 
-          HStack(spacing: 8) {
-            Image(systemName: "sparkles")
-              .foregroundStyle(.blue)
-              .symbolEffect(.pulse)
+            HStack(spacing: 8) {
+              Image(systemName: "sparkles")
+                .foregroundStyle(.blue)
+                .symbolEffect(.pulse)
 
-            Text(message)
-              .font(.subheadline)
-              .foregroundStyle(.primary)
-          }
+              Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            }
 
-          if progress >= 0 {
-            Text("\(Int(progress * 100))% complete")
-              .font(.caption)
-              .foregroundStyle(.secondary)
+            if progress >= 0 {
+              Text("\(Int(progress * 100))% complete")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
           }
+          .padding()
+          .background(Color.blue.opacity(0.05))
+          .clipShape(.rect(cornerRadius: 12))
         }
-        .padding()
-        .background(Color.blue.opacity(0.05))
-        .clipShape(.rect(cornerRadius: 12))
-
-      case .completed:
-        EmptyView()
 
       case .error(let message):
         HStack {
