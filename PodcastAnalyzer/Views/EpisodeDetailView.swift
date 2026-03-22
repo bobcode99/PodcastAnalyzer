@@ -114,10 +114,12 @@ struct EpisodeDetailView: View {
         .toolbar {
             ToolbarItem(placement: toolbarPlacement) {
                 HStack(spacing: 16) {
-                    Button(action: { showTranslationLanguagePicker = true }) {
-                        Image(systemName: "translate")
+                    if selectedTab != 2 {
+                        Button(action: { showTranslationLanguagePicker = true }) {
+                            Image(systemName: "translate")
+                        }
+                        .accessibilityLabel("Translate")
                     }
-                    .accessibilityLabel("Translate")
                     Menu {
                         EpisodeMenuActions(
                             isStarred: viewModel.isStarred,
