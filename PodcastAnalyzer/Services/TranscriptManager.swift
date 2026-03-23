@@ -234,6 +234,8 @@ class TranscriptManager {
           break
         }
 
+        try Task.checkCancellation()
+
         let transcriptService = TranscriptService(language: job.language)
 
         let modelReady = await transcriptService.isModelReady()
@@ -245,6 +247,8 @@ class TranscriptManager {
           for await _ in await transcriptService.setupAndInstallAssets() {}
         }
 
+        try Task.checkCancellation()
+
         guard await transcriptService.isInitialized() else {
           let setupError = await transcriptService.getSetupError()
           let detail = setupError?.localizedDescription ?? "Unknown error"
@@ -254,6 +258,7 @@ class TranscriptManager {
           )
         }
 
+        try Task.checkCancellation()
         activeJobs[job.id]?.status = .transcribing(progress: 0)
 
         var finalSRTContent: String?
@@ -311,6 +316,7 @@ class TranscriptManager {
           }
         }
 
+        try Task.checkCancellation()
         activeJobs[job.id]?.status = .transcribing(progress: 0)
 
         let whisperService = WhisperTranscriptService()
@@ -355,6 +361,9 @@ class TranscriptManager {
       try? await Task.sleep(for: .seconds(3))
       activeJobs.removeValue(forKey: job.id)
 
+    } catch is CancellationError {
+      activeJobs.removeValue(forKey: job.id)
+      logger.info("Transcript cancelled for: \(job.episodeTitle)")
     } catch {
       activeJobs[job.id]?.status = .failed(error: error.localizedDescription)
       logger.error("Transcript failed for \(job.episodeTitle): \(error.localizedDescription)")
