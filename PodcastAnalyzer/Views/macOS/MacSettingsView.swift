@@ -13,7 +13,7 @@ struct MacSettingsView: View {
   private enum SettingsTab: Hashable, CaseIterable {
     case general, appearance, sync, playback, transcript, ai, storage
 
-    var title: String {
+    var title: LocalizedStringKey {
       switch self {
       case .general: "General"
       case .appearance: "Appearance"
@@ -115,6 +115,21 @@ struct GeneralSettingsTab: View {
         Text("Insights")
       } footer: {
         Text("View your listening history, top shows, and trends.")
+      }
+
+      Section {
+        Picker("App Language", selection: Binding(
+          get: { LanguageManager.shared.appLanguage },
+          set: { LanguageManager.shared.appLanguage = $0 }
+        )) {
+          ForEach(LanguageManager.availableLanguages) { language in
+            Text(language.displayName).tag(language.id)
+          }
+        }
+      } header: {
+        Text("Language")
+      } footer: {
+        Text("Choose the language for the app interface. 'System Default' follows your device language.")
       }
 
       Section {

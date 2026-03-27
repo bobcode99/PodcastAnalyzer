@@ -444,6 +444,32 @@ struct SettingsView: View {
         } header: {
           Text("About")
         }
+
+        // MARK: - Language Section
+        Section {
+          Picker(selection: Binding(
+            get: { LanguageManager.shared.appLanguage },
+            set: { LanguageManager.shared.appLanguage = $0 }
+          )) {
+            ForEach(LanguageManager.availableLanguages) { language in
+              Text(language.displayName).tag(language.id)
+            }
+          } label: {
+            HStack {
+              Image(systemName: "character.bubble")
+                .foregroundStyle(.teal)
+                .frame(width: 24)
+              Text("App Language")
+            }
+          }
+          #if os(iOS)
+          .pickerStyle(.menu)
+          #endif
+        } header: {
+          Text("Language")
+        } footer: {
+          Text("Choose the language for the app interface. 'System Default' follows your device language.")
+        }
       }
       #if os(iOS)
       .listStyle(.insetGrouped)
