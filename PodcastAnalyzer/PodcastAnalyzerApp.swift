@@ -14,6 +14,7 @@ private let logger = Logger(subsystem: "com.podcast.analyzer", category: "App")
 @main
 struct PodcastAnalyzerApp: App {
   @Environment(\.scenePhase) private var scenePhase
+  @State private var languageManager = LanguageManager.shared
 
   let sharedModelContainer: ModelContainer = {
     let schema = Schema([
@@ -51,6 +52,7 @@ struct PodcastAnalyzerApp: App {
   var body: some Scene {
     WindowGroup {
       ContentView()
+        .environment(\.locale, languageManager.locale)
         .task {
           // Critical: initialize playback state and sync manager first
           if PlaybackStateCoordinator.shared == nil {
@@ -117,6 +119,7 @@ struct PodcastAnalyzerApp: App {
     #if os(macOS)
     Settings {
       MacSettingsView()
+        .environment(\.locale, languageManager.locale)
     }
     .modelContainer(sharedModelContainer)
     #endif
