@@ -47,6 +47,22 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
     var transcriptURLs: [String: String] = [:]
     var transcriptTypes: [String: String] = [:]
 
+    // Throttle state: suppress MainActor progress updates that are too frequent
+    private var lastProgressUpdate: [String: (time: Date, progress: Double)] = [:]
+
+    /// Returns true only when enough time has passed (≥250 ms) or progress jumped ≥5%.
+    /// Call this before dispatching to MainActor to avoid flooding the UI.
+    func shouldUpdateProgress(for key: String, newProgress: Double) -> Bool {
+      let now = Date()
+      if let last = lastProgressUpdate[key] {
+        let elapsed = now.timeIntervalSince(last.time)
+        let delta = abs(newProgress - last.progress)
+        guard elapsed >= 0.25 || delta >= 0.05 else { return false }
+      }
+      lastProgressUpdate[key] = (now, newProgress)
+      return true
+    }
+
     func setDownload(
       _ task: URLSessionDownloadTask,
       for key: String,
@@ -91,6 +107,7 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
       episodeLanguages.removeValue(forKey: key)
       transcriptURLs.removeValue(forKey: key)
       transcriptTypes.removeValue(forKey: key)
+      lastProgressUpdate.removeValue(forKey: key)
     }
 
     func cancelDownload(for key: String) -> URLSessionDownloadTask? {
@@ -100,6 +117,7 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
       episodeLanguages.removeValue(forKey: key)
       transcriptURLs.removeValue(forKey: key)
       transcriptTypes.removeValue(forKey: key)
+      lastProgressUpdate.removeValue(forKey: key)
       return task
     }
   }
@@ -317,6 +335,11 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
 
     Task {
       guard let episodeKey = await downloadTracker.getDownloadKey(for: downloadTask) else { return }
+
+      // Throttle: skip the MainActor dispatch when updates are too frequent.
+      // URLSession fires this delegate for every received chunk (potentially
+      // hundreds of times/sec), which would flood @Observable and cause UI lag.
+      guard await downloadTracker.shouldUpdateProgress(for: episodeKey, newProgress: progress) else { return }
 
       await MainActor.run {
         let manager = DownloadManager.shared
