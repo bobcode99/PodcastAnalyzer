@@ -127,6 +127,35 @@ final class LibraryViewModel {
     let duration: TimeInterval
   }
 
+  /// Sendable snapshot of all EpisodeDownloadModel fields needed for background LibraryEpisode construction.
+  private struct FullEpisodeSnapshot: Sendable {
+    let id: String
+    let podcastTitle: String
+    let episodeTitle: String
+    let audioURL: String?
+    let imageURL: String?
+    let pubDate: Date?
+    let localAudioPath: String?
+    let isStarred: Bool
+    let isCompleted: Bool
+    let lastPlaybackPosition: TimeInterval
+    let duration: TimeInterval
+
+    init(from model: EpisodeDownloadModel) {
+      self.id = model.id
+      self.podcastTitle = model.podcastTitle
+      self.episodeTitle = model.episodeTitle
+      self.audioURL = model.audioURL
+      self.imageURL = model.imageURL
+      self.pubDate = model.pubDate
+      self.localAudioPath = model.localAudioPath
+      self.isStarred = model.isStarred
+      self.isCompleted = model.isCompleted
+      self.lastPlaybackPosition = model.lastPlaybackPosition
+      self.duration = model.duration
+    }
+  }
+
 
   // Simplified loading state
   // We only track generally if background operations are happening, 
@@ -545,22 +574,29 @@ final class LibraryViewModel {
   private func loadSavedEpisodes() async {
     guard let context = modelContext else { return }
 
-    // Fetch ALL and filter in memory to avoid predicate issues with Unicode
+    // Predicate filters to only starred rows — avoids full table scan
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.isStarred == true },
       sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
     )
 
     do {
-      let allModels = try context.fetch(descriptor)
-      // Filter for starred episodes in memory, deduplicate by ID
-      var seenIds = Set<String>()
-      let starredModels = allModels.filter { model in
-        model.isStarred && seenIds.insert(model.id).inserted
-      }
-      // Map to LibraryEpisode - always succeeds due to fallback
-      let results = starredModels.map { model in
-        self.createLibraryEpisode(from: model)
-      }
+      let models = try context.fetch(descriptor)
+      // Extract Sendable snapshots on MainActor (ModelContext boundary)
+      let snapshots = models.map { FullEpisodeSnapshot(from: $0) }
+      // Capture Sendable lookup map
+      let infoMap = self.podcastTitleMap.mapValues { $0.podcastInfo }
+      let delimiter = Self.episodeKeyDelimiter
+
+      // Dedup + map off the MainActor
+      let results = await Task.detached(priority: .userInitiated) { () -> [LibraryEpisode] in
+        var seenIds = Set<String>()
+        return snapshots.compactMap { snap in
+          guard seenIds.insert(snap.id).inserted else { return nil }
+          return Self.makeLibraryEpisode(from: snap, podcastInfoMap: infoMap, delimiter: delimiter)
+        }
+      }.value
+
       self.savedEpisodes = results
       logger.info("Loaded \(self.savedEpisodes.count) saved episodes")
     } catch {
@@ -574,25 +610,30 @@ final class LibraryViewModel {
   private func loadDownloadedEpisodesQuick() async {
     guard let context = modelContext else { return }
 
-    // Fetch ALL EpisodeDownloadModel and filter in memory
+    // Predicate filters to only rows with a local path — avoids full table scan
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.localAudioPath != nil },
       sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
     )
 
     do {
-      let allModels = try context.fetch(descriptor)
+      let models = try context.fetch(descriptor)
+      // Extract Sendable snapshots on MainActor (ModelContext boundary)
+      let snapshots = models.map { FullEpisodeSnapshot(from: $0) }
+      // Capture Sendable lookup map
+      let infoMap = self.podcastTitleMap.mapValues { $0.podcastInfo }
+      let delimiter = Self.episodeKeyDelimiter
 
-      // Filter for downloaded episodes in memory, deduplicate by ID
-      var seenIds = Set<String>()
-      let downloadedModels = allModels.filter { model in
-        guard let path = model.localAudioPath, !path.isEmpty else { return false }
-        return seenIds.insert(model.id).inserted
-      }
+      // Dedup + map off the MainActor
+      let results = await Task.detached(priority: .userInitiated) { () -> [LibraryEpisode] in
+        var seenIds = Set<String>()
+        return snapshots.compactMap { snap in
+          guard let path = snap.localAudioPath, !path.isEmpty else { return nil }
+          guard seenIds.insert(snap.id).inserted else { return nil }
+          return Self.makeLibraryEpisode(from: snap, podcastInfoMap: infoMap, delimiter: delimiter)
+        }
+      }.value
 
-      // Map to LibraryEpisode
-      let results = downloadedModels.map { model in
-        self.createLibraryEpisode(from: model)
-      }
       self.downloadedEpisodes = results
       logger.info("Quick loaded \(self.downloadedEpisodes.count) downloaded episodes")
     } catch {
@@ -788,6 +829,58 @@ final class LibraryViewModel {
       .components(separatedBy: invalidCharacters)
       .joined(separator: "_")
       .trimmingCharacters(in: .whitespaces)
+  }
+
+  /// Construct a LibraryEpisode from a Sendable snapshot; safe to call from any isolation context.
+  nonisolated private static func makeLibraryEpisode(
+    from snap: FullEpisodeSnapshot,
+    podcastInfoMap: [String: PodcastInfo],
+    delimiter: String
+  ) -> LibraryEpisode {
+    // Try to enrich with live podcast info
+    if let delimiterRange = snap.id.range(of: delimiter) {
+      let podcastTitle = String(snap.id[..<delimiterRange.lowerBound])
+      let episodeTitle = String(snap.id[delimiterRange.upperBound...])
+      if podcastTitle == snap.podcastTitle && episodeTitle == snap.episodeTitle,
+         let podcast = podcastInfoMap[podcastTitle],
+         let episode = podcast.episodes.first(where: { $0.title == episodeTitle }) {
+        return LibraryEpisode(
+          id: snap.id,
+          podcastTitle: podcastTitle,
+          imageURL: episode.imageURL ?? podcast.imageURL,
+          language: podcast.language,
+          episodeInfo: episode,
+          isStarred: snap.isStarred,
+          isDownloaded: snap.localAudioPath != nil,
+          isCompleted: snap.isCompleted,
+          lastPlaybackPosition: snap.lastPlaybackPosition,
+          savedDuration: snap.duration
+        )
+      }
+    }
+    // Fallback: build from stored data (handles unsubscribed podcasts, special characters, etc.)
+    let durationSeconds: Int? = snap.duration > 0 ? Int(snap.duration) : nil
+    let episodeInfo = PodcastEpisodeInfo(
+      title: snap.episodeTitle,
+      podcastEpisodeDescription: nil,
+      pubDate: snap.pubDate,
+      audioURL: snap.audioURL,
+      imageURL: snap.imageURL,
+      duration: durationSeconds,
+      guid: nil
+    )
+    return LibraryEpisode(
+      id: snap.id,
+      podcastTitle: snap.podcastTitle,
+      imageURL: snap.imageURL,
+      language: "en",
+      episodeInfo: episodeInfo,
+      isStarred: snap.isStarred,
+      isDownloaded: snap.localAudioPath != nil,
+      isCompleted: snap.isCompleted,
+      lastPlaybackPosition: snap.lastPlaybackPosition,
+      savedDuration: snap.duration
+    )
   }
 
   // MARK: - Load Latest Episodes
