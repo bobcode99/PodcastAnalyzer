@@ -12,7 +12,7 @@ import SwiftUI
 struct QuickAccessCard: View {
   let icon: String
   let iconColor: Color
-  let title: String
+  let title: LocalizedStringKey
   let count: Int
   var isLoading: Bool = false
 

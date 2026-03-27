@@ -546,7 +546,7 @@ struct TranslationProgressCircle: View {
 // MARK: - Tab Button Component
 
 struct TabButton: View {
-    let title: String
+    let title: LocalizedStringKey
     let isSelected: Bool
     let action: () -> Void
 
