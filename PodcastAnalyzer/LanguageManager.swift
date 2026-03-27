@@ -17,10 +17,20 @@ final class LanguageManager {
 
   var locale: Locale {
     if appLanguage == "system" {
-      return .autoupdatingCurrent
+      // If the device's primary language is one we support, honour it.
+      // Otherwise fall back to English so unsupported languages (Japanese,
+      // Korean, Hindi, …) don't result in missing strings.
+      let primary = Locale.preferredLanguages.first ?? "en"
+      let isSupported = Self.supportedLanguageIDs.contains { primary.hasPrefix($0) }
+      return isSupported ? .autoupdatingCurrent : Locale(identifier: "en")
     }
     return Locale(identifier: appLanguage)
   }
+
+  /// Language IDs (excluding "system") that have translations in Localizable.xcstrings.
+  private static let supportedLanguageIDs: [String] = availableLanguages
+    .map(\.id)
+    .filter { $0 != "system" }
 
   struct AppLanguage: Identifiable {
     let id: String
