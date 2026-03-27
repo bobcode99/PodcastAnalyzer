@@ -15,6 +15,12 @@ struct MacLibraryPodcastsView: View {
   @State private var viewModel = LibraryViewModel(modelContext: nil)
   @Environment(\.modelContext) private var modelContext
 
+  @Query(
+    filter: #Predicate<PodcastInfoModel> { $0.isSubscribed },
+    sort: \.lastUpdated,
+    order: .reverse
+  ) private var subscribedPodcasts: [PodcastInfoModel]
+
   private let columns = [
     GridItem(.adaptive(minimum: 150, maximum: 180), spacing: 16)
   ]
@@ -55,6 +61,10 @@ struct MacLibraryPodcastsView: View {
     }
     .onAppear {
       viewModel.setModelContext(modelContext)
+      viewModel.setPodcasts(subscribedPodcasts)
+    }
+    .onChange(of: subscribedPodcasts) { _, newPodcasts in
+      viewModel.setPodcasts(newPodcasts)
     }
   }
 }
