@@ -16,8 +16,21 @@ func configureImagePipeline() {
   let dataCache = try? DataCache(name: "com.podcast.analyzer.images")
   var config = ImagePipeline.Configuration()
   if let dataCache {
+    dataCache.sizeLimit = 200 * 1024 * 1024
+  }
+  if let dataCache {
     config.dataCache = dataCache
   }
+  let imageCache = ImageCache()
+  #if os(macOS)
+  // The default shared cache can grow very large on desktop-class RAM.
+  imageCache.costLimit = 80 * 1024 * 1024
+  imageCache.countLimit = 200
+  #else
+  imageCache.costLimit = 120 * 1024 * 1024
+  imageCache.countLimit = 300
+  #endif
+  config.imageCache = imageCache
   ImagePipeline.shared = ImagePipeline(configuration: config)
 }
 
@@ -89,8 +102,23 @@ nonisolated struct CachedArtworkImage: View {
     return URL(string: urlString)
   }
 
+  private var request: ImageRequest? {
+    guard let url else { return nil }
+    var request = ImageRequest(url: url)
+    request.processors = [
+      ImageProcessors.Resize(
+        size: CGSize(width: size, height: size),
+        unit: .points,
+        contentMode: .aspectFill,
+        crop: true,
+        upscale: false
+      )
+    ]
+    return request
+  }
+
   var body: some View {
-    LazyImage(url: url) { state in
+    LazyImage(request: request) { state in
       if let image = state.image {
         image.resizable().aspectRatio(contentMode: .fill)
       } else {

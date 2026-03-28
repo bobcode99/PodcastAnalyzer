@@ -37,14 +37,12 @@ struct MacHomeContentView: View {
               GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 16)
             ], spacing: 16) {
               ForEach(viewModel.upNextEpisodes.prefix(8)) { episode in
-                NavigationLink(
-                  destination: EpisodeDetailView(
-                    episode: episode.episodeInfo,
-                    podcastTitle: episode.podcastTitle,
-                    fallbackImageURL: episode.imageURL,
-                    podcastLanguage: episode.language
-                  )
-                ) {
+                NavigationLink(value: EpisodeDetailRoute(
+                  episode: episode.episodeInfo,
+                  podcastTitle: episode.podcastTitle,
+                  fallbackImageURL: episode.imageURL,
+                  podcastLanguage: episode.language
+                )) {
                   MacUpNextCard(episode: episode)
                 }
                 .buttonStyle(.plain)
@@ -87,12 +85,12 @@ struct MacHomeContentView: View {
             ], spacing: 8) {
               ForEach(Array(viewModel.topPodcasts.enumerated()), id: \.element.id) { index, podcast in
                 NavigationLink(
-                  destination: EpisodeListView(
+                  value: PodcastBrowseRoute(
                     podcastName: podcast.name,
-                    podcastArtwork: podcast.safeArtworkUrl,
+                    artworkURL: podcast.safeArtworkUrl,
                     artistName: podcast.artistName,
                     collectionId: podcast.id,
-                    applePodcastUrl: podcast.url
+                    applePodcastURL: podcast.url
                   )
                 ) {
                   MacTopPodcastRow(podcast: podcast, rank: index + 1)

@@ -1,0 +1,82 @@
+//
+//  NavigationRoutes.swift
+//  PodcastAnalyzer
+//
+//  Shared value-based navigation route types used across iOS and macOS.
+//  Value-based NavigationLink(value:) + navigationDestination(for:) prevents
+//  the legacy NavigationLink(destination:) from eagerly constructing destination
+//  views before the user taps — eliminating the primary source of memory growth
+//  when browsing large podcast episode lists.
+//
+
+import SwiftUI
+
+// MARK: - Episode Detail Route
+
+/// Navigation route that defers EpisodeDetailView construction until the user
+/// actually taps the row. Carrying only value types keeps it cheap to create.
+struct EpisodeDetailRoute: Hashable {
+  let episode: PodcastEpisodeInfo
+  let podcastTitle: String
+  let fallbackImageURL: String?
+  let podcastLanguage: String?
+}
+
+// MARK: - Podcast Browse Route
+
+/// Value-based navigation route for EpisodeListView. Using a route type
+/// prevents legacy NavigationLink(destination:) from constructing the
+/// destination view eagerly before the user actually navigates to it.
+struct PodcastBrowseRoute: Hashable {
+  /// Non-nil when navigating to a subscribed podcast from the library.
+  let podcastModel: PodcastInfoModel?
+  /// Non-nil when navigating to an unsubscribed podcast from browse/search.
+  let collectionId: String?
+  let podcastName: String
+  let artistName: String
+  let artworkURL: String
+  let applePodcastURL: String?
+
+  /// Convenience init for a subscribed PodcastInfoModel.
+  init(podcastModel: PodcastInfoModel) {
+    self.podcastModel = podcastModel
+    self.collectionId = nil
+    self.podcastName = podcastModel.podcastInfo.title
+    self.artistName = ""
+    self.artworkURL = podcastModel.podcastInfo.imageURL
+    self.applePodcastURL = nil
+  }
+
+  /// Convenience init for an unsubscribed podcast from the Apple Podcasts directory.
+  init(
+    podcastName: String,
+    artworkURL: String,
+    artistName: String,
+    collectionId: String,
+    applePodcastURL: String?
+  ) {
+    self.podcastModel = nil
+    self.collectionId = collectionId
+    self.podcastName = podcastName
+    self.artistName = artistName
+    self.artworkURL = artworkURL
+    self.applePodcastURL = applePodcastURL
+  }
+
+  // Hashable conformance — PodcastInfoModel is a class so use ObjectIdentifier.
+  static func == (lhs: PodcastBrowseRoute, rhs: PodcastBrowseRoute) -> Bool {
+    if let lm = lhs.podcastModel, let rm = rhs.podcastModel {
+      return ObjectIdentifier(lm) == ObjectIdentifier(rm)
+    }
+    return lhs.collectionId == rhs.collectionId && lhs.podcastName == rhs.podcastName
+  }
+
+  func hash(into hasher: inout Hasher) {
+    if let model = podcastModel {
+      hasher.combine(ObjectIdentifier(model))
+    } else {
+      hasher.combine(collectionId)
+      hasher.combine(podcastName)
+    }
+  }
+}

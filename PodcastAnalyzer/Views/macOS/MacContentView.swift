@@ -82,6 +82,7 @@ struct MacContentView: View {
   @State private var searchText: String = ""
   @State private var columnVisibility: NavigationSplitViewVisibility = .all
   @State private var showExpandedPlayer = false
+  @State private var navigationPath = NavigationPath()
 
   // For notification navigation
   @State private var notificationEpisode: PodcastEpisodeInfo?
@@ -192,6 +193,9 @@ struct MacContentView: View {
       if let subItem = newValue?.librarySubItem {
         selectedLibrarySubItem = subItem
       }
+      // Reset the navigation path so any pushed view (e.g. EpisodeDetail) is
+      // dismissed — this ensures onDisappear fires and ViewModels are cleaned up.
+      navigationPath = NavigationPath()
     }
     .toolbar {
       ToolbarItem(placement: .primaryAction) {
@@ -207,28 +211,51 @@ struct MacContentView: View {
 
   @ViewBuilder
   private var mainContent: some View {
-    NavigationStack {
-      switch selectedSidebarItem {
-      case .home:
-        MacHomeContentView()
+    NavigationStack(path: $navigationPath) {
+      Group {
+        switch selectedSidebarItem {
+        case .home:
+          MacHomeContentView()
 
-      case .libraryPodcasts:
-        MacLibraryPodcastsView()
-      case .librarySaved:
-        MacLibrarySavedView()
-      case .libraryDownloaded:
-        MacLibraryDownloadedView()
-      case .libraryLatest:
-        MacLibraryLatestView()
-      case .library:
-        // Fallback to podcasts if somehow .library is selected
-        MacLibraryPodcastsView()
+        case .libraryPodcasts:
+          MacLibraryPodcastsView()
+        case .librarySaved:
+          MacLibrarySavedView()
+        case .libraryDownloaded:
+          MacLibraryDownloadedView()
+        case .libraryLatest:
+          MacLibraryLatestView()
+        case .library:
+          // Fallback to podcasts if somehow .library is selected
+          MacLibraryPodcastsView()
 
-      case .search:
-        MacSearchView()
+        case .search:
+          MacSearchView()
 
-      case .none:
-        MacHomeContentView()
+        case .none:
+          MacHomeContentView()
+        }
+      }
+      .navigationDestination(for: EpisodeDetailRoute.self) { route in
+        EpisodeDetailView(
+          episode: route.episode,
+          podcastTitle: route.podcastTitle,
+          fallbackImageURL: route.fallbackImageURL,
+          podcastLanguage: route.podcastLanguage ?? "en"
+        )
+      }
+      .navigationDestination(for: PodcastBrowseRoute.self) { route in
+        if let model = route.podcastModel {
+          EpisodeListView(podcastModel: model)
+        } else {
+          EpisodeListView(
+            podcastName: route.podcastName,
+            podcastArtwork: route.artworkURL,
+            artistName: route.artistName,
+            collectionId: route.collectionId ?? "",
+            applePodcastUrl: route.applePodcastURL
+          )
+        }
       }
     }
   }

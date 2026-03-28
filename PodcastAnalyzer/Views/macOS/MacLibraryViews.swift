@@ -37,9 +37,7 @@ struct MacLibraryPodcastsView: View {
       } else {
         LazyVGrid(columns: columns, spacing: 20) {
           ForEach(viewModel.podcastsSortedByRecentUpdate) { podcast in
-            NavigationLink(
-              destination: EpisodeListView(podcastModel: podcast)
-            ) {
+            NavigationLink(value: PodcastBrowseRoute(podcastModel: podcast)) {
               MacPodcastGridCell(podcast: podcast)
             }
             .buttonStyle(.plain)
@@ -62,6 +60,9 @@ struct MacLibraryPodcastsView: View {
     .onAppear {
       viewModel.setModelContext(modelContext)
       viewModel.setPodcasts(subscribedPodcasts)
+    }
+    .onDisappear {
+      viewModel.cleanup()
     }
     .onChange(of: subscribedPodcasts) { _, newPodcasts in
       viewModel.setPodcasts(newPodcasts)
@@ -106,107 +107,34 @@ struct MacLibrarySavedView: View {
         )
       } else {
         List(viewModel.savedEpisodes) { episode in
-          NavigationLink(
-            destination: EpisodeDetailView(
-              episode: episode.episodeInfo,
-              podcastTitle: episode.podcastTitle,
-              fallbackImageURL: episode.imageURL,
-              podcastLanguage: episode.language
-            )
-          ) {
-            MacLibraryEpisodeRow(
-              episode: episode.episodeInfo,
-              podcastTitle: episode.podcastTitle,
-              podcastImageURL: episode.imageURL ?? "",
-              podcastLanguage: episode.language
-            )
-          }
-          .contextMenu {
-            let checker = EpisodeStatusChecker(episode: episode)
-            let podcastModel = viewModel.podcastInfoModelList.first {
+          MacLibraryEpisodeListRow(
+            episode: episode,
+            podcastModel: viewModel.podcastInfoModelList.first {
               $0.podcastInfo.title == episode.podcastTitle
+            },
+            onToggleStar: {
+              LibraryEpisodeActions.toggleStar(
+                episode,
+                episodeModels: &episodeModels,
+                context: modelContext
+              )
+              Task { await viewModel.refreshSavedEpisodes() }
+            },
+            onTogglePlayed: {
+              LibraryEpisodeActions.togglePlayed(
+                episode,
+                episodeModels: &episodeModels,
+                context: modelContext
+              )
+            },
+            onDeleteDownload: {
+              LibraryEpisodeActions.deleteDownload(
+                episode,
+                episodeModels: episodeModels,
+                context: modelContext
+              )
             }
-            LibraryEpisodeContextMenu(
-              episode: episode,
-              isStarred: episode.isStarred,
-              isCompleted: episode.isCompleted,
-              downloadState: checker.downloadState,
-              podcastModel: podcastModel,
-              onPlay: {
-                let playbackURL = checker.playbackURL
-                guard !playbackURL.isEmpty else { return }
-                let playbackEpisode = PlaybackEpisode(
-                  id: checker.episodeKey,
-                  title: episode.episodeInfo.title,
-                  podcastTitle: episode.podcastTitle,
-                  audioURL: playbackURL,
-                  imageURL: episode.imageURL ?? "",
-                  episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
-                  pubDate: episode.episodeInfo.pubDate,
-                  duration: episode.episodeInfo.duration,
-                  guid: episode.episodeInfo.guid
-                )
-                audioManager.play(
-                  episode: playbackEpisode,
-                  audioURL: playbackURL,
-                  startTime: episode.lastPlaybackPosition,
-                  imageURL: episode.imageURL ?? "",
-                  useDefaultSpeed: true
-                )
-              },
-              onPlayNext: {
-                let playbackURL = checker.playbackURL
-                guard !playbackURL.isEmpty else { return }
-                let playbackEpisode = PlaybackEpisode(
-                  id: checker.episodeKey,
-                  title: episode.episodeInfo.title,
-                  podcastTitle: episode.podcastTitle,
-                  audioURL: playbackURL,
-                  imageURL: episode.imageURL ?? "",
-                  episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
-                  pubDate: episode.episodeInfo.pubDate,
-                  duration: episode.episodeInfo.duration,
-                  guid: episode.episodeInfo.guid
-                )
-                audioManager.playNext(playbackEpisode)
-              },
-              onToggleStar: {
-                LibraryEpisodeActions.toggleStar(
-                  episode,
-                  episodeModels: &episodeModels,
-                  context: modelContext
-                )
-                Task { await viewModel.refreshSavedEpisodes() }
-              },
-              onTogglePlayed: {
-                LibraryEpisodeActions.togglePlayed(
-                  episode,
-                  episodeModels: &episodeModels,
-                  context: modelContext
-                )
-              },
-              onDownload: { LibraryEpisodeActions.downloadEpisode(episode) },
-              onCancelDownload: {
-                DownloadManager.shared.cancelDownload(
-                  episodeTitle: episode.episodeInfo.title,
-                  podcastTitle: episode.podcastTitle
-                )
-              },
-              onDeleteDownload: {
-                LibraryEpisodeActions.deleteDownload(
-                  episode,
-                  episodeModels: episodeModels,
-                  context: modelContext
-                )
-              },
-              onShare: {
-                if let audioURL = episode.episodeInfo.audioURL,
-                   let url = URL(string: audioURL) {
-                  PlatformShareSheet.share(url: url)
-                }
-              }
-            )
-          }
+          )
         }
         .listStyle(.plain)
       }
@@ -215,6 +143,9 @@ struct MacLibrarySavedView: View {
     .onAppear {
       viewModel.setModelContext(modelContext)
       episodeModels = LibraryEpisodeActions.batchFetchEpisodeModels(from: modelContext)
+    }
+    .onDisappear {
+      viewModel.cleanup()
     }
   }
 }
@@ -238,106 +169,33 @@ struct MacLibraryDownloadedView: View {
         )
       } else {
         List(viewModel.downloadedEpisodes) { episode in
-          NavigationLink(
-            destination: EpisodeDetailView(
-              episode: episode.episodeInfo,
-              podcastTitle: episode.podcastTitle,
-              fallbackImageURL: episode.imageURL,
-              podcastLanguage: episode.language
-            )
-          ) {
-            MacLibraryEpisodeRow(
-              episode: episode.episodeInfo,
-              podcastTitle: episode.podcastTitle,
-              podcastImageURL: episode.imageURL ?? "",
-              podcastLanguage: episode.language
-            )
-          }
-          .contextMenu {
-            let checker = EpisodeStatusChecker(episode: episode)
-            let podcastModel = viewModel.podcastInfoModelList.first {
+          MacLibraryEpisodeListRow(
+            episode: episode,
+            podcastModel: viewModel.podcastInfoModelList.first {
               $0.podcastInfo.title == episode.podcastTitle
+            },
+            onToggleStar: {
+              LibraryEpisodeActions.toggleStar(
+                episode,
+                episodeModels: &episodeModels,
+                context: modelContext
+              )
+            },
+            onTogglePlayed: {
+              LibraryEpisodeActions.togglePlayed(
+                episode,
+                episodeModels: &episodeModels,
+                context: modelContext
+              )
+            },
+            onDeleteDownload: {
+              LibraryEpisodeActions.deleteDownload(
+                episode,
+                episodeModels: episodeModels,
+                context: modelContext
+              )
             }
-            LibraryEpisodeContextMenu(
-              episode: episode,
-              isStarred: episode.isStarred,
-              isCompleted: episode.isCompleted,
-              downloadState: checker.downloadState,
-              podcastModel: podcastModel,
-              onPlay: {
-                let playbackURL = checker.playbackURL
-                guard !playbackURL.isEmpty else { return }
-                let playbackEpisode = PlaybackEpisode(
-                  id: checker.episodeKey,
-                  title: episode.episodeInfo.title,
-                  podcastTitle: episode.podcastTitle,
-                  audioURL: playbackURL,
-                  imageURL: episode.imageURL ?? "",
-                  episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
-                  pubDate: episode.episodeInfo.pubDate,
-                  duration: episode.episodeInfo.duration,
-                  guid: episode.episodeInfo.guid
-                )
-                audioManager.play(
-                  episode: playbackEpisode,
-                  audioURL: playbackURL,
-                  startTime: episode.lastPlaybackPosition,
-                  imageURL: episode.imageURL ?? "",
-                  useDefaultSpeed: true
-                )
-              },
-              onPlayNext: {
-                let playbackURL = checker.playbackURL
-                guard !playbackURL.isEmpty else { return }
-                let playbackEpisode = PlaybackEpisode(
-                  id: checker.episodeKey,
-                  title: episode.episodeInfo.title,
-                  podcastTitle: episode.podcastTitle,
-                  audioURL: playbackURL,
-                  imageURL: episode.imageURL ?? "",
-                  episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
-                  pubDate: episode.episodeInfo.pubDate,
-                  duration: episode.episodeInfo.duration,
-                  guid: episode.episodeInfo.guid
-                )
-                audioManager.playNext(playbackEpisode)
-              },
-              onToggleStar: {
-                LibraryEpisodeActions.toggleStar(
-                  episode,
-                  episodeModels: &episodeModels,
-                  context: modelContext
-                )
-              },
-              onTogglePlayed: {
-                LibraryEpisodeActions.togglePlayed(
-                  episode,
-                  episodeModels: &episodeModels,
-                  context: modelContext
-                )
-              },
-              onDownload: { LibraryEpisodeActions.downloadEpisode(episode) },
-              onCancelDownload: {
-                DownloadManager.shared.cancelDownload(
-                  episodeTitle: episode.episodeInfo.title,
-                  podcastTitle: episode.podcastTitle
-                )
-              },
-              onDeleteDownload: {
-                LibraryEpisodeActions.deleteDownload(
-                  episode,
-                  episodeModels: episodeModels,
-                  context: modelContext
-                )
-              },
-              onShare: {
-                if let audioURL = episode.episodeInfo.audioURL,
-                   let url = URL(string: audioURL) {
-                  PlatformShareSheet.share(url: url)
-                }
-              }
-            )
-          }
+          )
         }
         .listStyle(.plain)
       }
@@ -346,6 +204,9 @@ struct MacLibraryDownloadedView: View {
     .onAppear {
       viewModel.setModelContext(modelContext)
       episodeModels = LibraryEpisodeActions.batchFetchEpisodeModels(from: modelContext)
+    }
+    .onDisappear {
+      viewModel.cleanup()
     }
   }
 }
@@ -369,111 +230,38 @@ struct MacLibraryLatestView: View {
         )
       } else {
         List(viewModel.latestEpisodes) { episode in
-          NavigationLink(
-            destination: EpisodeDetailView(
-              episode: episode.episodeInfo,
-              podcastTitle: episode.podcastTitle,
-              fallbackImageURL: episode.imageURL,
-              podcastLanguage: episode.language
-            )
-          ) {
-            MacLibraryEpisodeRow(
-              episode: episode.episodeInfo,
-              podcastTitle: episode.podcastTitle,
-              podcastImageURL: episode.imageURL ?? "",
-              podcastLanguage: episode.language
-            )
-          }
-          .contextMenu {
-            let checker = EpisodeStatusChecker(episode: episode)
-            let podcastModel = viewModel.podcastInfoModelList.first {
+          MacLibraryEpisodeListRow(
+            episode: episode,
+            podcastModel: viewModel.podcastInfoModelList.first {
               $0.podcastInfo.title == episode.podcastTitle
+            },
+            onToggleStar: {
+              LibraryEpisodeActions.toggleStar(
+                episode,
+                episodeModels: &episodeModels,
+                context: modelContext,
+                createIfMissing: true
+              )
+              viewModel.setModelContext(modelContext)
+            },
+            onTogglePlayed: {
+              LibraryEpisodeActions.togglePlayed(
+                episode,
+                episodeModels: &episodeModels,
+                context: modelContext,
+                createIfMissing: true
+              )
+              viewModel.setModelContext(modelContext)
+            },
+            onDeleteDownload: {
+              LibraryEpisodeActions.deleteDownload(
+                episode,
+                episodeModels: episodeModels,
+                context: modelContext
+              )
+              viewModel.setModelContext(modelContext)
             }
-            LibraryEpisodeContextMenu(
-              episode: episode,
-              isStarred: episode.isStarred,
-              isCompleted: episode.isCompleted,
-              downloadState: checker.downloadState,
-              podcastModel: podcastModel,
-              onPlay: {
-                let playbackURL = checker.playbackURL
-                guard !playbackURL.isEmpty else { return }
-                let playbackEpisode = PlaybackEpisode(
-                  id: checker.episodeKey,
-                  title: episode.episodeInfo.title,
-                  podcastTitle: episode.podcastTitle,
-                  audioURL: playbackURL,
-                  imageURL: episode.imageURL ?? "",
-                  episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
-                  pubDate: episode.episodeInfo.pubDate,
-                  duration: episode.episodeInfo.duration,
-                  guid: episode.episodeInfo.guid
-                )
-                audioManager.play(
-                  episode: playbackEpisode,
-                  audioURL: playbackURL,
-                  startTime: episode.lastPlaybackPosition,
-                  imageURL: episode.imageURL ?? "",
-                  useDefaultSpeed: true
-                )
-              },
-              onPlayNext: {
-                let playbackURL = checker.playbackURL
-                guard !playbackURL.isEmpty else { return }
-                let playbackEpisode = PlaybackEpisode(
-                  id: checker.episodeKey,
-                  title: episode.episodeInfo.title,
-                  podcastTitle: episode.podcastTitle,
-                  audioURL: playbackURL,
-                  imageURL: episode.imageURL ?? "",
-                  episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
-                  pubDate: episode.episodeInfo.pubDate,
-                  duration: episode.episodeInfo.duration,
-                  guid: episode.episodeInfo.guid
-                )
-                audioManager.playNext(playbackEpisode)
-              },
-              onToggleStar: {
-                LibraryEpisodeActions.toggleStar(
-                  episode,
-                  episodeModels: &episodeModels,
-                  context: modelContext,
-                  createIfMissing: true
-                )
-                viewModel.setModelContext(modelContext)
-              },
-              onTogglePlayed: {
-                LibraryEpisodeActions.togglePlayed(
-                  episode,
-                  episodeModels: &episodeModels,
-                  context: modelContext,
-                  createIfMissing: true
-                )
-                viewModel.setModelContext(modelContext)
-              },
-              onDownload: { LibraryEpisodeActions.downloadEpisode(episode) },
-              onCancelDownload: {
-                DownloadManager.shared.cancelDownload(
-                  episodeTitle: episode.episodeInfo.title,
-                  podcastTitle: episode.podcastTitle
-                )
-              },
-              onDeleteDownload: {
-                LibraryEpisodeActions.deleteDownload(
-                  episode,
-                  episodeModels: episodeModels,
-                  context: modelContext
-                )
-                viewModel.setModelContext(modelContext)
-              },
-              onShare: {
-                if let audioURL = episode.episodeInfo.audioURL,
-                   let url = URL(string: audioURL) {
-                  PlatformShareSheet.share(url: url)
-                }
-              }
-            )
-          }
+          )
         }
         .listStyle(.plain)
       }
@@ -482,6 +270,105 @@ struct MacLibraryLatestView: View {
     .onAppear {
       viewModel.setModelContext(modelContext)
       episodeModels = LibraryEpisodeActions.batchFetchEpisodeModels(from: modelContext)
+    }
+    .onDisappear {
+      viewModel.cleanup()
+    }
+  }
+}
+
+// MARK: - Library Episode List Row (with cached status observer)
+
+/// Wraps MacLibraryEpisodeRow + NavigationLink + contextMenu.
+/// Uses direct status reads so the list does not allocate one observer per row.
+private struct MacLibraryEpisodeListRow: View {
+  let episode: LibraryEpisode
+  let podcastModel: PodcastInfoModel?
+  let onToggleStar: () -> Void
+  let onTogglePlayed: () -> Void
+  let onDeleteDownload: () -> Void
+
+  private var audioManager: EnhancedAudioManager { .shared }
+  private var statusChecker: EpisodeStatusChecker {
+    EpisodeStatusChecker(episode: episode)
+  }
+
+  var body: some View {
+    NavigationLink(value: EpisodeDetailRoute(
+      episode: episode.episodeInfo,
+      podcastTitle: episode.podcastTitle,
+      fallbackImageURL: episode.imageURL,
+      podcastLanguage: episode.language
+    )) {
+      MacLibraryEpisodeRow(
+        episode: episode.episodeInfo,
+        podcastTitle: episode.podcastTitle,
+        podcastImageURL: episode.imageURL ?? "",
+        podcastLanguage: episode.language
+      )
+    }
+    .contextMenu {
+      LibraryEpisodeContextMenu(
+        episode: episode,
+        isStarred: episode.isStarred,
+        isCompleted: episode.isCompleted,
+        downloadState: statusChecker.downloadState,
+        podcastModel: podcastModel,
+        onPlay: {
+          let playbackURL = statusChecker.playbackURL
+          guard !playbackURL.isEmpty else { return }
+          let playbackEpisode = PlaybackEpisode(
+            id: statusChecker.episodeKey,
+            title: episode.episodeInfo.title,
+            podcastTitle: episode.podcastTitle,
+            audioURL: playbackURL,
+            imageURL: episode.imageURL ?? "",
+            episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+            pubDate: episode.episodeInfo.pubDate,
+            duration: episode.episodeInfo.duration,
+            guid: episode.episodeInfo.guid
+          )
+          audioManager.play(
+            episode: playbackEpisode,
+            audioURL: playbackURL,
+            startTime: episode.lastPlaybackPosition,
+            imageURL: episode.imageURL ?? "",
+            useDefaultSpeed: true
+          )
+        },
+        onPlayNext: {
+          let playbackURL = statusChecker.playbackURL
+          guard !playbackURL.isEmpty else { return }
+          let playbackEpisode = PlaybackEpisode(
+            id: statusChecker.episodeKey,
+            title: episode.episodeInfo.title,
+            podcastTitle: episode.podcastTitle,
+            audioURL: playbackURL,
+            imageURL: episode.imageURL ?? "",
+            episodeDescription: episode.episodeInfo.podcastEpisodeDescription,
+            pubDate: episode.episodeInfo.pubDate,
+            duration: episode.episodeInfo.duration,
+            guid: episode.episodeInfo.guid
+          )
+          audioManager.playNext(playbackEpisode)
+        },
+        onToggleStar: onToggleStar,
+        onTogglePlayed: onTogglePlayed,
+        onDownload: { LibraryEpisodeActions.downloadEpisode(episode) },
+        onCancelDownload: {
+          DownloadManager.shared.cancelDownload(
+            episodeTitle: episode.episodeInfo.title,
+            podcastTitle: episode.podcastTitle
+          )
+        },
+        onDeleteDownload: onDeleteDownload,
+        onShare: {
+          if let audioURL = episode.episodeInfo.audioURL,
+             let url = URL(string: audioURL) {
+            PlatformShareSheet.share(url: url)
+          }
+        }
+      )
     }
   }
 }

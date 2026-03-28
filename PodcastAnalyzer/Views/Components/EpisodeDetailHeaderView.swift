@@ -7,18 +7,11 @@ struct EpisodeDetailHeaderView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var cachedPodcastModel: PodcastInfoModel?
 
-    /// Destination view for navigating to the podcast's episode list
-    @ViewBuilder
-    private var podcastDestination: some View {
-        if let podcastModel = cachedPodcastModel {
-            EpisodeListView(podcastModel: podcastModel)
-        } else {
-            ContentUnavailableView(
-                "Podcast Not Found",
-                systemImage: "exclamationmark.triangle",
-                description: Text("This podcast is not in your library")
-            )
-        }
+    /// Value-based navigation route built lazily from the cached model.
+    /// Returns nil when the model hasn't been fetched yet, which disables the link.
+    private var podcastBrowseRoute: PodcastBrowseRoute? {
+        guard let model = cachedPodcastModel else { return nil }
+        return PodcastBrowseRoute(podcastModel: model)
     }
 
     var body: some View {
@@ -69,8 +62,9 @@ struct EpisodeDetailHeaderView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    // Tappable podcast title - navigates to show
-                    NavigationLink(destination: podcastDestination) {
+                    // Tappable podcast title - navigates to show using value-based navigation
+                    // to avoid eagerly constructing EpisodeListView (and its ViewModel) on render.
+                    NavigationLink(value: podcastBrowseRoute) {
                         HStack(spacing: 4) {
                             if let translatedTitle = viewModel.translatedPodcastTitle {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -92,6 +86,7 @@ struct EpisodeDetailHeaderView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .disabled(podcastBrowseRoute == nil)
 
                     // Date and status icons row
                     HStack(spacing: 8) {

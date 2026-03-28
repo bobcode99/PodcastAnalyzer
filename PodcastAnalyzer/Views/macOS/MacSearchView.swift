@@ -130,13 +130,15 @@ struct MacSearchView: View {
       } else {
         List {
           ForEach(viewModel.podcasts, id: \.collectionId) { podcast in
-            NavigationLink(destination: EpisodeListView(
-              podcastName: podcast.collectionName,
-              podcastArtwork: podcast.artworkUrl100 ?? "",
-              artistName: podcast.artistName,
-              collectionId: String(podcast.collectionId),
-              applePodcastUrl: nil
-            )) {
+            NavigationLink(
+              value: PodcastBrowseRoute(
+                podcastName: podcast.collectionName,
+                artworkURL: podcast.artworkUrl100 ?? "",
+                artistName: podcast.artistName,
+                collectionId: String(podcast.collectionId),
+                applePodcastURL: nil
+              )
+            ) {
               MacApplePodcastRow(
                 podcast: podcast,
                 isSubscribed: isSubscribed(podcast),
@@ -171,9 +173,7 @@ struct MacSearchView: View {
           if !filteredPodcasts.isEmpty {
             Section {
               ForEach(filteredPodcasts) { podcastModel in
-                NavigationLink {
-                  EpisodeListView(podcastModel: podcastModel)
-                } label: {
+                NavigationLink(value: PodcastBrowseRoute(podcastModel: podcastModel)) {
                   MacLibraryPodcastRow(podcastModel: podcastModel)
                 }
               }
@@ -184,14 +184,12 @@ struct MacSearchView: View {
           if !filteredEpisodes.isEmpty {
             Section {
               ForEach(filteredEpisodes, id: \.uniqueId) { item in
-                NavigationLink {
-                  EpisodeDetailView(
-                    episode: item.episode,
-                    podcastTitle: item.podcastTitle,
-                    fallbackImageURL: item.podcastImageURL,
-                    podcastLanguage: item.podcastLanguage
-                  )
-                } label: {
+                NavigationLink(value: EpisodeDetailRoute(
+                  episode: item.episode,
+                  podcastTitle: item.podcastTitle,
+                  fallbackImageURL: item.podcastImageURL,
+                  podcastLanguage: item.podcastLanguage
+                )) {
                   MacLibraryEpisodeRow(
                     episode: item.episode,
                     podcastTitle: item.podcastTitle,
