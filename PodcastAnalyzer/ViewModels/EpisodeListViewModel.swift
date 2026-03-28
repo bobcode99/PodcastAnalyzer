@@ -58,6 +58,7 @@ final class EpisodeListViewModel {
   private var downloadCompletionObserver: NSObjectProtocol?
   private var parseDescriptionTask: Task<Void, Never>?
   @ObservationIgnored private var isCleaned = false
+  @ObservationIgnored private var progressTimer: Timer?
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
   private static let episodeKeyDelimiter = "\u{1F}"
@@ -151,6 +152,7 @@ final class EpisodeListViewModel {
     recomputeFilteredEpisodes()
     parseDescription()
     observeDownloadStates()
+    manageProgressTimer()
     #if DEBUG
     viewModelLogger.info("📦 EpisodeListViewModel INIT: \(self.instanceId) for \(podcastModel.podcastInfo.title)")
     #endif
@@ -166,11 +168,15 @@ final class EpisodeListViewModel {
     guard !isCleaned else { return }
 
     withObservationTracking {
+      // Subscribe to state transitions only (start/finish/fail/cancel).
+      // Progress updates now go to inFlightProgress (non-observable),
+      // so this callback fires only on actual state changes.
       _ = downloadManager.downloadStates
     } onChange: {
       Task { @MainActor [weak self] in
         guard let self, !self.isCleaned else { return }
         self.rebuildDownloadStatesSnapshot()
+        self.manageProgressTimer()
         self.observeDownloadStates()
       }
     }
@@ -180,28 +186,70 @@ final class EpisodeListViewModel {
     let podcastTitle = podcastModel.podcastInfo.title
     var snapshot: [String: DownloadState] = [:]
     for (key, state) in downloadManager.downloadStates {
-      // Only include keys that belong to this podcast
       guard key.hasPrefix(podcastTitle) else { continue }
       switch state {
-      case .downloading, .finishing:
-        snapshot[key] = state
+      case .downloading:
+        // Use latest progress from non-observable storage
+        let progress = downloadManager.inFlightProgress[key] ?? 0
+        snapshot[key] = .downloading(progress: progress)
+      case .finishing:
+        snapshot[key] = .finishing
       case .downloaded(let path):
         snapshot[key] = .downloaded(localPath: path)
       case .failed, .notDownloaded:
         snapshot[key] = state
       }
     }
-    // Only invalidate the view if something meaningful changed
-    if snapshot.keys.sorted() != downloadStatesSnapshot.keys.sorted()
-      || snapshot.contains(where: { key, newState in
-        guard let oldState = downloadStatesSnapshot[key] else { return true }
-        if case .downloading(let newP) = newState,
-           case .downloading(let oldP) = oldState {
-          return abs(newP - oldP) >= 0.05
-        }
-        return newState != oldState
-      }) {
+    if snapshot != downloadStatesSnapshot {
       downloadStatesSnapshot = snapshot
+    }
+  }
+
+  // MARK: - Progress Timer
+
+  private func manageProgressTimer() {
+    if downloadManager.hasActiveDownloads {
+      guard progressTimer == nil else { return }
+      progressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        Task { @MainActor [weak self] in
+          self?.updateProgressFromInFlight()
+        }
+      }
+    } else {
+      progressTimer?.invalidate()
+      progressTimer = nil
+    }
+  }
+
+  /// Poll inFlightProgress and update the snapshot for actively downloading episodes.
+  private func updateProgressFromInFlight() {
+    guard !isCleaned else {
+      progressTimer?.invalidate()
+      progressTimer = nil
+      return
+    }
+    let podcastTitle = podcastModel.podcastInfo.title
+    var snapshot = downloadStatesSnapshot
+    var changed = false
+    for (key, progress) in downloadManager.inFlightProgress {
+      guard key.hasPrefix(podcastTitle) else { continue }
+      if case .downloading(let oldP) = snapshot[key] {
+        if abs(oldP - progress) >= 0.01 {
+          snapshot[key] = .downloading(progress: progress)
+          changed = true
+        }
+      } else if snapshot[key] == nil {
+        snapshot[key] = .downloading(progress: progress)
+        changed = true
+      }
+    }
+    if changed {
+      downloadStatesSnapshot = snapshot
+    }
+    // Stop timer if no more active downloads
+    if !downloadManager.hasActiveDownloads {
+      progressTimer?.invalidate()
+      progressTimer = nil
     }
   }
 
@@ -446,6 +494,8 @@ final class EpisodeListViewModel {
     viewModelLogger.info("🗑️ EpisodeListViewModel CLEANUP: \(self.instanceId)")
     #endif
     isCleaned = true
+    progressTimer?.invalidate()
+    progressTimer = nil
     if let observer = downloadCompletionObserver {
       NotificationCenter.default.removeObserver(observer)
       downloadCompletionObserver = nil

@@ -277,15 +277,23 @@ final class EpisodeStatusObserver {
     }
   }
 
-  /// Cheap dictionary lookup — no disk I/O.  Returns true when the download
-  /// state for this specific episode differs from the last value we stored.
+  /// Cheap check — returns true when the download state for this specific
+  /// episode differs from the last value we stored.
+  /// Reads inFlightProgress (non-observable) for progress comparison to
+  /// avoid creating additional @Observable subscriptions on progress ticks.
   private func stateChangedForThisEpisode() -> Bool {
+    // Check non-observable progress first for actively downloading episodes
+    if case .downloading = downloadState,
+       let newP = downloadManager.inFlightProgress[episodeKey] {
+      return abs(newP - downloadProgress) >= 0.01
+    }
     let dictState = downloadManager.downloadStates[episodeKey]
     switch (dictState, downloadState) {
     case (nil, .notDownloaded):
-      return false                               // still absent → no change
-    case (.downloading(let newP), .downloading):
-      return abs(newP - downloadProgress) >= 0.01 // ignore sub-1 % noise
+      return false
+    case (.downloading, .downloading):
+      // Progress comparison already handled above via inFlightProgress
+      return false
     case let (new?, old) where new == old:
       return false
     default:

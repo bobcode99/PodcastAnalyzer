@@ -214,6 +214,8 @@ final class LibraryViewModel {
   @ObservationIgnored private var refreshTask: Task<Void, Never>?
   /// Observes episodeDownloadCompleted notifications for optimistic UI updates.
   @ObservationIgnored private var downloadCompletionTask: Task<Void, Never>?
+  /// Polls inFlightProgress at 500ms intervals while downloads are active.
+  @ObservationIgnored private var progressTimer: Timer?
 
   init(modelContext: ModelContext?) {
     self.modelContext = modelContext
@@ -223,6 +225,7 @@ final class LibraryViewModel {
       }
     }
     observeDownloadingEpisodes()
+    manageProgressTimer()
     observeDownloadCompletions()
   }
 
@@ -234,6 +237,8 @@ final class LibraryViewModel {
     refreshTask = nil
     downloadCompletionTask?.cancel()
     downloadCompletionTask = nil
+    progressTimer?.invalidate()
+    progressTimer = nil
   }
 
   private func observeDownloadCompletions() {
@@ -255,22 +260,22 @@ final class LibraryViewModel {
   private func updateDownloadingEpisodes() {
     var downloading: [DownloadingEpisode] = []
     for (episodeKey, state) in downloadManager.downloadStates {
-      let progressValue: Double
       let isActive: Bool
       switch state {
-      case .downloading(let progress):
-        progressValue = progress
-        isActive = true
-      case .finishing:
-        progressValue = 1.0
+      case .downloading, .finishing:
         isActive = true
       default:
-        progressValue = 0
         isActive = false
       }
       if isActive {
         if let (podcastTitle, episodeTitle) = parseDownloadEpisodeKey(episodeKey) {
           let imageURL = podcastTitleMap[podcastTitle]?.podcastInfo.imageURL
+          let progressValue: Double
+          if case .finishing = state {
+            progressValue = 1.0
+          } else {
+            progressValue = downloadManager.inFlightProgress[episodeKey] ?? 0
+          }
           downloading.append(DownloadingEpisode(
             id: episodeKey,
             episodeTitle: episodeTitle,
@@ -283,47 +288,67 @@ final class LibraryViewModel {
       }
     }
     let sorted = downloading.sorted { $0.progress < $1.progress }
-    // Only assign if actually changed to avoid unnecessary @Observable invalidations
-    if sorted.map(\.id) != downloadingEpisodes.map(\.id)
-      || zip(sorted, downloadingEpisodes).contains(where: {
-        $0.state != $1.state || abs($0.progress - $1.progress) > 0.005
-      }) {
+    // Only assign if the set of active downloads changed
+    if sorted.map(\.id) != downloadingEpisodes.map(\.id) {
       downloadingEpisodes = sorted
     }
   }
 
   private func observeDownloadingEpisodes() {
     withObservationTracking {
+      // Only fires on state transitions (start/finish/fail/cancel),
+      // not on progress ticks. Progress is polled by progressTimer.
       _ = downloadManager.downloadStates
     } onChange: {
       Task { @MainActor [weak self] in
         guard let self else { return }
-        // Early-exit: skip the rebuild if the set of actively-downloading keys
-        // hasn't changed AND no in-flight progress has moved by more than 5%.
-        let newStates = self.downloadManager.downloadStates
-        let oldIds = Set(self.downloadingEpisodes.map(\.id))
-        let newActiveIds = Set(newStates.filter { state in
-          switch state.value {
-          case .downloading, .finishing: return true
-          default: return false
-          }
-        }.keys)
-        if oldIds == newActiveIds {
-          let significantProgressChange = self.downloadingEpisodes.contains { ep in
-            if case .downloading(let newP) = newStates[ep.id] {
-              return abs(newP - ep.progress) >= 0.05
-            }
-            return false
-          }
-          if !significantProgressChange {
-            self.observeDownloadingEpisodes()
-            return
-          }
-        }
         self.updateDownloadingEpisodes()
+        self.manageProgressTimer()
         self.observeDownloadingEpisodes()
       }
     }
+  }
+
+  // MARK: - Progress Timer
+
+  private func manageProgressTimer() {
+    if downloadManager.hasActiveDownloads {
+      guard progressTimer == nil else { return }
+      progressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        Task { @MainActor [weak self] in
+          self?.updateDownloadingProgress()
+        }
+      }
+    } else {
+      progressTimer?.invalidate()
+      progressTimer = nil
+    }
+  }
+
+  /// Poll inFlightProgress and update downloadingEpisodes with latest values.
+  private func updateDownloadingProgress() {
+    var changed = false
+    for i in downloadingEpisodes.indices {
+      let ep = downloadingEpisodes[i]
+      if let newProgress = downloadManager.inFlightProgress[ep.id],
+         abs(newProgress - ep.progress) > 0.005 {
+        downloadingEpisodes[i] = DownloadingEpisode(
+          id: ep.id,
+          episodeTitle: ep.episodeTitle,
+          podcastTitle: ep.podcastTitle,
+          imageURL: ep.imageURL,
+          progress: newProgress,
+          state: .downloading(progress: newProgress)
+        )
+        changed = true
+      }
+    }
+    // Stop timer if no more active downloads
+    if !downloadManager.hasActiveDownloads {
+      progressTimer?.invalidate()
+      progressTimer = nil
+    }
+    _ = changed // suppress unused warning
   }
 
   /// Parse episode key for downloading episodes

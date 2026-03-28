@@ -377,6 +377,14 @@ extension View {
           EpisodeListView(podcastModel: podcastModel)
         }
       }
+      .navigationDestination(for: EpisodeDetailRoute.self) { route in
+        EpisodeDetailView(
+          episode: route.episode,
+          podcastTitle: route.podcastTitle,
+          fallbackImageURL: route.fallbackImageURL,
+          podcastLanguage: route.podcastLanguage ?? "en"
+        )
+      }
   }
 }
 
