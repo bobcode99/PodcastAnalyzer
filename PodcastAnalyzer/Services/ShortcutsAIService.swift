@@ -395,10 +395,7 @@ class ShortcutsAIService {
         return CloudAnalysisResult(
             type: analysisType,
             content: result,
-            parsedSummary: nil,
-            parsedEntities: nil,
-            parsedHighlights: nil,
-            parsedFullAnalysis: nil,
+            parsedAnalysis: nil,
             provider: .applePCC,
             model: "Shortcuts",
             timestamp: Date()
@@ -417,67 +414,9 @@ class ShortcutsAIService {
         let languageInstruction = settings.analysisLanguage.getLanguageInstruction()
 
         switch analysisType {
-        case .summary:
+        case .analysis:
             return """
-            Please provide a comprehensive summary of this podcast episode.
-
-            Podcast: \(podcastTitle)
-            Episode: \(episodeTitle)
-
-            \(languageInstruction)
-
-            Transcript:
-            \(transcript)
-
-            Provide:
-            1. A 2-3 paragraph summary
-            2. Main topics discussed (bullet points)
-            3. Key takeaways (bullet points)
-            4. Who would benefit from this episode
-            """
-
-        case .entities:
-            return """
-            Please extract all named entities from this podcast episode.
-
-            Podcast: \(podcastTitle)
-            Episode: \(episodeTitle)
-
-            \(languageInstruction)
-
-            Transcript:
-            \(transcript)
-
-            List:
-            1. People mentioned (names, roles if known)
-            2. Organizations or companies
-            3. Products or services
-            4. Locations
-            5. Books, articles, or resources mentioned
-            """
-
-        case .highlights:
-            return """
-            Please identify the key highlights from this podcast episode.
-
-            Podcast: \(podcastTitle)
-            Episode: \(episodeTitle)
-
-            \(languageInstruction)
-
-            Transcript:
-            \(transcript)
-
-            Provide:
-            1. Top 5 highlights or key moments
-            2. The best quote from the episode
-            3. Any action items mentioned
-            4. Interesting or surprising facts
-            """
-
-        case .fullAnalysis:
-            return """
-            Please provide a complete analysis of this podcast episode.
+            Please provide one complete analysis of this podcast episode.
 
             Podcast: \(podcastTitle)
             Episode: \(episodeTitle)
@@ -490,11 +429,14 @@ class ShortcutsAIService {
             Provide:
             1. Executive Summary (2-3 paragraphs)
             2. Main Topics Discussed
-            3. Key Insights and Learnings
-            4. Notable Quotes
-            5. Actionable Advice
-            6. People and Organizations Mentioned
-            7. Conclusion
+            3. Key Takeaways
+            4. Key Insights and Learnings
+            5. Target Audience and engagement level
+            6. People, organizations, products, locations, and resources mentioned
+            7. Highlights and notable quotes
+            8. Action items or actionable advice
+            9. Controversial or entertaining moments if present
+            10. Conclusion
             """
         }
     }

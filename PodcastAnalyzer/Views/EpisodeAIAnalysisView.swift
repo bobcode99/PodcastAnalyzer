@@ -30,7 +30,7 @@ struct EpisodeAIAnalysisView: View {
   @Binding var isUserScrolling: Bool
   @Binding var scrollToTopTrigger: Bool
 
-  @State private var selectedTab: CloudAnalysisTab = .summary
+  @State private var selectedTab: CloudAnalysisTab = .analysis
   @State private var questionInput: String = ""
   @State private var showSettingsSheet = false
 
@@ -111,10 +111,7 @@ struct EpisodeAIAnalysisView: View {
   private var aiContentView: some View {
     VStack(alignment: .leading, spacing: 16) {
       switch selectedTab {
-      case .summary: summaryTab
-      case .entities: entitiesTab
-      case .highlights: highlightsTab
-      case .fullAnalysis: fullAnalysisTab
+      case .analysis: analysisTab
       case .askQuestion: questionAnswerTab
       }
     }
@@ -197,99 +194,27 @@ struct EpisodeAIAnalysisView: View {
   }
 
 
-  // MARK: - Summary Tab
+  // MARK: - Analysis Tab
 
-  private var summaryTab: some View {
+  private var analysisTab: some View {
     VStack(alignment: .leading, spacing: 16) {
       tabHeader(
-        title: "Episode Summary",
-        description: "Get a comprehensive summary with key topics and takeaways"
+        title: "Episode Analysis",
+        description: "One-shot analysis with summary, entities, highlights, quotes, and takeaways"
       )
 
-      if viewModel.isStreaming && viewModel.currentStreamingType == .summary {
+      if viewModel.isStreaming && viewModel.currentStreamingType == .analysis {
         streamingResponseView
-      } else if let result = viewModel.cloudAnalysisCache.summary {
+      } else if let result = viewModel.cloudAnalysisCache.analysis {
         analysisResultCard(result)
       } else {
         generateButton(
-          title: "Generate Summary",
-          action: { viewModel.generateCloudAnalysis(type: .summary) }
+          title: "Analyze Episode",
+          action: { viewModel.generateCloudAnalysis(type: .analysis) }
         )
       }
 
-      analysisStateView(for: viewModel.cloudAnalysisState, type: .summary)
-    }
-  }
-
-  // MARK: - Entities Tab
-
-  private var entitiesTab: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      tabHeader(
-        title: "Named Entities",
-        description: "Extract people, organizations, products, and locations"
-      )
-
-      if viewModel.isStreaming && viewModel.currentStreamingType == .entities {
-        streamingResponseView
-      } else if let result = viewModel.cloudAnalysisCache.entities {
-        analysisResultCard(result)
-      } else {
-        generateButton(
-          title: "Extract Entities",
-          action: { viewModel.generateCloudAnalysis(type: .entities) }
-        )
-      }
-
-      analysisStateView(for: viewModel.cloudAnalysisState, type: .entities)
-    }
-  }
-
-  // MARK: - Highlights Tab
-
-  private var highlightsTab: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      tabHeader(
-        title: "Episode Highlights",
-        description: "Find key moments, quotes, and action items"
-      )
-
-      if viewModel.isStreaming && viewModel.currentStreamingType == .highlights {
-        streamingResponseView
-      } else if let result = viewModel.cloudAnalysisCache.highlights {
-        analysisResultCard(result)
-      } else {
-        generateButton(
-          title: "Generate Highlights",
-          action: { viewModel.generateCloudAnalysis(type: .highlights) }
-        )
-      }
-
-      analysisStateView(for: viewModel.cloudAnalysisState, type: .highlights)
-    }
-  }
-
-  // MARK: - Full Analysis Tab
-
-  private var fullAnalysisTab: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      tabHeader(
-        title: "Full Analysis",
-        description: "Comprehensive analysis including summary, topics, quotes, and more"
-      )
-
-      if viewModel.isStreaming && viewModel.currentStreamingType == .fullAnalysis {
-        streamingResponseView
-      } else if let result = viewModel.cloudAnalysisCache.fullAnalysis {
-        analysisResultCard(result)
-      } else {
-        generateButton(
-          title: "Generate Full Analysis",
-          action: { viewModel.generateCloudAnalysis(type: .fullAnalysis) }
-        )
-      }
-
-      analysisStateView(for: viewModel.cloudAnalysisState, type: .fullAnalysis)
+      analysisStateView(for: viewModel.cloudAnalysisState, type: .analysis)
     }
   }
 
@@ -429,13 +354,7 @@ struct EpisodeAIAnalysisView: View {
 
       // Structured content based on type
       switch result.type {
-      case .summary:
-        summaryResultView(result)
-      case .entities:
-        entitiesResultView(result)
-      case .highlights:
-        highlightsResultView(result)
-      case .fullAnalysis:
+      case .analysis:
         fullAnalysisResultView(result)
       }
 
@@ -458,17 +377,33 @@ struct EpisodeAIAnalysisView: View {
           .foregroundStyle(.secondary)
       }
 
-      // Regenerate button
-      Button(action: {
-        if let type = selectedTab.analysisType {
-          viewModel.clearCloudAnalysis(type: type)
-          viewModel.generateCloudAnalysis(type: type)
+      // Share & Regenerate buttons
+      HStack {
+        if let parsed = result.parsedAnalysis {
+          Button(action: {
+            let text = parsed.formatAsShareableText(
+              episodeTitle: viewModel.episode.title,
+              podcastTitle: viewModel.podcastTitle
+            )
+            PlatformShareSheet.share(items: [text])
+          }) {
+            Label("Share", systemImage: "square.and.arrow.up")
+              .font(.caption)
+          }
+          .buttonStyle(.bordered)
         }
-      }) {
-        Label("Regenerate", systemImage: "arrow.clockwise")
-          .font(.caption)
+
+        Button(action: {
+          if let type = selectedTab.analysisType {
+            viewModel.clearCloudAnalysis(type: type)
+            viewModel.generateCloudAnalysis(type: type)
+          }
+        }) {
+          Label("Regenerate", systemImage: "arrow.clockwise")
+            .font(.caption)
+        }
+        .buttonStyle(.bordered)
       }
-      .buttonStyle(.bordered)
     }
     .padding()
     .background(Color.platformSystemGray6)
@@ -476,112 +411,6 @@ struct EpisodeAIAnalysisView: View {
   }
 
   // MARK: - Structured Result Views
-
-  @ViewBuilder
-  private func summaryResultView(_ result: CloudAnalysisResult) -> some View {
-    if let parsed = result.parsedSummary {
-      VStack(alignment: .leading, spacing: 16) {
-        // Summary text
-        timestampAwareText(parsed.summary)
-          .font(.body)
-
-        // Main topics as chips
-        if !parsed.mainTopics.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Main Topics", systemImage: "list.bullet")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.blue)
-
-            FlowLayout(spacing: 8) {
-              ForEach(parsed.mainTopics, id: \.self) { topic in
-                Text(topic)
-                  .font(.caption)
-                  .padding(.horizontal, 10)
-                  .padding(.vertical, 6)
-                  .background(Color.blue.opacity(0.1))
-                  .foregroundStyle(.blue)
-                  .clipShape(.rect(cornerRadius: 16))
-              }
-            }
-          }
-        }
-
-        // Key takeaways
-        if !parsed.keyTakeaways.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Key Takeaways", systemImage: "lightbulb")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.orange)
-
-            ForEach(Array(parsed.keyTakeaways.enumerated()), id: \.offset) { _, takeaway in
-              HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "checkmark.circle.fill")
-                  .foregroundStyle(.green)
-                  .font(.caption)
-                Text(takeaway)
-                  .font(.subheadline)
-              }
-            }
-          }
-        }
-
-        // Target audience & engagement
-        HStack(spacing: 16) {
-          if !parsed.targetAudience.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Target Audience")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              Text(parsed.targetAudience)
-                .font(.caption)
-                .fontWeight(.medium)
-            }
-          }
-
-          if !parsed.engagementLevel.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Engagement")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              HStack(spacing: 4) {
-                engagementIcon(parsed.engagementLevel)
-                Text(parsed.engagementLevel.capitalized)
-                  .font(.caption)
-                  .fontWeight(.medium)
-              }
-            }
-          }
-        }
-      }
-    } else {
-      Text(result.content)
-        .font(.body)
-        .textSelection(.enabled)
-    }
-  }
-
-  @ViewBuilder
-  private func entitiesResultView(_ result: CloudAnalysisResult) -> some View {
-    if let parsed = result.parsedEntities {
-      VStack(alignment: .leading, spacing: 16) {
-        entitySection(title: "People", icon: "person.fill", items: parsed.people, color: .blue)
-        entitySection(
-          title: "Organizations", icon: "building.2.fill", items: parsed.organizations,
-          color: .purple)
-        entitySection(
-          title: "Products", icon: "shippingbox.fill", items: parsed.products, color: .orange)
-        entitySection(
-          title: "Locations", icon: "mappin.circle.fill", items: parsed.locations, color: .green)
-        entitySection(title: "Resources", icon: "book.fill", items: parsed.resources, color: .red)
-      }
-    } else {
-      Text(result.content)
-        .font(.body)
-        .textSelection(.enabled)
-    }
-  }
 
   @ViewBuilder
   private func entitySection(title: String, icon: String, items: [String], color: Color)
@@ -609,132 +438,11 @@ struct EpisodeAIAnalysisView: View {
     }
   }
 
-  @ViewBuilder
-  private func highlightsResultView(_ result: CloudAnalysisResult) -> some View {
-    if let parsed = result.parsedHighlights {
-      VStack(alignment: .leading, spacing: 16) {
-        // Best quote card
-        if !parsed.bestQuote.text.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Best Quote", systemImage: "quote.opening")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.purple)
-
-            VStack(alignment: .leading, spacing: 6) {
-              Text("\"\(parsed.bestQuote.text)\"")
-                .font(.body)
-                .italic()
-
-              if let seconds = parsed.bestQuote.timeInSeconds {
-                timestampBadge(parsed.bestQuote.timestamp!, seconds: seconds)
-              }
-            }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-              RoundedRectangle(cornerRadius: 8)
-                .fill(Color.purple.opacity(0.1))
-            )
-            .overlay(
-              Rectangle()
-                .fill(Color.purple)
-                .frame(width: 4),
-              alignment: .leading
-            )
-          }
-        }
-
-        // Highlights
-        if !parsed.highlights.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Highlights", systemImage: "star.fill")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.yellow)
-
-            ForEach(Array(parsed.highlights.enumerated()), id: \.offset) { _, highlight in
-              HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "star.fill")
-                  .foregroundStyle(.yellow)
-                  .font(.caption)
-                Text(highlight)
-                  .font(.subheadline)
-              }
-            }
-          }
-        }
-
-        // Action items
-        if !parsed.actionItems.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Action Items", systemImage: "checklist")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.green)
-
-            ForEach(Array(parsed.actionItems.enumerated()), id: \.offset) { _, item in
-              HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "arrow.right.circle.fill")
-                  .foregroundStyle(.green)
-                  .font(.caption)
-                Text(item)
-                  .font(.subheadline)
-              }
-            }
-          }
-        }
-
-        // Controversial points
-        if let controversial = parsed.controversialPoints, !controversial.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Controversial Points", systemImage: "exclamationmark.triangle.fill")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.orange)
-
-            ForEach(Array(controversial.enumerated()), id: \.offset) { _, point in
-              HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                  .foregroundStyle(.orange)
-                  .font(.caption)
-                Text(point)
-                  .font(.subheadline)
-              }
-            }
-          }
-        }
-
-        // Entertaining moments
-        if let entertaining = parsed.entertainingMoments, !entertaining.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Entertaining Moments", systemImage: "face.smiling.fill")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.pink)
-
-            ForEach(Array(entertaining.enumerated()), id: \.offset) { _, moment in
-              HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "face.smiling.fill")
-                  .foregroundStyle(.pink)
-                  .font(.caption)
-                Text(moment)
-                  .font(.subheadline)
-              }
-            }
-          }
-        }
-      }
-    } else {
-      selectableText(result.content)
-    }
-  }
-
-  // MARK: - Full Analysis Result View
+  // MARK: - Analysis Result View
 
   @ViewBuilder
   private func fullAnalysisResultView(_ result: CloudAnalysisResult) -> some View {
-    if let parsed = result.parsedFullAnalysis {
+    if let parsed = result.parsedAnalysis {
       VStack(alignment: .leading, spacing: 20) {
         // Overview
         VStack(alignment: .leading, spacing: 8) {
@@ -744,6 +452,53 @@ struct EpisodeAIAnalysisView: View {
             .foregroundStyle(.blue)
 
           timestampAwareText(parsed.overview)
+        }
+
+        if !parsed.keyTakeaways.isEmpty {
+          VStack(alignment: .leading, spacing: 8) {
+            Label("Key Takeaways", systemImage: "lightbulb.fill")
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .foregroundStyle(.orange)
+
+            ForEach(Array(parsed.keyTakeaways.enumerated()), id: \.offset) { _, takeaway in
+              HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                  .foregroundStyle(.green)
+                  .font(.caption)
+                selectableText(takeaway)
+              }
+            }
+          }
+        }
+
+        if !parsed.targetAudience.isEmpty || !parsed.engagementLevel.isEmpty {
+          HStack(spacing: 16) {
+            if !parsed.targetAudience.isEmpty {
+              VStack(alignment: .leading, spacing: 4) {
+                Text("Target Audience")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                Text(parsed.targetAudience)
+                  .font(.caption)
+                  .fontWeight(.medium)
+              }
+            }
+
+            if !parsed.engagementLevel.isEmpty {
+              VStack(alignment: .leading, spacing: 4) {
+                Text("Engagement")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                  engagementIcon(parsed.engagementLevel)
+                  Text(parsed.engagementLevel.capitalized)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                }
+              }
+            }
+          }
         }
 
         // Main Topics
@@ -779,6 +534,32 @@ struct EpisodeAIAnalysisView: View {
               .padding()
               .background(Color.purple.opacity(0.05))
               .clipShape(.rect(cornerRadius: 8))
+            }
+          }
+        }
+
+        VStack(alignment: .leading, spacing: 16) {
+          entitySection(title: "People", icon: "person.fill", items: parsed.people, color: .blue)
+          entitySection(title: "Organizations", icon: "building.2.fill", items: parsed.organizations, color: .purple)
+          entitySection(title: "Products", icon: "shippingbox.fill", items: parsed.products, color: .orange)
+          entitySection(title: "Locations", icon: "mappin.circle.fill", items: parsed.locations, color: .green)
+          entitySection(title: "Resources", icon: "book.fill", items: parsed.resources, color: .red)
+        }
+
+        if !parsed.highlights.isEmpty {
+          VStack(alignment: .leading, spacing: 8) {
+            Label("Highlights", systemImage: "star.fill")
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .foregroundStyle(.yellow)
+
+            ForEach(Array(parsed.highlights.enumerated()), id: \.offset) { _, highlight in
+              HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "star.fill")
+                  .foregroundStyle(.yellow)
+                  .font(.caption)
+                selectableText(highlight)
+              }
             }
           }
         }
@@ -836,20 +617,55 @@ struct EpisodeAIAnalysisView: View {
           }
         }
 
-        // Actionable Advice
-        if let advice = parsed.actionableAdvice, !advice.isEmpty {
+        if !parsed.actionItems.isEmpty {
           VStack(alignment: .leading, spacing: 8) {
-            Label("Actionable Advice", systemImage: "checkmark.circle.fill")
+            Label("Action Items", systemImage: "checkmark.circle.fill")
               .font(.subheadline)
               .fontWeight(.semibold)
               .foregroundStyle(.teal)
 
-            ForEach(Array(advice.enumerated()), id: \.offset) { _, item in
+            ForEach(Array(parsed.actionItems.enumerated()), id: \.offset) { _, item in
               HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "arrow.right.circle.fill")
                   .foregroundStyle(.teal)
                   .font(.caption)
                 selectableText(item)
+              }
+            }
+          }
+        }
+
+        if let controversial = parsed.controversialPoints, !controversial.isEmpty {
+          VStack(alignment: .leading, spacing: 8) {
+            Label("Controversial Points", systemImage: "exclamationmark.triangle.fill")
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .foregroundStyle(.orange)
+
+            ForEach(Array(controversial.enumerated()), id: \.offset) { _, point in
+              HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                  .foregroundStyle(.orange)
+                  .font(.caption)
+                selectableText(point)
+              }
+            }
+          }
+        }
+
+        if let entertaining = parsed.entertainingMoments, !entertaining.isEmpty {
+          VStack(alignment: .leading, spacing: 8) {
+            Label("Entertaining Moments", systemImage: "face.smiling.fill")
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .foregroundStyle(.pink)
+
+            ForEach(Array(entertaining.enumerated()), id: \.offset) { _, moment in
+              HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "face.smiling.fill")
+                  .foregroundStyle(.pink)
+                  .font(.caption)
+                selectableText(moment)
               }
             }
           }

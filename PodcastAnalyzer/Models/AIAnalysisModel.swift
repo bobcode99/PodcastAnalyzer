@@ -17,42 +17,11 @@ final class EpisodeAIAnalysis {
     var episodeTitle: String = ""
     var podcastTitle: String = ""
 
-    // Summary analysis
-    var summaryText: String?
-    var summaryMainTopics: [String]?
-    var summaryKeyTakeaways: [String]?
-    var summaryTargetAudience: String?
-    var summaryEngagementLevel: String?
-    var summaryProvider: String?
-    var summaryModel: String?
-    var summaryGeneratedAt: Date?
-
-    // Entities analysis
-    var entitiesPeople: [String]?
-    var entitiesOrganizations: [String]?
-    var entitiesProducts: [String]?
-    var entitiesLocations: [String]?
-    var entitiesResources: [String]?
-    var entitiesProvider: String?
-    var entitiesModel: String?
-    var entitiesGeneratedAt: Date?
-
-    // Highlights analysis
-    var highlightsList: [String]?
-    var highlightsBestQuote: String?
-    var highlightsBestQuoteTimestamp: String?
-    var highlightsActionItems: [String]?
-    var highlightsControversialPoints: [String]?
-    var highlightsEntertainingMoments: [String]?
-    var highlightsProvider: String?
-    var highlightsModel: String?
-    var highlightsGeneratedAt: Date?
-
-    // Full analysis (markdown/text)
-    var fullAnalysisText: String?
-    var fullAnalysisProvider: String?
-    var fullAnalysisModel: String?
-    var fullAnalysisGeneratedAt: Date?
+    // Single JSON payload storing the unified ParsedEpisodeAnalysisResponse
+    var analysisJSON: String?
+    var provider: String?
+    var model: String?
+    var generatedAt: Date?
 
     // Q&A history (stored as JSON)
     var qaHistoryJSON: String?
@@ -75,10 +44,26 @@ final class EpisodeAIAnalysis {
 
     // MARK: - Convenience Methods
 
-    var hasSummary: Bool { summaryText != nil }
-    var hasEntities: Bool { entitiesPeople != nil || entitiesOrganizations != nil }
-    var hasHighlights: Bool { highlightsList != nil }
-    var hasFullAnalysis: Bool { fullAnalysisText != nil }
+    var hasAnalysis: Bool { analysisJSON != nil }
+
+    /// Decoded unified analysis — encodes/decodes lazily on access
+    var parsedAnalysis: ParsedEpisodeAnalysisResponse? {
+        get {
+            guard let json = analysisJSON,
+                  let data = json.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode(ParsedEpisodeAnalysisResponse.self, from: data)
+        }
+        set {
+            guard let value = newValue else {
+                analysisJSON = nil
+                return
+            }
+            if let data = try? JSONEncoder().encode(value),
+               let json = String(data: data, encoding: .utf8) {
+                analysisJSON = json
+            }
+        }
+    }
 
     // Q&A history as CloudQAResult array
     var qaHistory: [CloudQAResult] {
@@ -220,104 +205,103 @@ nonisolated struct TimestampedQuote: Codable, Sendable {
 
 // MARK: - Parsed Response Types (for JSON parsing)
 
-/// Parsed summary response from cloud AI
-struct ParsedSummaryResponse: Codable {
-    let summary: String
-    let mainTopics: [String]
-    let keyTakeaways: [String]
-    let targetAudience: String
-    let engagementLevel: String
-}
-
-/// Parsed entities response from cloud AI
-struct ParsedEntitiesResponse: Codable {
-    let people: [String]
-    let organizations: [String]
-    let products: [String]
-    let locations: [String]
-    let resources: [String]
-}
-
-/// Parsed highlights response from cloud AI
-struct ParsedHighlightsResponse: Codable {
-    let highlights: [String]
-    let bestQuote: TimestampedQuote
-    let actionItems: [String]
-    let controversialPoints: [String]?
-    let entertainingMoments: [String]?
-
-    /// Backward-compatible memberwise init (SwiftData restore uses plain String)
-    init(
-        highlights: [String],
-        bestQuote: String,
-        bestQuoteTimestamp: String? = nil,
-        actionItems: [String],
-        controversialPoints: [String]?,
-        entertainingMoments: [String]?
-    ) {
-        self.highlights = highlights
-        self.bestQuote = TimestampedQuote(text: bestQuote, timestamp: bestQuoteTimestamp)
-        self.actionItems = actionItems
-        self.controversialPoints = controversialPoints
-        self.entertainingMoments = entertainingMoments
-    }
-
-    /// Decode from JSON — handles both object and plain string for bestQuote
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        highlights = try container.decode([String].self, forKey: .highlights)
-        actionItems = try container.decode([String].self, forKey: .actionItems)
-        controversialPoints = try container.decodeIfPresent([String].self, forKey: .controversialPoints)
-        entertainingMoments = try container.decodeIfPresent([String].self, forKey: .entertainingMoments)
-
-        // Try object first, fall back to plain string
-        if let quote = try? container.decode(TimestampedQuote.self, forKey: .bestQuote) {
-            bestQuote = quote
-        } else if let text = try? container.decode(String.self, forKey: .bestQuote) {
-            bestQuote = TimestampedQuote(text: text, timestamp: nil)
-        } else {
-            bestQuote = TimestampedQuote(text: "", timestamp: nil)
-        }
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case highlights, bestQuote, actionItems, controversialPoints, entertainingMoments
-    }
-}
-
 /// Parsed Q&A response from cloud AI
-struct ParsedQAResponse: Codable {
+nonisolated struct ParsedQAResponse: Codable {
     let answer: String
     let confidence: String
     let relatedTopics: [String]?
     let sources: [String]?
 }
 
-/// Parsed full analysis response from cloud AI
-struct ParsedFullAnalysisResponse: Codable {
+/// Unified transcript analysis response from cloud AI.
+nonisolated struct ParsedEpisodeAnalysisResponse: Codable {
     let overview: String
     let mainTopics: [TopicDetail]
+    let keyTakeaways: [String]
     let keyInsights: [String]
+    let targetAudience: String
+    let engagementLevel: String
+    let people: [String]
+    let organizations: [String]
+    let products: [String]
+    let locations: [String]
+    let resources: [String]
+    let highlights: [String]
     let notableQuotes: [TimestampedQuote]
-    let actionableAdvice: [String]?
+    let actionItems: [String]
+    let controversialPoints: [String]?
+    let entertainingMoments: [String]?
     let conclusion: String
 
-    struct TopicDetail: Codable {
+    nonisolated struct TopicDetail: Codable {
         let topic: String
         let summary: String
         let keyPoints: [String]
     }
 
-    /// Decode from JSON — handles both [TimestampedQuote] and [String] for notableQuotes
+    init(
+        overview: String,
+        mainTopics: [TopicDetail],
+        keyTakeaways: [String],
+        keyInsights: [String],
+        targetAudience: String,
+        engagementLevel: String,
+        people: [String],
+        organizations: [String],
+        products: [String],
+        locations: [String],
+        resources: [String],
+        highlights: [String],
+        notableQuotes: [TimestampedQuote],
+        actionItems: [String],
+        controversialPoints: [String]?,
+        entertainingMoments: [String]?,
+        conclusion: String
+    ) {
+        self.overview = overview
+        self.mainTopics = mainTopics
+        self.keyTakeaways = keyTakeaways
+        self.keyInsights = keyInsights
+        self.targetAudience = targetAudience
+        self.engagementLevel = engagementLevel
+        self.people = people
+        self.organizations = organizations
+        self.products = products
+        self.locations = locations
+        self.resources = resources
+        self.highlights = highlights
+        self.notableQuotes = notableQuotes
+        self.actionItems = actionItems
+        self.controversialPoints = controversialPoints
+        self.entertainingMoments = entertainingMoments
+        self.conclusion = conclusion
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         overview = try container.decode(String.self, forKey: .overview)
         mainTopics = try container.decode([TopicDetail].self, forKey: .mainTopics)
-        keyInsights = try container.decode([String].self, forKey: .keyInsights)
-        actionableAdvice = try container.decodeIfPresent([String].self, forKey: .actionableAdvice)
+        keyTakeaways = try container.decodeIfPresent([String].self, forKey: .keyTakeaways) ?? []
+        keyInsights = try container.decodeIfPresent([String].self, forKey: .keyInsights) ?? []
+        targetAudience = try container.decodeIfPresent(String.self, forKey: .targetAudience) ?? ""
+        engagementLevel = try container.decodeIfPresent(String.self, forKey: .engagementLevel) ?? ""
+        people = try container.decodeIfPresent([String].self, forKey: .people) ?? []
+        organizations = try container.decodeIfPresent([String].self, forKey: .organizations) ?? []
+        products = try container.decodeIfPresent([String].self, forKey: .products) ?? []
+        locations = try container.decodeIfPresent([String].self, forKey: .locations) ?? []
+        resources = try container.decodeIfPresent([String].self, forKey: .resources) ?? []
+        highlights = try container.decodeIfPresent([String].self, forKey: .highlights) ?? []
+        if let items = try container.decodeIfPresent([String].self, forKey: .actionItems) {
+            actionItems = items
+        } else if let advice = try container.decodeIfPresent([String].self, forKey: .actionableAdvice) {
+            actionItems = advice
+        } else {
+            actionItems = []
+        }
+        controversialPoints = try container.decodeIfPresent([String].self, forKey: .controversialPoints)
+        entertainingMoments = try container.decodeIfPresent([String].self, forKey: .entertainingMoments)
         conclusion = try container.decode(String.self, forKey: .conclusion)
 
-        // Try [TimestampedQuote] first, fall back to [String]
         if let quotes = try? container.decode([TimestampedQuote].self, forKey: .notableQuotes) {
             notableQuotes = quotes
         } else if let strings = try? container.decode([String].self, forKey: .notableQuotes) {
@@ -327,7 +311,139 @@ struct ParsedFullAnalysisResponse: Codable {
         }
     }
 
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(overview, forKey: .overview)
+        try container.encode(mainTopics, forKey: .mainTopics)
+        try container.encode(keyTakeaways, forKey: .keyTakeaways)
+        try container.encode(keyInsights, forKey: .keyInsights)
+        try container.encode(targetAudience, forKey: .targetAudience)
+        try container.encode(engagementLevel, forKey: .engagementLevel)
+        try container.encode(people, forKey: .people)
+        try container.encode(organizations, forKey: .organizations)
+        try container.encode(products, forKey: .products)
+        try container.encode(locations, forKey: .locations)
+        try container.encode(resources, forKey: .resources)
+        try container.encode(highlights, forKey: .highlights)
+        try container.encode(notableQuotes, forKey: .notableQuotes)
+        try container.encode(actionItems, forKey: .actionItems)
+        try container.encodeIfPresent(controversialPoints, forKey: .controversialPoints)
+        try container.encodeIfPresent(entertainingMoments, forKey: .entertainingMoments)
+        try container.encode(conclusion, forKey: .conclusion)
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case overview, mainTopics, keyInsights, notableQuotes, actionableAdvice, conclusion
+        case overview
+        case mainTopics
+        case keyTakeaways
+        case keyInsights
+        case targetAudience
+        case engagementLevel
+        case people
+        case organizations
+        case products
+        case locations
+        case resources
+        case highlights
+        case notableQuotes
+        case actionItems
+        case actionableAdvice  // decode-only alias for actionItems
+        case controversialPoints
+        case entertainingMoments
+        case conclusion
+    }
+
+    // MARK: - Shareable Text
+
+    func formatAsShareableText(episodeTitle: String, podcastTitle: String) -> String {
+        var lines: [String] = []
+        lines.append("\(episodeTitle)")
+        lines.append("\(podcastTitle)")
+        lines.append(String(repeating: "─", count: 30))
+
+        lines.append("")
+        lines.append("Overview")
+        lines.append(overview)
+
+        if !keyTakeaways.isEmpty {
+            lines.append("")
+            lines.append("Key Takeaways")
+            for item in keyTakeaways { lines.append("  - \(item)") }
+        }
+
+        if !mainTopics.isEmpty {
+            lines.append("")
+            lines.append("Main Topics")
+            for topic in mainTopics {
+                lines.append("  \(topic.topic)")
+                lines.append("  \(topic.summary)")
+                for point in topic.keyPoints { lines.append("    - \(point)") }
+            }
+        }
+
+        if !keyInsights.isEmpty {
+            lines.append("")
+            lines.append("Key Insights")
+            for item in keyInsights { lines.append("  - \(item)") }
+        }
+
+        func entityBlock(_ title: String, _ items: [String]) {
+            guard !items.isEmpty else { return }
+            lines.append("")
+            lines.append(title)
+            lines.append("  \(items.joined(separator: ", "))")
+        }
+        entityBlock("People", people)
+        entityBlock("Organizations", organizations)
+        entityBlock("Products", products)
+        entityBlock("Locations", locations)
+        entityBlock("Resources", resources)
+
+        if !highlights.isEmpty {
+            lines.append("")
+            lines.append("Highlights")
+            for item in highlights { lines.append("  - \(item)") }
+        }
+
+        if !notableQuotes.isEmpty {
+            lines.append("")
+            lines.append("Notable Quotes")
+            for quote in notableQuotes {
+                let ts = quote.timestamp.map { " [\($0)]" } ?? ""
+                lines.append("  \"\(quote.text)\"\(ts)")
+            }
+        }
+
+        if !actionItems.isEmpty {
+            lines.append("")
+            lines.append("Action Items")
+            for item in actionItems { lines.append("  - \(item)") }
+        }
+
+        if let controversial = controversialPoints, !controversial.isEmpty {
+            lines.append("")
+            lines.append("Controversial Points")
+            for item in controversial { lines.append("  - \(item)") }
+        }
+
+        if let entertaining = entertainingMoments, !entertaining.isEmpty {
+            lines.append("")
+            lines.append("Entertaining Moments")
+            for item in entertaining { lines.append("  - \(item)") }
+        }
+
+        lines.append("")
+        lines.append("Conclusion")
+        lines.append(conclusion)
+
+        if !targetAudience.isEmpty {
+            lines.append("")
+            lines.append("Target Audience: \(targetAudience)")
+        }
+        if !engagementLevel.isEmpty {
+            lines.append("Engagement: \(engagementLevel.capitalized)")
+        }
+
+        return lines.joined(separator: "\n")
     }
 }

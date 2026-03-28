@@ -1385,7 +1385,7 @@ final class EpisodeDetailViewModel {
   }
 
   var hasAIAnalysis: Bool {
-    cloudAnalysisCache.fullAnalysis != nil || !cloudAnalysisCache.questionAnswers.isEmpty
+    cloudAnalysisCache.analysis != nil || !cloudAnalysisCache.questionAnswers.isEmpty
   }
 
   /// Parses SRT content and returns clean text formatted in paragraphs
@@ -2009,16 +2009,7 @@ final class EpisodeDetailViewModel {
         streamingText = ""
 
         // Store in cache
-        switch type {
-        case .summary:
-          cloudAnalysisCache.summary = result
-        case .entities:
-          cloudAnalysisCache.entities = result
-        case .highlights:
-          cloudAnalysisCache.highlights = result
-        case .fullAnalysis:
-          cloudAnalysisCache.fullAnalysis = result
-        }
+        cloudAnalysisCache.analysis = result
         cloudAnalysisState = .completed
 
         // Save to SwiftData
@@ -2089,14 +2080,8 @@ final class EpisodeDetailViewModel {
   /// Clear a specific cloud analysis result
   func clearCloudAnalysis(type: CloudAnalysisType) {
     switch type {
-    case .summary:
-      cloudAnalysisCache.summary = nil
-    case .entities:
-      cloudAnalysisCache.entities = nil
-    case .highlights:
-      cloudAnalysisCache.highlights = nil
-    case .fullAnalysis:
-      cloudAnalysisCache.fullAnalysis = nil
+    case .analysis:
+      cloudAnalysisCache.analysis = nil
     }
     cloudAnalysisState = .idle
   }
@@ -2162,89 +2147,14 @@ final class EpisodeDetailViewModel {
 
   /// Restore cloud analysis cache from SwiftData model
   private func restoreCloudAnalysisFromModel(_ model: EpisodeAIAnalysis) {
-    // Restore summary
-    if let summaryText = model.summaryText {
-      let parsed = ParsedSummaryResponse(
-        summary: summaryText,
-        mainTopics: model.summaryMainTopics ?? [],
-        keyTakeaways: model.summaryKeyTakeaways ?? [],
-        targetAudience: model.summaryTargetAudience ?? "",
-        engagementLevel: model.summaryEngagementLevel ?? ""
-      )
-      cloudAnalysisCache.summary = CloudAnalysisResult(
-        type: .summary,
-        content: summaryText,
-        parsedSummary: parsed,
-        parsedEntities: nil,
-        parsedHighlights: nil,
-        parsedFullAnalysis: nil,
-        provider: CloudAIProvider(rawValue: model.summaryProvider ?? "") ?? .openai,
-        model: model.summaryModel ?? "",
-        timestamp: model.summaryGeneratedAt ?? model.createdAt
-      )
-    }
-
-    // Restore entities
-    if model.hasEntities {
-      let parsed = ParsedEntitiesResponse(
-        people: model.entitiesPeople ?? [],
-        organizations: model.entitiesOrganizations ?? [],
-        products: model.entitiesProducts ?? [],
-        locations: model.entitiesLocations ?? [],
-        resources: model.entitiesResources ?? []
-      )
-      let content = formatEntitiesAsText(parsed)
-      cloudAnalysisCache.entities = CloudAnalysisResult(
-        type: .entities,
-        content: content,
-        parsedSummary: nil,
-        parsedEntities: parsed,
-        parsedHighlights: nil,
-        parsedFullAnalysis: nil,
-        provider: CloudAIProvider(rawValue: model.entitiesProvider ?? "") ?? .openai,
-        model: model.entitiesModel ?? "",
-        timestamp: model.entitiesGeneratedAt ?? model.createdAt
-      )
-    }
-
-    // Restore highlights
-    if model.hasHighlights {
-      let parsed = ParsedHighlightsResponse(
-        highlights: model.highlightsList ?? [],
-        bestQuote: model.highlightsBestQuote ?? "",
-        bestQuoteTimestamp: model.highlightsBestQuoteTimestamp,
-        actionItems: model.highlightsActionItems ?? [],
-        controversialPoints: model.highlightsControversialPoints,
-        entertainingMoments: model.highlightsEntertainingMoments
-      )
-      let content = formatHighlightsAsText(parsed)
-      cloudAnalysisCache.highlights = CloudAnalysisResult(
-        type: .highlights,
-        content: content,
-        parsedSummary: nil,
-        parsedEntities: nil,
-        parsedHighlights: parsed,
-        parsedFullAnalysis: nil,
-        provider: CloudAIProvider(rawValue: model.highlightsProvider ?? "") ?? .openai,
-        model: model.highlightsModel ?? "",
-        timestamp: model.highlightsGeneratedAt ?? model.createdAt
-      )
-    }
-
-    // Restore full analysis
-    if let fullText = model.fullAnalysisText {
-      // Try to parse as JSON for structured display
-      let parsedFull = parseFullAnalysisJSON(fullText)
-      cloudAnalysisCache.fullAnalysis = CloudAnalysisResult(
-        type: .fullAnalysis,
-        content: fullText,
-        parsedSummary: nil,
-        parsedEntities: nil,
-        parsedHighlights: nil,
-        parsedFullAnalysis: parsedFull,
-        provider: CloudAIProvider(rawValue: model.fullAnalysisProvider ?? "") ?? .openai,
-        model: model.fullAnalysisModel ?? "",
-        timestamp: model.fullAnalysisGeneratedAt ?? model.createdAt
+    if let parsed = model.parsedAnalysis {
+      cloudAnalysisCache.analysis = CloudAnalysisResult(
+        type: .analysis,
+        content: model.analysisJSON ?? formatAnalysisAsText(parsed),
+        parsedAnalysis: parsed,
+        provider: CloudAIProvider(rawValue: model.provider ?? "") ?? .openai,
+        model: model.model ?? "",
+        timestamp: model.generatedAt ?? model.updatedAt
       )
     }
 
@@ -2336,50 +2246,11 @@ final class EpisodeDetailViewModel {
 
       // Update based on analysis type
       switch type {
-      case .summary:
-        if let parsed = result.parsedSummary {
-          model.summaryText = parsed.summary
-          model.summaryMainTopics = parsed.mainTopics
-          model.summaryKeyTakeaways = parsed.keyTakeaways
-          model.summaryTargetAudience = parsed.targetAudience
-          model.summaryEngagementLevel = parsed.engagementLevel
-        } else {
-          model.summaryText = result.content
-        }
-        model.summaryProvider = result.provider.rawValue
-        model.summaryModel = result.model
-        model.summaryGeneratedAt = result.timestamp
-
-      case .entities:
-        if let parsed = result.parsedEntities {
-          model.entitiesPeople = parsed.people
-          model.entitiesOrganizations = parsed.organizations
-          model.entitiesProducts = parsed.products
-          model.entitiesLocations = parsed.locations
-          model.entitiesResources = parsed.resources
-        }
-        model.entitiesProvider = result.provider.rawValue
-        model.entitiesModel = result.model
-        model.entitiesGeneratedAt = result.timestamp
-
-      case .highlights:
-        if let parsed = result.parsedHighlights {
-          model.highlightsList = parsed.highlights
-          model.highlightsBestQuote = parsed.bestQuote.text
-          model.highlightsBestQuoteTimestamp = parsed.bestQuote.timestamp
-          model.highlightsActionItems = parsed.actionItems
-          model.highlightsControversialPoints = parsed.controversialPoints
-          model.highlightsEntertainingMoments = parsed.entertainingMoments
-        }
-        model.highlightsProvider = result.provider.rawValue
-        model.highlightsModel = result.model
-        model.highlightsGeneratedAt = result.timestamp
-
-      case .fullAnalysis:
-        model.fullAnalysisText = result.content
-        model.fullAnalysisProvider = result.provider.rawValue
-        model.fullAnalysisModel = result.model
-        model.fullAnalysisGeneratedAt = result.timestamp
+      case .analysis:
+        model.parsedAnalysis = result.parsedAnalysis
+        model.provider = result.provider.rawValue
+        model.model = result.model
+        model.generatedAt = result.timestamp
       }
 
       model.updatedAt = Date()
@@ -2429,54 +2300,27 @@ final class EpisodeDetailViewModel {
 
   // MARK: - Format Helpers
 
-  private func formatEntitiesAsText(_ entities: ParsedEntitiesResponse) -> String {
+  private func formatAnalysisAsText(_ analysis: ParsedEpisodeAnalysisResponse) -> String {
     var parts: [String] = []
-    if !entities.people.isEmpty { parts.append("People: \(entities.people.joined(separator: ", "))") }
-    if !entities.organizations.isEmpty { parts.append("Organizations: \(entities.organizations.joined(separator: ", "))") }
-    if !entities.products.isEmpty { parts.append("Products: \(entities.products.joined(separator: ", "))") }
-    if !entities.locations.isEmpty { parts.append("Locations: \(entities.locations.joined(separator: ", "))") }
-    if !entities.resources.isEmpty { parts.append("Resources: \(entities.resources.joined(separator: ", "))") }
-    return parts.joined(separator: "\n\n")
-  }
-
-  private func formatHighlightsAsText(_ highlights: ParsedHighlightsResponse) -> String {
-    var parts: [String] = []
-    if !highlights.highlights.isEmpty { parts.append("Highlights:\n• " + highlights.highlights.joined(separator: "\n• ")) }
-    if !highlights.bestQuote.text.isEmpty { parts.append("Best Quote: \"\(highlights.bestQuote.text)\"") }
-    if !highlights.actionItems.isEmpty { parts.append("Action Items:\n• " + highlights.actionItems.joined(separator: "\n• ")) }
-    if let controversial = highlights.controversialPoints, !controversial.isEmpty {
+    if !analysis.overview.isEmpty { parts.append(analysis.overview) }
+    if !analysis.keyTakeaways.isEmpty { parts.append("Key Takeaways:\n• " + analysis.keyTakeaways.joined(separator: "\n• ")) }
+    if !analysis.people.isEmpty { parts.append("People: \(analysis.people.joined(separator: ", "))") }
+    if !analysis.organizations.isEmpty { parts.append("Organizations: \(analysis.organizations.joined(separator: ", "))") }
+    if !analysis.products.isEmpty { parts.append("Products: \(analysis.products.joined(separator: ", "))") }
+    if !analysis.locations.isEmpty { parts.append("Locations: \(analysis.locations.joined(separator: ", "))") }
+    if !analysis.resources.isEmpty { parts.append("Resources: \(analysis.resources.joined(separator: ", "))") }
+    if !analysis.highlights.isEmpty { parts.append("Highlights:\n• " + analysis.highlights.joined(separator: "\n• ")) }
+    if !analysis.actionItems.isEmpty { parts.append("Action Items:\n• " + analysis.actionItems.joined(separator: "\n• ")) }
+    if let controversial = analysis.controversialPoints, !controversial.isEmpty {
       parts.append("Controversial Points:\n• " + controversial.joined(separator: "\n• "))
     }
-    if let entertaining = highlights.entertainingMoments, !entertaining.isEmpty {
+    if let entertaining = analysis.entertainingMoments, !entertaining.isEmpty {
       parts.append("Entertaining Moments:\n• " + entertaining.joined(separator: "\n• "))
     }
+    if !analysis.conclusion.isEmpty { parts.append("Conclusion: \(analysis.conclusion)") }
     return parts.joined(separator: "\n\n")
   }
 
-  /// Parse full analysis JSON from stored content
-  private func parseFullAnalysisJSON(_ content: String) -> ParsedFullAnalysisResponse? {
-    var jsonString = content.trimmingCharacters(in: .whitespacesAndNewlines)
-
-    // Remove markdown code block if present
-    if jsonString.hasPrefix("```json") {
-      jsonString = String(jsonString.dropFirst(7))
-    } else if jsonString.hasPrefix("```") {
-      jsonString = String(jsonString.dropFirst(3))
-    }
-    if jsonString.hasSuffix("```") {
-      jsonString = String(jsonString.dropLast(3))
-    }
-    jsonString = jsonString.trimmingCharacters(in: .whitespacesAndNewlines)
-
-    guard let data = jsonString.data(using: .utf8) else { return nil }
-
-    do {
-      return try JSONDecoder().decode(ParsedFullAnalysisResponse.self, from: data)
-    } catch {
-      logger.debug("Failed to parse full analysis JSON: \(error.localizedDescription)")
-      return nil
-    }
-  }
 
   // MARK: - Cleanup
 

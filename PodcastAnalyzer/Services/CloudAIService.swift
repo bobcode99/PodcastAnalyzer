@@ -123,41 +123,17 @@ final class CloudAIService {
             progressCallback?("Parsing response...", 0.8)
 
             // Try to parse JSON response
-            var parsedSummary: ParsedSummaryResponse?
-            var parsedEntities: ParsedEntitiesResponse?
-            var parsedHighlights: ParsedHighlightsResponse?
-            var parsedFullAnalysis: ParsedFullAnalysisResponse?
+            var parsedAnalysis: ParsedEpisodeAnalysisResponse?
             var jsonParseWarning: String?
 
             // Clean the response - remove markdown code blocks if present
             let cleanedResult = cleanJSONResponse(rawResult)
 
             if let data = cleanedResult.data(using: .utf8) {
-                switch analysisType {
-                case .summary:
-                    if let parsed = try? JSONDecoder().decode(ParsedSummaryResponse.self, from: data) {
-                        parsedSummary = parsed
-                    } else {
-                        jsonParseWarning = "JSON parsing failed - showing raw response"
-                    }
-                case .entities:
-                    if let parsed = try? JSONDecoder().decode(ParsedEntitiesResponse.self, from: data) {
-                        parsedEntities = parsed
-                    } else {
-                        jsonParseWarning = "JSON parsing failed - showing raw response"
-                    }
-                case .highlights:
-                    if let parsed = try? JSONDecoder().decode(ParsedHighlightsResponse.self, from: data) {
-                        parsedHighlights = parsed
-                    } else {
-                        jsonParseWarning = "JSON parsing failed - showing raw response"
-                    }
-                case .fullAnalysis:
-                    if let parsed = try? JSONDecoder().decode(ParsedFullAnalysisResponse.self, from: data) {
-                        parsedFullAnalysis = parsed
-                    } else {
-                        jsonParseWarning = "JSON parsing failed - showing raw response"
-                    }
+                if let parsed = try? JSONDecoder().decode(ParsedEpisodeAnalysisResponse.self, from: data) {
+                    parsedAnalysis = parsed
+                } else {
+                    jsonParseWarning = "JSON parsing failed - showing raw response"
                 }
             }
 
@@ -174,10 +150,7 @@ final class CloudAIService {
             return CloudAnalysisResult(
                 type: analysisType,
                 content: displayContent,
-                parsedSummary: parsedSummary,
-                parsedEntities: parsedEntities,
-                parsedHighlights: parsedHighlights,
-                parsedFullAnalysis: parsedFullAnalysis,
+                parsedAnalysis: parsedAnalysis,
                 provider: .applePCC,
                 model: "Shortcuts",
                 timestamp: Date(),
@@ -318,116 +291,51 @@ final class CloudAIService {
         let languageInstruction = settings.analysisLanguage.getLanguageInstruction(podcastLanguage: podcastLanguage)
         let languageLine = languageInstruction.isEmpty ? "" : "\n\nLanguage: \(languageInstruction)"
 
-        switch analysisType {
-        case .summary:
-            return """
-            You are an expert podcast analyst. Please analyze this podcast episode.
+        let useTimestamps = settings.transcriptFormat == .segmentBased
+        let quotesSchema = useTimestamps
+            ? #""notableQuotes": [{"text": "quote 1", "timestamp": "MM:SS"}, {"text": "quote 2", "timestamp": "MM:SS"}]"#
+            : #""notableQuotes": ["quote 1", "quote 2"]"#
+        let quotesNote = useTimestamps
+            ? "\nFor each notable quote, include the timestamp where it appears in the transcript. Use MM:SS or H:MM:SS format."
+            : ""
+        return """
+        You are an expert podcast analyst. Provide a single comprehensive analysis of this podcast episode.
 
-            Podcast: \(podcastTitle)
-            Episode: \(episodeTitle)
+        Podcast: \(podcastTitle)
+        Episode: \(episodeTitle)
 
-            IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
+        IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
 
-            Return JSON in this exact format:
-            {
-                "summary": "A 2-3 paragraph summary of the episode",
-                "mainTopics": ["topic1", "topic2", "topic3"],
-                "keyTakeaways": ["takeaway1", "takeaway2", "takeaway3"],
-                "targetAudience": "Description of who would benefit from this episode",
-                "engagementLevel": "high/medium/low"
-            }\(languageLine)
+        Return JSON in this exact format:
+        {
+            "overview": "2-3 paragraph executive summary of the episode",
+            "mainTopics": [
+                {
+                    "topic": "Topic Name",
+                    "summary": "Brief summary of this topic",
+                    "keyPoints": ["point 1", "point 2"]
+                }
+            ],
+            "keyTakeaways": ["takeaway 1", "takeaway 2", "takeaway 3"],
+            "keyInsights": ["insight 1", "insight 2", "insight 3"],
+            "targetAudience": "Description of who would benefit from this episode",
+            "engagementLevel": "high/medium/low",
+            "people": ["person1", "person2"],
+            "organizations": ["org1", "org2"],
+            "products": ["product1", "product2"],
+            "locations": ["location1", "location2"],
+            "resources": ["book1", "article1"],
+            "highlights": ["highlight1", "highlight2", "highlight3"],
+            \(quotesSchema),
+            "actionItems": ["action1", "action2"],
+            "controversialPoints": ["point1"] or null,
+            "entertainingMoments": ["moment1"] or null,
+            "conclusion": "Overall assessment and who would benefit from this episode"
+        }\(quotesNote)\(languageLine)
 
-            Transcript:
-            \(transcript)
-            """
-
-        case .entities:
-            return """
-            You are an expert at extracting named entities from text. Please analyze this podcast episode.
-
-            Podcast: \(podcastTitle)
-            Episode: \(episodeTitle)
-
-            IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
-
-            Return JSON in this exact format:
-            {
-                "people": ["person1", "person2"],
-                "organizations": ["org1", "org2"],
-                "products": ["product1", "product2"],
-                "locations": ["location1", "location2"],
-                "resources": ["book1", "article1"]
-            }\(languageLine)
-
-            Transcript:
-            \(transcript)
-            """
-
-        case .highlights:
-            let useTimestamps = settings.transcriptFormat == .segmentBased
-            let bestQuoteSchema = useTimestamps
-                ? #""bestQuote": {"text": "The most memorable quote from the episode", "timestamp": "MM:SS or H:MM:SS from transcript"}"#
-                : #""bestQuote": "The most memorable quote from the episode""#
-            let bestQuoteNote = useTimestamps
-                ? "\nFor bestQuote, include the timestamp where this quote appears in the transcript. Use MM:SS or H:MM:SS format."
-                : ""
-            return """
-            You are an expert at identifying key moments and highlights in podcast episodes. Please analyze this episode.
-
-            Podcast: \(podcastTitle)
-            Episode: \(episodeTitle)
-
-            IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
-
-            Return JSON in this exact format:
-            {
-                "highlights": ["highlight1", "highlight2", "highlight3"],
-                \(bestQuoteSchema),
-                "actionItems": ["action1", "action2"],
-                "controversialPoints": ["point1"],
-                "entertainingMoments": ["moment1"]
-            }\(bestQuoteNote)\(languageLine)
-
-            Transcript:
-            \(transcript)
-            """
-
-        case .fullAnalysis:
-            let useTimestamps = settings.transcriptFormat == .segmentBased
-            let quotesSchema = useTimestamps
-                ? #""notableQuotes": [{"text": "quote 1", "timestamp": "MM:SS"}, {"text": "quote 2", "timestamp": "MM:SS"}]"#
-                : #""notableQuotes": ["quote 1", "quote 2"]"#
-            let quotesNote = useTimestamps
-                ? "\nFor each notable quote, include the timestamp where it appears in the transcript. Use MM:SS or H:MM:SS format."
-                : ""
-            return """
-            You are an expert podcast analyst. Provide a comprehensive analysis of this podcast episode.
-
-            Podcast: \(podcastTitle)
-            Episode: \(episodeTitle)
-
-            IMPORTANT: Return ONLY valid JSON with no additional text, markdown, or code blocks.
-
-            Return JSON in this exact format:
-            {
-                "overview": "2-3 paragraph executive summary of the episode",
-                "mainTopics": [
-                    {
-                        "topic": "Topic Name",
-                        "summary": "Brief summary of this topic",
-                        "keyPoints": ["point 1", "point 2"]
-                    }
-                ],
-                "keyInsights": ["insight 1", "insight 2", "insight 3"],
-                \(quotesSchema),
-                "actionableAdvice": ["advice 1", "advice 2"],
-                "conclusion": "Overall assessment and who would benefit from this episode"
-            }\(quotesNote)\(languageLine)
-
-            Transcript:
-            \(transcript)
-            """
-        }
+        Transcript:
+        \(transcript)
+        """
     }
 
     // MARK: - Streaming Transcript Analysis
@@ -485,8 +393,7 @@ final class CloudAIService {
 
         progressCallback?("Connecting to \(provider.displayName)...", 0.15)
 
-        // Use higher token limit for fullAnalysis to prevent truncation
-        let maxTokens = analysisType == .fullAnalysis ? 8192 : 4096
+        let maxTokens = 8192
 
         // Use streaming via the provider client
         let providerClient = client(for: provider)
@@ -506,32 +413,14 @@ final class CloudAIService {
 
         progressCallback?("Parsing response...", 0.9)
 
-        // Parse the JSON response based on analysis type
-        var parsedSummary: ParsedSummaryResponse?
-        var parsedEntities: ParsedEntitiesResponse?
-        var parsedHighlights: ParsedHighlightsResponse?
-        var parsedFullAnalysis: ParsedFullAnalysisResponse?
-
-        switch analysisType {
-        case .summary:
-            parsedSummary = parseJSON(fullResponse, as: ParsedSummaryResponse.self)
-        case .entities:
-            parsedEntities = parseJSON(fullResponse, as: ParsedEntitiesResponse.self)
-        case .highlights:
-            parsedHighlights = parseJSON(fullResponse, as: ParsedHighlightsResponse.self)
-        case .fullAnalysis:
-            parsedFullAnalysis = parseJSON(fullResponse, as: ParsedFullAnalysisResponse.self)
-        }
+        let parsedAnalysis = parseJSON(fullResponse, as: ParsedEpisodeAnalysisResponse.self)
 
         progressCallback?("Done", 1.0)
 
         return CloudAnalysisResult(
             type: analysisType,
             content: fullResponse,
-            parsedSummary: parsedSummary,
-            parsedEntities: parsedEntities,
-            parsedHighlights: parsedHighlights,
-            parsedFullAnalysis: parsedFullAnalysis,
+            parsedAnalysis: parsedAnalysis,
             provider: provider,
             model: model,
             timestamp: Date()
@@ -585,32 +474,14 @@ final class CloudAIService {
 
         progressCallback?("Parsing response...", 0.8)
 
-        // Parse the JSON response based on analysis type
-        var parsedSummary: ParsedSummaryResponse?
-        var parsedEntities: ParsedEntitiesResponse?
-        var parsedHighlights: ParsedHighlightsResponse?
-        var parsedFullAnalysis: ParsedFullAnalysisResponse?
-
-        switch analysisType {
-        case .summary:
-            parsedSummary = parseJSON(response, as: ParsedSummaryResponse.self)
-        case .entities:
-            parsedEntities = parseJSON(response, as: ParsedEntitiesResponse.self)
-        case .highlights:
-            parsedHighlights = parseJSON(response, as: ParsedHighlightsResponse.self)
-        case .fullAnalysis:
-            parsedFullAnalysis = parseJSON(response, as: ParsedFullAnalysisResponse.self)
-        }
+        let parsedAnalysis = parseJSON(response, as: ParsedEpisodeAnalysisResponse.self)
 
         progressCallback?("Done", 1.0)
 
         return CloudAnalysisResult(
             type: analysisType,
             content: response,
-            parsedSummary: parsedSummary,
-            parsedEntities: parsedEntities,
-            parsedHighlights: parsedHighlights,
-            parsedFullAnalysis: parsedFullAnalysis,
+            parsedAnalysis: parsedAnalysis,
             provider: provider,
             model: model,
             timestamp: Date()
@@ -764,56 +635,7 @@ final class CloudAIService {
         let languageLine = languageInstruction.isEmpty ? "" : "\n\n\(languageInstruction)"
 
         switch type {
-        case .summary:
-            return """
-            You are an expert podcast analyst. Your task is to create comprehensive summaries of podcast episodes.
-
-            Provide your response in the following JSON format:
-            {
-                "summary": "A 2-3 paragraph summary of the episode",
-                "mainTopics": ["topic1", "topic2", "topic3"],
-                "keyTakeaways": ["takeaway1", "takeaway2", "takeaway3"],
-                "targetAudience": "Description of who would benefit from this episode",
-                "engagementLevel": "high/medium/low"
-            }\(languageLine)
-            """
-
-        case .entities:
-            return """
-            You are an expert at extracting named entities from text.
-
-            Provide your response in the following JSON format:
-            {
-                "people": ["person1", "person2"],
-                "organizations": ["org1", "org2"],
-                "products": ["product1", "product2"],
-                "locations": ["location1", "location2"],
-                "resources": ["book1", "article1"]
-            }\(languageLine)
-            """
-
-        case .highlights:
-            let useTimestamps = settings.transcriptFormat == .segmentBased
-            let bestQuoteSchema = useTimestamps
-                ? #""bestQuote": {"text": "The most memorable quote from the episode", "timestamp": "MM:SS or H:MM:SS"}"#
-                : #""bestQuote": "The most memorable quote from the episode""#
-            let bestQuoteNote = useTimestamps
-                ? "\nFor bestQuote, include the timestamp where this quote appears in the transcript. Use MM:SS or H:MM:SS format."
-                : ""
-            return """
-            You are an expert at identifying key moments and highlights in podcast episodes.
-
-            Provide your response in the following JSON format:
-            {
-                "highlights": ["highlight1", "highlight2", "highlight3"],
-                \(bestQuoteSchema),
-                "actionItems": ["action1", "action2"],
-                "controversialPoints": ["point1"] or null,
-                "entertainingMoments": ["moment1"] or null
-            }\(bestQuoteNote)\(languageLine)
-            """
-
-        case .fullAnalysis:
+        case .analysis:
             let useTimestamps = settings.transcriptFormat == .segmentBased
             let quotesSchema = useTimestamps
                 ? #""notableQuotes": [{"text": "quote 1", "timestamp": "MM:SS"}, {"text": "quote 2", "timestamp": "MM:SS"}]"#
@@ -822,7 +644,7 @@ final class CloudAIService {
                 ? "\nFor each notable quote, include the timestamp where it appears in the transcript. Use MM:SS or H:MM:SS format."
                 : ""
             return """
-            You are an expert podcast analyst. Provide a comprehensive analysis of this podcast episode.
+            You are an expert podcast analyst. Create a single comprehensive analysis that combines summary, entities, highlights, and strategic takeaways.
 
             IMPORTANT: Return ONLY valid JSON with no additional text.
 
@@ -836,9 +658,20 @@ final class CloudAIService {
                         "keyPoints": ["point 1", "point 2"]
                     }
                 ],
+                "keyTakeaways": ["takeaway 1", "takeaway 2", "takeaway 3"],
                 "keyInsights": ["insight 1", "insight 2", "insight 3"],
+                "targetAudience": "Description of who would benefit from this episode",
+                "engagementLevel": "high/medium/low",
+                "people": ["person1", "person2"],
+                "organizations": ["org1", "org2"],
+                "products": ["product1", "product2"],
+                "locations": ["location1", "location2"],
+                "resources": ["book1", "article1"],
+                "highlights": ["highlight1", "highlight2", "highlight3"],
                 \(quotesSchema),
-                "actionableAdvice": ["advice 1", "advice 2"] or null,
+                "actionItems": ["action1", "action2"],
+                "controversialPoints": ["point1"] or null,
+                "entertainingMoments": ["moment1"] or null,
                 "conclusion": "Overall assessment and who would benefit from this episode"
             }\(quotesNote)\(languageLine)
             """
@@ -853,14 +686,8 @@ final class CloudAIService {
     ) -> String {
         let instruction: String
         switch analysisType {
-        case .summary:
-            instruction = "Please provide a comprehensive summary of this podcast episode."
-        case .entities:
-            instruction = "Please extract all named entities from this podcast episode."
-        case .highlights:
-            instruction = "Please identify the key highlights and memorable moments from this episode."
-        case .fullAnalysis:
-            instruction = "Please provide a complete analysis of this podcast episode."
+        case .analysis:
+            instruction = "Please provide one complete analysis of this podcast episode, covering summary, topics, entities, highlights, quotes, action items, and conclusion."
         }
 
         // When using segment-based format, tell the AI timestamps are present so it uses them
@@ -883,17 +710,11 @@ final class CloudAIService {
 // MARK: - Supporting Types
 
 enum CloudAnalysisType: String, CaseIterable {
-    case summary = "Summary"
-    case entities = "Entities"
-    case highlights = "Highlights"
-    case fullAnalysis = "Full Analysis"
+    case analysis = "Analysis"
 
     var icon: String {
         switch self {
-        case .summary: return "doc.text"
-        case .entities: return "person.2"
-        case .highlights: return "star"
-        case .fullAnalysis: return "sparkles"
+        case .analysis: return "sparkles"
         }
     }
 }
@@ -901,10 +722,7 @@ enum CloudAnalysisType: String, CaseIterable {
 struct CloudAnalysisResult {
     let type: CloudAnalysisType
     let content: String
-    let parsedSummary: ParsedSummaryResponse?
-    let parsedEntities: ParsedEntitiesResponse?
-    let parsedHighlights: ParsedHighlightsResponse?
-    let parsedFullAnalysis: ParsedFullAnalysisResponse?
+    let parsedAnalysis: ParsedEpisodeAnalysisResponse?
     let provider: CloudAIProvider
     let model: String
     let timestamp: Date
@@ -914,10 +732,7 @@ struct CloudAnalysisResult {
     init(
         type: CloudAnalysisType,
         content: String,
-        parsedSummary: ParsedSummaryResponse? = nil,
-        parsedEntities: ParsedEntitiesResponse? = nil,
-        parsedHighlights: ParsedHighlightsResponse? = nil,
-        parsedFullAnalysis: ParsedFullAnalysisResponse? = nil,
+        parsedAnalysis: ParsedEpisodeAnalysisResponse? = nil,
         provider: CloudAIProvider,
         model: String,
         timestamp: Date,
@@ -925,10 +740,7 @@ struct CloudAnalysisResult {
     ) {
         self.type = type
         self.content = content
-        self.parsedSummary = parsedSummary
-        self.parsedEntities = parsedEntities
-        self.parsedHighlights = parsedHighlights
-        self.parsedFullAnalysis = parsedFullAnalysis
+        self.parsedAnalysis = parsedAnalysis
         self.provider = provider
         self.model = model
         self.timestamp = timestamp

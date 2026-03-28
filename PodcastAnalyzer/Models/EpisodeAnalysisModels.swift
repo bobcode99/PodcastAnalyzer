@@ -103,30 +103,21 @@ enum AnalysisState: Equatable {
 
 /// Tabs available for cloud-based transcript analysis
 enum CloudAnalysisTab: String, CaseIterable, Identifiable {
-    case summary = "Summary"
-    case entities = "Entities"
-    case highlights = "Highlights"
-    case fullAnalysis = "Full Analysis"
+    case analysis = "Analysis"
     case askQuestion = "Ask"
 
     var id: String { rawValue }
 
     var icon: String {
         switch self {
-        case .summary: return "doc.text"
-        case .entities: return "person.2"
-        case .highlights: return "star"
-        case .fullAnalysis: return "sparkles"
+        case .analysis: return "sparkles"
         case .askQuestion: return "questionmark.bubble"
         }
     }
 
     var description: String {
         switch self {
-        case .summary: return "Episode summary with key topics and takeaways"
-        case .entities: return "People, organizations, and products mentioned"
-        case .highlights: return "Key moments and notable quotes"
-        case .fullAnalysis: return "Comprehensive analysis of the entire episode"
+        case .analysis: return "Unified summary, entities, highlights, quotes, and takeaways"
         case .askQuestion: return "Ask questions about the episode content"
         }
     }
@@ -134,10 +125,7 @@ enum CloudAnalysisTab: String, CaseIterable, Identifiable {
     /// Convert to CloudAnalysisType for the service
     var analysisType: CloudAnalysisType? {
         switch self {
-        case .summary: return .summary
-        case .entities: return .entities
-        case .highlights: return .highlights
-        case .fullAnalysis: return .fullAnalysis
+        case .analysis: return .analysis
         case .askQuestion: return nil // Q&A is handled separately
         }
     }
@@ -147,38 +135,26 @@ enum CloudAnalysisTab: String, CaseIterable, Identifiable {
 
 /// Container for cached cloud analysis results
 struct CachedCloudAnalysis {
-    var summary: CloudAnalysisResult?
-    var entities: CloudAnalysisResult?
-    var highlights: CloudAnalysisResult?
-    var fullAnalysis: CloudAnalysisResult?
+    var analysis: CloudAnalysisResult?
     var questionAnswers: [CloudQAResult] = []
 
     /// Check if a specific analysis type has been completed
     func hasResult(for type: CloudAnalysisType) -> Bool {
         switch type {
-        case .summary: return summary != nil
-        case .entities: return entities != nil
-        case .highlights: return highlights != nil
-        case .fullAnalysis: return fullAnalysis != nil
+        case .analysis: return analysis != nil
         }
     }
 
     /// Get result for a specific type
     func result(for type: CloudAnalysisType) -> CloudAnalysisResult? {
         switch type {
-        case .summary: return summary
-        case .entities: return entities
-        case .highlights: return highlights
-        case .fullAnalysis: return fullAnalysis
+        case .analysis: return analysis
         }
     }
 
     /// Clear all cached results
     mutating func clearAll() {
-        summary = nil
-        entities = nil
-        highlights = nil
-        fullAnalysis = nil
+        analysis = nil
         questionAnswers = []
     }
 }

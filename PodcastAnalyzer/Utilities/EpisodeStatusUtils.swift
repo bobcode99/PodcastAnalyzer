@@ -159,10 +159,7 @@ struct EpisodeStatusChecker {
       return false
     }
 
-    return model.hasFullAnalysis
-      || model.hasSummary
-      || model.hasEntities
-      || model.hasHighlights
+    return model.hasAnalysis
       || (model.qaHistoryJSON != nil && !model.qaHistoryJSON!.isEmpty)
   }
 
@@ -417,10 +414,7 @@ final class EpisodeStatusObserver {
       return
     }
 
-    hasAIAnalysis = model.hasFullAnalysis
-      || model.hasSummary
-      || model.hasEntities
-      || model.hasHighlights
+    hasAIAnalysis = model.hasAnalysis
       || (model.qaHistoryJSON != nil && !model.qaHistoryJSON!.isEmpty)
   }
 

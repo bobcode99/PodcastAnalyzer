@@ -26,6 +26,12 @@ struct EpisodeRowView: View {
   let onDeleteRequested: () -> Void
   let onTogglePlayed: () -> Void
 
+  /// When non-nil, this pre-computed download state is used instead of reading
+  /// directly from DownloadManager. Pass this from a parent that already has the
+  /// state (e.g. EpisodeListView reads it once per refresh, not on every tick).
+  /// This prevents every row from re-rendering on every download progress update.
+  let precomputedDownloadState: DownloadState?
+
   /// Primary initializer for PodcastEpisodeInfo (used in EpisodeListView)
   init(
     episode: PodcastEpisodeInfo,
@@ -34,6 +40,7 @@ struct EpisodeRowView: View {
     podcastLanguage: String,
     downloadManager: DownloadManager = DownloadManager.shared,
     episodeModel: EpisodeDownloadModel? = nil,
+    precomputedDownloadState: DownloadState? = nil,
     showArtwork: Bool = true,
     onToggleStar: @escaping () -> Void,
     onDownload: @escaping () -> Void,
@@ -46,6 +53,7 @@ struct EpisodeRowView: View {
     self.podcastLanguage = podcastLanguage
     self.downloadManager = downloadManager
     self.episodeModel = episodeModel
+    self.precomputedDownloadState = precomputedDownloadState
     self.showArtwork = showArtwork
     self.onToggleStar = onToggleStar
     self.onDownload = onDownload
@@ -70,6 +78,7 @@ struct EpisodeRowView: View {
     self.podcastLanguage = libraryEpisode.language
     self.downloadManager = downloadManager
     self.episodeModel = episodeModel
+    self.precomputedDownloadState = nil
     self.showArtwork = showArtwork
     self.onToggleStar = onToggleStar
     self.onDownload = onDownload
@@ -87,19 +96,50 @@ struct EpisodeRowView: View {
   @State private var cachedPlainDescription: String?
   @State private var hasAIAnalysis = false
 
-  private var statusChecker: EpisodeStatusChecker {
+  // MARK: - Download state
+  //
+  // PERFORMANCE: Do NOT read downloadManager.downloadStates here as a computed property.
+  // That makes this view a dependency of the @Observable downloadStates dictionary,
+  // causing every row to re-render on every download progress tick.
+  //
+  // Instead, `precomputedDownloadState` is passed from the parent (e.g. EpisodeListView
+  // snapshots the state once per row). When nil (Library views with already-downloaded
+  // episodes), we fall back to a lazy one-time read via statusChecker.
+  //
+  // The statusChecker is only used for non-hot-path properties (episodeKey, hasCaptions,
+  // playbackURL). It is NOT accessed during body evaluation for download state.
+
+  private var downloadState: DownloadState {
+    if let precomputed = precomputedDownloadState { return precomputed }
+    return downloadManager.getDownloadState(
+      episodeTitle: episode.title,
+      podcastTitle: podcastTitle
+    )
+  }
+
+  private var isDownloaded: Bool {
+    if case .downloaded = downloadState { return true }
+    return false
+  }
+
+  private var episodeKey: String {
+    EpisodeKeyUtils.makeKey(podcastTitle: podcastTitle, episodeTitle: episode.title)
+  }
+
+  private var playbackURL: String {
+    if case .downloaded(let path) = downloadState {
+      return URL(fileURLWithPath: path).absoluteString
+    }
+    return episode.audioURL ?? ""
+  }
+
+  private var hasCaptions: Bool {
     EpisodeStatusChecker(
       episodeTitle: episode.title,
       podcastTitle: podcastTitle,
       audioURL: episode.audioURL
-    )
+    ).hasTranscript
   }
-
-  private var downloadState: DownloadState { statusChecker.downloadState }
-  private var isDownloaded: Bool { statusChecker.isDownloaded }
-  private var playbackURL: String { statusChecker.playbackURL }
-  private var episodeKey: String { statusChecker.episodeKey }
-  private var hasCaptions: Bool { statusChecker.hasTranscript }
 
   private var transcriptJob: TranscriptJob? {
     transcriptManager.activeJobs[episodeKey]
