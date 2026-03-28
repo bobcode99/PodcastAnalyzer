@@ -62,17 +62,15 @@ struct LibraryView: View {
       updateSortedPodcasts()
     }
     .task {
+      // Only run the initial load if it hasn't already been kicked off by setModelContext.
+      // Without this guard, every tab re-appearance triggers a full refresh.
+      guard !viewModel.isLoaded else { return }
       await viewModel.refreshSavedEpisodes()
       await viewModel.refreshDownloadedEpisodes()
     }
     .task {
       // Modernized notification observers using async sequences
       for await _ in NotificationCenter.default.notifications(named: .podcastSyncCompleted) {
-        viewModel.refreshData()
-      }
-    }
-    .task {
-      for await _ in NotificationCenter.default.notifications(named: .episodeDownloadCompleted) {
         viewModel.refreshData()
       }
     }

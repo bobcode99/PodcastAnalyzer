@@ -76,43 +76,7 @@ final class LibraryViewModel {
   var podcastInfoModelList: [PodcastInfoModel] = []
   var savedEpisodes: [LibraryEpisode] = []
   var downloadedEpisodes: [LibraryEpisode] = []
-  var downloadingEpisodes: [DownloadingEpisode] {
-    var downloading: [DownloadingEpisode] = []
-
-    for (episodeKey, state) in downloadManager.downloadStates {
-      let progressValue: Double
-      let isActive: Bool
-
-      switch state {
-      case .downloading(let progress):
-        progressValue = progress
-        isActive = true
-      case .finishing:
-        progressValue = 1.0
-        isActive = true
-      default:
-        progressValue = 0
-        isActive = false
-      }
-
-      if isActive {
-        if let (podcastTitle, episodeTitle) = parseDownloadEpisodeKey(episodeKey) {
-          let imageURL = podcastTitleMap[podcastTitle]?.podcastInfo.imageURL
-
-          downloading.append(DownloadingEpisode(
-            id: episodeKey,
-            episodeTitle: episodeTitle,
-            podcastTitle: podcastTitle,
-            imageURL: imageURL,
-            progress: progressValue,
-            state: state
-          ))
-        }
-      }
-    }
-
-    return downloading.sorted { $0.progress < $1.progress }
-  }
+  var downloadingEpisodes: [DownloadingEpisode] = []
   var latestEpisodes: [LibraryEpisode] = []
   var isLoading = false
   var error: String?
@@ -158,10 +122,14 @@ final class LibraryViewModel {
 
 
   // Simplified loading state
-  // We only track generally if background operations are happening, 
+  // We only track generally if background operations are happening,
   // but we don't block the UI with specific flags for each section anymore.
   // The UI should show whatever data is available.
   var isRefreshing = false
+
+  /// True once setModelContext has been called and the initial load has been kicked off.
+  /// Views can use this to skip redundant refreshes on re-appearance.
+  var isLoaded: Bool { isAlreadyLoaded }
 
 
   // Search state for subpages
@@ -222,7 +190,7 @@ final class LibraryViewModel {
   }
 
   private let service = PodcastRssService()
-  private let downloadManager = DownloadManager.shared
+  @ObservationIgnored private let downloadManager = DownloadManager.shared
   private var modelContext: ModelContext?
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "LibraryViewModel")
 
@@ -244,6 +212,8 @@ final class LibraryViewModel {
   @ObservationIgnored private var initTask: Task<Void, Never>?
   /// Tracks the latest unstructured refresh task so it can be cancelled in cleanup().
   @ObservationIgnored private var refreshTask: Task<Void, Never>?
+  /// Observes episodeDownloadCompleted notifications for optimistic UI updates.
+  @ObservationIgnored private var downloadCompletionTask: Task<Void, Never>?
 
   init(modelContext: ModelContext?) {
     self.modelContext = modelContext
@@ -252,6 +222,8 @@ final class LibraryViewModel {
         await loadAll()
       }
     }
+    observeDownloadingEpisodes()
+    observeDownloadCompletions()
   }
 
   /// Clean up resources. Call this from onDisappear.
@@ -260,6 +232,98 @@ final class LibraryViewModel {
     initTask = nil
     refreshTask?.cancel()
     refreshTask = nil
+    downloadCompletionTask?.cancel()
+    downloadCompletionTask = nil
+  }
+
+  private func observeDownloadCompletions() {
+    downloadCompletionTask = Task { [weak self] in
+      for await notification in NotificationCenter.default.notifications(named: .episodeDownloadCompleted) {
+        guard let self else { return }
+        guard let episodeTitle = notification.userInfo?["episodeTitle"] as? String,
+              let podcastTitle = notification.userInfo?["podcastTitle"] as? String,
+              let localPath = notification.userInfo?["localPath"] as? String else { continue }
+        self.handleDownloadCompletion(
+          episodeTitle: episodeTitle,
+          podcastTitle: podcastTitle,
+          localPath: localPath
+        )
+      }
+    }
+  }
+
+  private func updateDownloadingEpisodes() {
+    var downloading: [DownloadingEpisode] = []
+    for (episodeKey, state) in downloadManager.downloadStates {
+      let progressValue: Double
+      let isActive: Bool
+      switch state {
+      case .downloading(let progress):
+        progressValue = progress
+        isActive = true
+      case .finishing:
+        progressValue = 1.0
+        isActive = true
+      default:
+        progressValue = 0
+        isActive = false
+      }
+      if isActive {
+        if let (podcastTitle, episodeTitle) = parseDownloadEpisodeKey(episodeKey) {
+          let imageURL = podcastTitleMap[podcastTitle]?.podcastInfo.imageURL
+          downloading.append(DownloadingEpisode(
+            id: episodeKey,
+            episodeTitle: episodeTitle,
+            podcastTitle: podcastTitle,
+            imageURL: imageURL,
+            progress: progressValue,
+            state: state
+          ))
+        }
+      }
+    }
+    let sorted = downloading.sorted { $0.progress < $1.progress }
+    // Only assign if actually changed to avoid unnecessary @Observable invalidations
+    if sorted.map(\.id) != downloadingEpisodes.map(\.id)
+      || zip(sorted, downloadingEpisodes).contains(where: {
+        $0.state != $1.state || abs($0.progress - $1.progress) > 0.005
+      }) {
+      downloadingEpisodes = sorted
+    }
+  }
+
+  private func observeDownloadingEpisodes() {
+    withObservationTracking {
+      _ = downloadManager.downloadStates
+    } onChange: {
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        // Early-exit: skip the rebuild if the set of actively-downloading keys
+        // hasn't changed AND no in-flight progress has moved by more than 5%.
+        let newStates = self.downloadManager.downloadStates
+        let oldIds = Set(self.downloadingEpisodes.map(\.id))
+        let newActiveIds = Set(newStates.filter { state in
+          switch state.value {
+          case .downloading, .finishing: return true
+          default: return false
+          }
+        }.keys)
+        if oldIds == newActiveIds {
+          let significantProgressChange = self.downloadingEpisodes.contains { ep in
+            if case .downloading(let newP) = newStates[ep.id] {
+              return abs(newP - ep.progress) >= 0.05
+            }
+            return false
+          }
+          if !significantProgressChange {
+            self.observeDownloadingEpisodes()
+            return
+          }
+        }
+        self.updateDownloadingEpisodes()
+        self.observeDownloadingEpisodes()
+      }
+    }
   }
 
   /// Parse episode key for downloading episodes

@@ -179,6 +179,7 @@ final class EpisodeStatusObserver {
   var downloadProgress: Double = 0
   var hasTranscript: Bool = false
   var isTranscribing: Bool = false
+  var isDownloadingModel: Bool = false
   var transcriptProgress: Double = 0
   var hasAIAnalysis: Bool = false
 
@@ -193,7 +194,7 @@ final class EpisodeStatusObserver {
   private let audioURL: String?
 
   @ObservationIgnored
-  private let episodeKey: String
+  let episodeKey: String
 
   // Managers
   @ObservationIgnored
@@ -314,6 +315,7 @@ final class EpisodeStatusObserver {
       episodeTitle: episodeTitle,
       podcastTitle: podcastTitle
     )
+    let previousState = downloadState
     downloadState = state
 
     switch state {
@@ -339,8 +341,16 @@ final class EpisodeStatusObserver {
       downloadProgress = 0
     }
 
-    // Also check transcript after download state changes (download completion enables transcript)
-    updateTranscriptStatus()
+    // Only check transcript status when transitioning into .downloaded — the transcript file
+    // cannot appear or disappear during a progress tick, and hasTranscript does synchronous
+    // disk I/O that blocks @MainActor unnecessarily on every throttled progress update.
+    if case .downloaded = state {
+      if case .downloaded = previousState {
+        // Already was downloaded — no transition, skip disk I/O
+      } else {
+        updateTranscriptStatus()
+      }
+    }
   }
 
   private func updateTranscriptStatus() {
@@ -357,20 +367,28 @@ final class EpisodeStatusObserver {
       isTranscribing = true
       // Extract progress from job status
       switch job.status {
-      case .transcribing(let progress), .downloadingModel(let progress):
+      case .transcribing(let progress):
+        isDownloadingModel = false
+        transcriptProgress = progress
+      case .downloadingModel(let progress):
+        isDownloadingModel = true
         transcriptProgress = progress
       case .queued:
+        isDownloadingModel = false
         transcriptProgress = 0
       case .completed:
+        isDownloadingModel = false
         transcriptProgress = 1.0
         isTranscribing = false
         hasTranscript = true
       case .failed:
+        isDownloadingModel = false
         transcriptProgress = 0
         isTranscribing = false
       }
     } else {
       isTranscribing = false
+      isDownloadingModel = false
       transcriptProgress = hasTranscript ? 1.0 : 0
     }
   }
