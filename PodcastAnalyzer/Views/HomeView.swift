@@ -77,9 +77,6 @@ struct HomeView: View {
   @Environment(\.modelContext) private var modelContext
   @State private var showRegionPicker = false
 
-  // Deferred navigation state (avoids eager destination creation)
-  @State private var selectedEpisode: LibraryEpisode?
-
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 24) {
@@ -98,14 +95,6 @@ struct HomeView: View {
         popularShowsSection
       }
       .padding(.vertical)
-    }
-    .navigationDestination(item: $selectedEpisode) { episode in
-      EpisodeDetailView(
-        episode: episode.episodeInfo,
-        podcastTitle: episode.podcastTitle,
-        fallbackImageURL: episode.imageURL,
-        podcastLanguage: episode.language
-      )
     }
     .navigationDestination(for: AppleRSSPodcast.self) { podcast in
       EpisodeListView(
@@ -280,9 +269,14 @@ struct HomeView: View {
         ScrollView(.horizontal) {
           HStack(spacing: 12) {
             ForEach(viewModel.upNextEpisodes.prefix(10)) { episode in
-              Button {
-                selectedEpisode = episode
-              } label: {
+              NavigationLink(
+                value: EpisodeDetailRoute(
+                  episode: episode.episodeInfo,
+                  podcastTitle: episode.podcastTitle,
+                  fallbackImageURL: episode.imageURL,
+                  podcastLanguage: episode.language
+                )
+              ) {
                 UpNextCard(episode: episode, onPlay: { viewModel.playEpisode(episode) })
               }
               .buttonStyle(.plain)
@@ -345,9 +339,14 @@ struct HomeView: View {
           ScrollView(.horizontal) {
             HStack(spacing: 12) {
               ForEach(Array(viewModel.recommendedEpisodes.enumerated()), id: \.element.id) { index, episode in
-                Button {
-                  selectedEpisode = episode
-                } label: {
+                NavigationLink(
+                  value: EpisodeDetailRoute(
+                    episode: episode.episodeInfo,
+                    podcastTitle: episode.podcastTitle,
+                    fallbackImageURL: episode.imageURL,
+                    podcastLanguage: episode.language
+                  )
+                ) {
                   ForYouCard(
                     episode: episode
                   )

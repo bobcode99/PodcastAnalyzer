@@ -65,19 +65,6 @@ struct LibraryView: View {
         ActiveDownloadsView(viewModel: viewModel)
       }
     }
-    .navigationDestination(for: PodcastBrowseRoute.self) { route in
-      if let model = route.podcastModel {
-        EpisodeListView(podcastModel: model)
-      } else if let collectionId = route.collectionId {
-        EpisodeListView(
-          podcastName: route.podcastName,
-          podcastArtwork: route.artworkURL,
-          artistName: route.artistName,
-          collectionId: collectionId,
-          applePodcastUrl: route.applePodcastURL
-        )
-      }
-    }
     .refreshable {
       await viewModel.refreshAllPodcasts()
     }

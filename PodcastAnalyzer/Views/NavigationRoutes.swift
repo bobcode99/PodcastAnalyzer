@@ -15,11 +15,15 @@ import SwiftUI
 
 /// Navigation route that defers EpisodeDetailView construction until the user
 /// actually taps the row. Carrying only value types keeps it cheap to create.
-struct EpisodeDetailRoute: Hashable {
+struct EpisodeDetailRoute: Hashable, Identifiable {
   let episode: PodcastEpisodeInfo
   let podcastTitle: String
   let fallbackImageURL: String?
   let podcastLanguage: String?
+
+  var id: String {
+    "\(podcastTitle)\u{1F}\(episode.id)"
+  }
 }
 
 // MARK: - Library Sub-page Routes
@@ -35,7 +39,7 @@ enum LibrarySubpageRoute: Hashable {
 /// Value-based navigation route for EpisodeListView. Using a route type
 /// prevents legacy NavigationLink(destination:) from constructing the
 /// destination view eagerly before the user actually navigates to it.
-struct PodcastBrowseRoute: Hashable {
+struct PodcastBrowseRoute: Hashable, Identifiable {
   /// Non-nil when navigating to a subscribed podcast from the library.
   let podcastModel: PodcastInfoModel?
   /// Non-nil when navigating to an unsubscribed podcast from browse/search.
@@ -69,6 +73,13 @@ struct PodcastBrowseRoute: Hashable {
     self.artistName = artistName
     self.artworkURL = artworkURL
     self.applePodcastURL = applePodcastURL
+  }
+
+  var id: String {
+    if let model = podcastModel {
+      return model.id.uuidString
+    }
+    return collectionId ?? podcastName
   }
 
   // Hashable conformance — PodcastInfoModel is a class so use ObjectIdentifier.

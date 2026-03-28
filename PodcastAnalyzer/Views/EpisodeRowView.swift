@@ -212,20 +212,26 @@ struct EpisodeRowView: View {
   }
 
   var body: some View {
-    NavigationLink(value: EpisodeDetailRoute(
-      episode: episode,
-      podcastTitle: podcastTitle,
-      fallbackImageURL: fallbackImageURL,
-      podcastLanguage: podcastLanguage
-    )) {
-      HStack(alignment: .center, spacing: 12) {
-        if showArtwork {
-          episodeThumbnail
+    VStack(alignment: .leading, spacing: 8) {
+      NavigationLink(value: EpisodeDetailRoute(
+        episode: episode,
+        podcastTitle: podcastTitle,
+        fallbackImageURL: fallbackImageURL,
+        podcastLanguage: podcastLanguage
+      )) {
+        HStack(alignment: .center, spacing: 12) {
+          if showArtwork {
+            episodeThumbnail
+          }
+          episodeInfo
         }
-        episodeInfo
+        .contentShape(Rectangle())
       }
-      .padding(.vertical, 8)
+      .buttonStyle(.plain)
+
+      bottomStatusBar
     }
+    .padding(.vertical, 8)
     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
       trailingSwipeActions
     }
@@ -310,11 +316,6 @@ struct EpisodeRowView: View {
           .foregroundStyle(.secondary)
           .lineLimit(3)
       }
-
-      Spacer(minLength: 4)
-
-      // Bottom status bar
-      bottomStatusBar
     }
   }
 

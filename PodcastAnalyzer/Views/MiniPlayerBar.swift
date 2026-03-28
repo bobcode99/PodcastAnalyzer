@@ -34,6 +34,7 @@ struct MiniPlayerBar: View {
   // Access singleton directly without @State to avoid unnecessary observation overhead
   private var audioManager: EnhancedAudioManager { .shared }
   @State private var showExpandedPlayer = false
+  @State private var deferredNavigation: ExpandedPlayerNavigation = .none
 
   // Pending navigation after expanded player dismisses
   @Binding var pendingNavigation: ExpandedPlayerNavigation
@@ -113,13 +114,13 @@ struct MiniPlayerBar: View {
       .padding(.vertical, 10)
       .glassEffect(Glass.regular)
     }
-    .sheet(isPresented: $showExpandedPlayer) {
+    .sheet(isPresented: $showExpandedPlayer, onDismiss: handleExpandedPlayerDismissed) {
       ExpandedPlayerView(
         onNavigateToEpisodeDetail: { episode, podcastTitle, imageURL in
-          pendingNavigation = .episodeDetail(episode, podcastTitle: podcastTitle, imageURL: imageURL)
+          deferredNavigation = .episodeDetail(episode, podcastTitle: podcastTitle, imageURL: imageURL)
         },
         onNavigateToPodcast: { podcast in
-          pendingNavigation = .podcastEpisodeList(podcast)
+          deferredNavigation = .podcastEpisodeList(podcast)
         }
       )
     }
@@ -171,6 +172,12 @@ struct MiniPlayerBar: View {
         )
       }
     }
+  }
+
+  private func handleExpandedPlayerDismissed() {
+    guard deferredNavigation != .none else { return }
+    pendingNavigation = deferredNavigation
+    deferredNavigation = .none
   }
 
   /// Finds an episode to play when there's no previous playback history
