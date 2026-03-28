@@ -93,6 +93,12 @@ class EpisodeDownloadModel {
     return min(lastPlaybackPosition / duration, 1.0)
   }
 
+  /// True only when the local file path exists on this device.
+  var hasLocalAudioFile: Bool {
+    guard let path = localAudioPath, !path.isEmpty else { return false }
+    return FileManager.default.fileExists(atPath: path)
+  }
+
   /// Formatted remaining time (always shows seconds)
   var remainingTimeString: String? {
     guard duration > 0 else { return nil }

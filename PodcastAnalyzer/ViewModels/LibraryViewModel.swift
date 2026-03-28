@@ -206,6 +206,17 @@ final class LibraryViewModel {
   // Use Unit Separator (U+001F) as delimiter
   private static let episodeKeyDelimiter = "\u{1F}"
 
+  nonisolated private static func hasLocalAudioFile(_ path: String?) -> Bool {
+    guard let path, !path.isEmpty else { return false }
+    return FileManager.default.fileExists(atPath: path)
+  }
+
+  nonisolated private static func podcastDedupKey(for podcast: PodcastInfoModel) -> String {
+    let rss = podcast.rssUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !rss.isEmpty { return "rss:\(rss.lowercased())" }
+    return "title:\(podcast.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+  }
+
   // Cache for O(1) lookups
   private var podcastTitleMap: [String: PodcastInfoModel] = [:]
 
@@ -483,9 +494,46 @@ final class LibraryViewModel {
 
   /// Load podcasts section independently
   private func loadPodcastsSection() async {
+    await deduplicatePodcastModels()
     // We no longer load feeds manually here, they are injected via setPodcasts
     // Just load the full lookup map
     await loadAllPodcasts()
+  }
+
+  private func deduplicatePodcastModels() async {
+    guard let context = modelContext else { return }
+
+    let descriptor = FetchDescriptor<PodcastInfoModel>(
+      sortBy: [SortDescriptor(\.lastUpdated, order: .reverse)]
+    )
+
+    guard let allPodcasts = try? context.fetch(descriptor), allPodcasts.count > 1 else { return }
+
+    var keptByKey: [String: PodcastInfoModel] = [:]
+    var duplicates: [PodcastInfoModel] = []
+
+    for podcast in allPodcasts {
+      let key = Self.podcastDedupKey(for: podcast)
+      if let existing = keptByKey[key] {
+        let keepCurrent = podcast.isSubscribed && !existing.isSubscribed
+        if keepCurrent {
+          duplicates.append(existing)
+          keptByKey[key] = podcast
+        } else {
+          duplicates.append(podcast)
+        }
+      } else {
+        keptByKey[key] = podcast
+      }
+    }
+
+    guard !duplicates.isEmpty else { return }
+
+    for duplicate in duplicates {
+      context.delete(duplicate)
+    }
+    try? context.save()
+    logger.warning("Removed \(duplicates.count) duplicate PodcastInfoModel entries")
   }
 
   /// Load saved episodes section independently
@@ -662,7 +710,7 @@ final class LibraryViewModel {
       let results = await Task.detached(priority: .userInitiated) { () -> [LibraryEpisode] in
         var seenIds = Set<String>()
         return snapshots.compactMap { snap in
-          guard let path = snap.localAudioPath, !path.isEmpty else { return nil }
+          guard Self.hasLocalAudioFile(snap.localAudioPath) else { return nil }
           guard seenIds.insert(snap.id).inserted else { return nil }
           return Self.makeLibraryEpisode(from: snap, podcastInfoMap: infoMap, delimiter: delimiter)
         }
@@ -695,8 +743,7 @@ final class LibraryViewModel {
 
       // Filter for downloaded episodes in memory (localAudioPath is not nil and not empty)
       let downloadedModels = allModels.filter { model in
-        guard let path = model.localAudioPath else { return false }
-        return !path.isEmpty
+        return model.hasLocalAudioFile
       }
       logger.info("Found \(downloadedModels.count) models with localAudioPath")
 
@@ -816,7 +863,7 @@ final class LibraryViewModel {
         let episodeKey = "\(podcastTitle)\(delimiter)\(episode.title)"
 
         // Skip if already has localAudioPath
-        if let model = modelsById[episodeKey], model.localAudioPath != nil {
+        if let model = modelsById[episodeKey], model.hasLocalAudioFile {
           continue
         }
 
@@ -885,7 +932,7 @@ final class LibraryViewModel {
           language: podcast.language,
           episodeInfo: episode,
           isStarred: snap.isStarred,
-          isDownloaded: snap.localAudioPath != nil,
+          isDownloaded: Self.hasLocalAudioFile(snap.localAudioPath),
           isCompleted: snap.isCompleted,
           lastPlaybackPosition: snap.lastPlaybackPosition,
           savedDuration: snap.duration
@@ -910,7 +957,7 @@ final class LibraryViewModel {
       language: "en",
       episodeInfo: episodeInfo,
       isStarred: snap.isStarred,
-      isDownloaded: snap.localAudioPath != nil,
+      isDownloaded: Self.hasLocalAudioFile(snap.localAudioPath),
       isCompleted: snap.isCompleted,
       lastPlaybackPosition: snap.lastPlaybackPosition,
       savedDuration: snap.duration
@@ -966,7 +1013,7 @@ final class LibraryViewModel {
             language: podcastInfo.language,
             episodeInfo: episode,
             isStarred: data?.isStarred ?? false,
-            isDownloaded: data?.localAudioPath != nil,
+            isDownloaded: Self.hasLocalAudioFile(data?.localAudioPath),
             isCompleted: data?.isCompleted ?? false,
             lastPlaybackPosition: data?.lastPlaybackPosition ?? 0,
             savedDuration: data?.duration ?? 0
@@ -1030,7 +1077,7 @@ final class LibraryViewModel {
             language: podcast.podcastInfo.language,
             episodeInfo: episode,
             isStarred: model.isStarred,
-            isDownloaded: model.localAudioPath != nil,
+            isDownloaded: Self.hasLocalAudioFile(model.localAudioPath),
             isCompleted: model.isCompleted,
             lastPlaybackPosition: model.lastPlaybackPosition,
             savedDuration: model.duration
@@ -1059,7 +1106,7 @@ final class LibraryViewModel {
       language: "en",
       episodeInfo: episodeInfo,
       isStarred: model.isStarred,
-      isDownloaded: model.localAudioPath != nil,
+      isDownloaded: Self.hasLocalAudioFile(model.localAudioPath),
       isCompleted: model.isCompleted,
       lastPlaybackPosition: model.lastPlaybackPosition,
       savedDuration: model.duration
@@ -1104,7 +1151,7 @@ final class LibraryViewModel {
         language: podcast.podcastInfo.language,
         episodeInfo: episode,
         isStarred: model.isStarred,
-        isDownloaded: model.localAudioPath != nil,
+        isDownloaded: Self.hasLocalAudioFile(model.localAudioPath),
         isCompleted: model.isCompleted,
         lastPlaybackPosition: model.lastPlaybackPosition,
         savedDuration: model.duration
@@ -1137,7 +1184,7 @@ final class LibraryViewModel {
       language: "en",  // Default language when unknown
       episodeInfo: episodeInfo,
       isStarred: model.isStarred,
-      isDownloaded: model.localAudioPath != nil,
+      isDownloaded: Self.hasLocalAudioFile(model.localAudioPath),
       isCompleted: model.isCompleted,
       lastPlaybackPosition: model.lastPlaybackPosition,
       savedDuration: model.duration

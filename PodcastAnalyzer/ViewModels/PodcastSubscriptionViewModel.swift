@@ -52,13 +52,32 @@ final class PodcastSubscriptionViewModel {
         // Fetch podcast info from RSS
         let podcastInfo = try await rssService.fetchPodcast(from: feedUrl)
 
-        // Check if already subscribed
+        if let existingByRSS = try? context.fetch(FetchDescriptor<PodcastInfoModel>(
+          predicate: #Predicate { $0.rssUrl == feedUrl }
+        )).first {
+          existingByRSS.isSubscribed = true
+          existingByRSS.podcastInfo = podcastInfo
+          existingByRSS.title = podcastInfo.title
+          existingByRSS.rssUrl = podcastInfo.rssUrl
+          existingByRSS.lastUpdated = Date()
+          try context.save()
+          subscriptionSuccess = true
+          isSubscribing = false
+          return
+        }
+
         let title = podcastInfo.title
         let existingDescriptor = FetchDescriptor<PodcastInfoModel>(
           predicate: #Predicate { $0.title == title }
         )
 
-        if (try? context.fetch(existingDescriptor).first) != nil {
+        if let existingByTitle = try? context.fetch(existingDescriptor).first {
+          existingByTitle.isSubscribed = true
+          existingByTitle.podcastInfo = podcastInfo
+          existingByTitle.title = podcastInfo.title
+          existingByTitle.rssUrl = podcastInfo.rssUrl
+          existingByTitle.lastUpdated = Date()
+          try context.save()
           subscriptionSuccess = true
           isSubscribing = false
           return

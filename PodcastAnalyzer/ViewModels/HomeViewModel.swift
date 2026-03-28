@@ -99,6 +99,11 @@ final class HomeViewModel {
   // Use Unit Separator (U+001F) as delimiter
   private static let episodeKeyDelimiter = "\u{1F}"
 
+  nonisolated private static func hasLocalAudioFile(_ path: String?) -> Bool {
+    guard let path, !path.isEmpty else { return false }
+    return FileManager.default.fileExists(atPath: path)
+  }
+
   /// Whether the "For You" section should be shown (cached from UserDefaults)
   var showForYouRecommendations: Bool {
     UserDefaults.standard.object(forKey: "showForYouRecommendations") == nil ||
@@ -258,7 +263,7 @@ final class HomeViewModel {
             language: podcastModel.podcastInfo.language,
             episodeInfo: episode,
             isStarred: model?.isStarred ?? false,
-            isDownloaded: model?.localAudioPath != nil,
+            isDownloaded: Self.hasLocalAudioFile(model?.localAudioPath),
             isCompleted: model?.isCompleted ?? false,
             lastPlaybackPosition: model?.lastPlaybackPosition ?? 0,
             savedDuration: model?.duration ?? 0
@@ -313,7 +318,7 @@ final class HomeViewModel {
             language: "",
             episodeInfo: episodeInfo,
             isStarred: currentModel?.isStarred ?? false,
-            isDownloaded: currentModel?.localAudioPath != nil,
+            isDownloaded: Self.hasLocalAudioFile(currentModel?.localAudioPath),
             isCompleted: false,
             lastPlaybackPosition: currentModel?.lastPlaybackPosition ?? 0,
             savedDuration: currentModel?.duration ?? 0
@@ -512,13 +517,32 @@ final class HomeViewModel {
 
         let podcastInfo = try await rssService.fetchPodcast(from: feedUrl)
 
-        let title = podcastInfo.title
-        let existingDescriptor = FetchDescriptor<PodcastInfoModel>(
-          predicate: #Predicate { $0.title == title }
-        )
+        if let existingByRSS = try? context.fetch(FetchDescriptor<PodcastInfoModel>(
+          predicate: #Predicate { $0.rssUrl == feedUrl }
+        )).first {
+          existingByRSS.isSubscribed = true
+          existingByRSS.podcastInfo = podcastInfo
+          existingByRSS.title = podcastInfo.title
+          existingByRSS.rssUrl = podcastInfo.rssUrl
+          existingByRSS.lastUpdated = Date()
+          try context.save()
+          await loadUpNextEpisodes()
+          logger.info("Reused existing podcast row for \(podcastInfo.title)")
+          return
+        }
 
-        if (try? context.fetch(existingDescriptor).first) != nil {
-          logger.info("Already subscribed to \(podcastInfo.title)")
+        let title = podcastInfo.title
+        if let existingByTitle = try? context.fetch(FetchDescriptor<PodcastInfoModel>(
+          predicate: #Predicate { $0.title == title }
+        )).first {
+          existingByTitle.isSubscribed = true
+          existingByTitle.podcastInfo = podcastInfo
+          existingByTitle.title = podcastInfo.title
+          existingByTitle.rssUrl = podcastInfo.rssUrl
+          existingByTitle.lastUpdated = Date()
+          try context.save()
+          await loadUpNextEpisodes()
+          logger.info("Reused title-matched podcast row for \(podcastInfo.title)")
           return
         }
 
@@ -665,7 +689,7 @@ final class HomeViewModel {
             language: podcastModel.podcastInfo.language,
             episodeInfo: episode,
             isStarred: model?.isStarred ?? false,
-            isDownloaded: model?.localAudioPath != nil,
+            isDownloaded: Self.hasLocalAudioFile(model?.localAudioPath),
             isCompleted: model?.isCompleted ?? false,
             lastPlaybackPosition: model?.lastPlaybackPosition ?? 0,
             savedDuration: model?.duration ?? 0
