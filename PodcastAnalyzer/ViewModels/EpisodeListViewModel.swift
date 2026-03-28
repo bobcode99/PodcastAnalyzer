@@ -56,6 +56,7 @@ final class EpisodeListViewModel {
   private let rssService = PodcastRssService()
   private var modelContext: ModelContext?
   private var downloadCompletionObserver: NSObjectProtocol?
+  private var parseDescriptionTask: Task<Void, Never>?
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
   private static let episodeKeyDelimiter = "\u{1F}"
@@ -253,8 +254,10 @@ final class EpisodeListViewModel {
       .set(rootStyle: rootStyle)
       .build()
 
-    Task {
+    parseDescriptionTask?.cancel()
+    parseDescriptionTask = Task {
       let attributedString = parser.render(html)
+      guard !Task.isCancelled else { return }
       descriptionCache.setObject(attributedString, forKey: cacheKey)
       self.descriptionContent = .parsed(attributedString)
     }
@@ -382,5 +385,7 @@ final class EpisodeListViewModel {
       NotificationCenter.default.removeObserver(observer)
       downloadCompletionObserver = nil
     }
+    parseDescriptionTask?.cancel()
+    parseDescriptionTask = nil
   }
 }

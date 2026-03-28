@@ -27,7 +27,12 @@ private let logger = Logger(subsystem: "com.podcast.analyzer", category: "Episod
 /// Keyed by "\(html.hashValue)_\(fontSize)" to distinguish styles.
 /// NSCache auto-evicts under memory pressure — no manual purging needed.
 /// @MainActor because both ViewModels that use it are @MainActor-isolated.
-@MainActor let descriptionCache = NSCache<NSString, NSAttributedString>()
+@MainActor let descriptionCache: NSCache<NSString, NSAttributedString> = {
+  let cache = NSCache<NSString, NSAttributedString>()
+  cache.countLimit = 100
+  cache.totalCostLimit = 50_000_000  // 50 MB
+  return cache
+}()
 
 // MARK: - Transcript State
 
@@ -218,6 +223,9 @@ final class EpisodeDetailViewModel {
 
   @ObservationIgnored
   private var rssTranscriptCheckTask: Task<Void, Never>?
+
+  @ObservationIgnored
+  private var rssTranscriptDownloadTask: Task<Void, Never>?
 
   @ObservationIgnored
   private var loadExistingTranscriptTask: Task<Void, Never>?
@@ -477,27 +485,28 @@ final class EpisodeDetailViewModel {
   func shareTimestampedLink(seconds: TimeInterval) {
     let totalSeconds = Int(seconds)
     shareTask?.cancel()
-    shareTask = Task {
+    shareTask = Task { [weak self] in
+      guard let self else { return }
       do {
-        let appleUrl = try await withTimeout(seconds: 5) {
+        let appleUrl = try await self.withTimeout(seconds: 5) {
           try await self.applePodcastService.getAppleEpisodeLink(
             episodeTitle: self.episode.title,
             episodeGuid: self.episode.guid
           )
         }
         guard !Task.isCancelled else { return }
-        var urlString = appleUrl ?? episode.audioURL
+        var urlString = appleUrl ?? self.episode.audioURL
         if totalSeconds > 0 {
           urlString = (urlString ?? "") + "&t=\(totalSeconds)"
         }
-        shareWithURL(urlString)
+        self.shareWithURL(urlString)
       } catch {
         guard !Task.isCancelled else { return }
-        var urlString = episode.audioURL ?? ""
+        var urlString = self.episode.audioURL ?? ""
         if totalSeconds > 0 {
           urlString += "&t=\(totalSeconds)"
         }
-        shareWithURL(urlString)
+        self.shareWithURL(urlString)
       }
     }
   }
@@ -688,7 +697,8 @@ final class EpisodeDetailViewModel {
       .set(rootStyle: rootStyle)
       .build()
 
-    parseDescriptionTask = Task {
+    parseDescriptionTask = Task { [weak self] in
+      guard let self else { return }
       let attributedString = parser.render(html)
       descriptionCache.setObject(attributedString, forKey: cacheKey)
       self.descriptionContent = .parsed(attributedString)
@@ -710,21 +720,22 @@ final class EpisodeDetailViewModel {
     shareTask?.cancel()
 
     // Try to find Apple Podcast URL first with timeout
-    shareTask = Task {
+    shareTask = Task { [weak self] in
+      guard let self else { return }
       do {
-        let appleUrl = try await withTimeout(seconds: 5) {
+        let appleUrl = try await self.withTimeout(seconds: 5) {
           try await self.applePodcastService.getAppleEpisodeLink(
             episodeTitle: self.episode.title,
             episodeGuid: self.episode.guid
           )
         }
         if !Task.isCancelled {
-          shareWithURL(appleUrl ?? episode.audioURL)
+          self.shareWithURL(appleUrl ?? self.episode.audioURL)
         }
       } catch {
         if !Task.isCancelled {
           // On error, fall back to audio URL
-          shareWithURL(episode.audioURL)
+          self.shareWithURL(self.episode.audioURL)
         }
       }
     }
@@ -785,14 +796,16 @@ final class EpisodeDetailViewModel {
     }
 
     translationTask?.cancel()
-    translationTask = Task {
+    translationTask = Task { [weak self] in
+      guard let self else { return }
       // Try to load existing transcript translation first
-      if let translated = await translationService.loadExistingTranslation(
-        segments: transcriptSegments,
-        episodeTitle: episode.title,
-        podcastTitle: podcastTitle,
+      if let translated = await self.translationService.loadExistingTranslation(
+        segments: self.transcriptSegments,
+        episodeTitle: self.episode.title,
+        podcastTitle: self.podcastTitle,
         targetLanguage: targetLang
       ) {
+        guard !Task.isCancelled else { return }
         self.transcriptSegments = translated
         self.regroupSentences()
         self.translationStatus = .completed
@@ -804,6 +817,7 @@ final class EpisodeDetailViewModel {
         return
       }
 
+      guard !Task.isCancelled else { return }
       // No cached translation, trigger the transcript translation task
       self.transcriptTranslationTrigger.toggle()
     }
@@ -812,12 +826,13 @@ final class EpisodeDetailViewModel {
   /// Check which translation languages are available (cached)
   func checkAvailableTranslations() {
     availableTranslationsTask?.cancel()
-    availableTranslationsTask = Task {
-      let available = await fileStorage.listAvailableTranslations(
-        for: episode.title,
-        podcastTitle: podcastTitle
+    availableTranslationsTask = Task { [weak self] in
+      guard let self else { return }
+      let available = await self.fileStorage.listAvailableTranslations(
+        for: self.episode.title,
+        podcastTitle: self.podcastTitle
       )
-
+      guard !Task.isCancelled else { return }
       self.availableTranslationLanguages = available
       logger.info("Found \(available.count) cached translations: \(available)")
     }
@@ -834,20 +849,23 @@ final class EpisodeDetailViewModel {
     let targetLang = (selectedTranslationLanguage ?? subtitleSettings.targetLanguage).languageIdentifier
 
     translationTask?.cancel()
-    translationTask = Task {
+    translationTask = Task { [weak self] in
+      guard let self else { return }
       // Try to load existing translation first
-      if let translated = await translationService.loadExistingTranslation(
-        segments: transcriptSegments,
-        episodeTitle: episode.title,
-        podcastTitle: podcastTitle,
+      if let translated = await self.translationService.loadExistingTranslation(
+        segments: self.transcriptSegments,
+        episodeTitle: self.episode.title,
+        podcastTitle: self.podcastTitle,
         targetLanguage: targetLang
       ) {
+        guard !Task.isCancelled else { return }
         self.transcriptSegments = translated
         self.translationStatus = .completed
         logger.info("Loaded cached translation for \(self.episode.title)")
         return
       }
 
+      guard !Task.isCancelled else { return }
       // No cached translation, trigger the translation task
       self.translationStatus = .preparingSession
       self.transcriptTranslationTrigger.toggle()
@@ -986,13 +1004,15 @@ final class EpisodeDetailViewModel {
     let targetLang = settings.targetLanguage.languageIdentifier
 
     translationTask?.cancel()
-    translationTask = Task {
-      if let translated = await translationService.loadExistingTranslation(
-        segments: transcriptSegments,
-        episodeTitle: episode.title,
-        podcastTitle: podcastTitle,
+    translationTask = Task { [weak self] in
+      guard let self else { return }
+      if let translated = await self.translationService.loadExistingTranslation(
+        segments: self.transcriptSegments,
+        episodeTitle: self.episode.title,
+        podcastTitle: self.podcastTitle,
         targetLanguage: targetLang
       ) {
+        guard !Task.isCancelled else { return }
         self.transcriptSegments = translated
         self.regroupSentences()
         // Auto-switch display mode so translated text is visible
@@ -1084,21 +1104,22 @@ final class EpisodeDetailViewModel {
   /// Check if RSS transcript is available from the feed
   func checkRSSTranscriptAvailability() {
     rssTranscriptCheckTask?.cancel()
-    rssTranscriptCheckTask = Task {
-      let state = await transcriptDownloadService.getDownloadState(
-        episodeTitle: episode.title,
-        podcastTitle: podcastTitle,
-        transcriptURL: episode.transcriptURL,
-        transcriptType: episode.transcriptType
+    rssTranscriptCheckTask = Task { [weak self] in
+      guard let self else { return }
+      let state = await self.transcriptDownloadService.getDownloadState(
+        episodeTitle: self.episode.title,
+        podcastTitle: self.podcastTitle,
+        transcriptURL: self.episode.transcriptURL,
+        transcriptType: self.episode.transcriptType
       )
-
-      rssTranscriptState = state
+      guard !Task.isCancelled else { return }
+      self.rssTranscriptState = state
 
       // If already downloaded, load the transcript
       if case .downloaded = state {
         self.loadExistingTranscriptTask?.cancel()
-        self.loadExistingTranscriptTask = Task {
-          await self.loadExistingTranscript()
+        self.loadExistingTranscriptTask = Task { [weak self] in
+          await self?.loadExistingTranscript()
         }
       }
     }
@@ -1112,32 +1133,36 @@ final class EpisodeDetailViewModel {
       return
     }
 
-    Task {
-      rssTranscriptState = .downloading(progress: 0.5)
+    rssTranscriptDownloadTask?.cancel()
+    rssTranscriptDownloadTask = Task { [weak self] in
+      guard let self else { return }
+      self.rssTranscriptState = .downloading(progress: 0.5)
 
       do {
-        let savedURL = try await transcriptDownloadService.downloadTranscript(
+        let savedURL = try await self.transcriptDownloadService.downloadTranscript(
           from: url,
           type: type,
-          episodeTitle: episode.title,
-          podcastTitle: podcastTitle
+          episodeTitle: self.episode.title,
+          podcastTitle: self.podcastTitle
         )
 
-        rssTranscriptState = .downloaded(localPath: savedURL.path)
+        guard !Task.isCancelled else { return }
+        self.rssTranscriptState = .downloaded(localPath: savedURL.path)
         logger.info("RSS transcript downloaded successfully")
 
         // Track that this transcript came from RSS
-        if let model = episodeModel {
+        if let model = self.episodeModel {
           model.transcriptSource = "rss"
-          transcriptSource = "rss"
-          try? modelContext?.save()
+          self.transcriptSource = "rss"
+          try? self.modelContext?.save()
         }
 
         // Load the transcript
-        await loadExistingTranscript()
+        await self.loadExistingTranscript()
 
       } catch {
-        rssTranscriptState = .failed(error: error.localizedDescription)
+        guard !Task.isCancelled else { return }
+        self.rssTranscriptState = .failed(error: error.localizedDescription)
         logger.error("RSS transcript download failed: \(error.localizedDescription)")
       }
     }
@@ -1185,25 +1210,29 @@ final class EpisodeDetailViewModel {
 
   func checkTranscriptStatus() {
     checkTranscriptTask?.cancel()
-    checkTranscriptTask = Task {
+    checkTranscriptTask = Task { [weak self] in
+      guard let self else { return }
       // Get podcast language and create transcript service
-      let language = getPodcastLanguage()
+      let language = self.getPodcastLanguage()
       let transcriptService = TranscriptService(language: language)
-      isModelReady = await transcriptService.isModelReady()
+      let modelReady = await transcriptService.isModelReady()
 
       // Check if transcript already exists (either from RSS or generated)
-      let exists = await fileStorage.captionFileExists(
-        for: episode.title,
-        podcastTitle: podcastTitle
+      let exists = await self.fileStorage.captionFileExists(
+        for: self.episode.title,
+        podcastTitle: self.podcastTitle
       )
+      guard !Task.isCancelled else { return }
+      self.isModelReady = modelReady
 
       if exists {
-        await loadExistingTranscript()
+        await self.loadExistingTranscript()
       } else {
+        guard !Task.isCancelled else { return }
         // Check for RSS transcript availability
-        checkRSSTranscriptAvailability()
+        self.checkRSSTranscriptAvailability()
         // Check for active background transcript jobs and resume observation
-        checkAndObserveTranscriptJob()
+        self.checkAndObserveTranscriptJob()
       }
     }
   }
@@ -1347,9 +1376,11 @@ final class EpisodeDetailViewModel {
   /// Load transcript generation date
   func loadTranscriptDate() {
     loadTranscriptDateTask?.cancel()
-    loadTranscriptDateTask = Task {
-      let date = await transcriptGeneratedAt
-      cachedTranscriptDate = date
+    loadTranscriptDateTask = Task { [weak self] in
+      guard let self else { return }
+      let date = await self.transcriptGeneratedAt
+      guard !Task.isCancelled else { return }
+      self.cachedTranscriptDate = date
     }
   }
 
@@ -2482,6 +2513,9 @@ final class EpisodeDetailViewModel {
     rssTranscriptCheckTask?.cancel()
     rssTranscriptCheckTask = nil
 
+    rssTranscriptDownloadTask?.cancel()
+    rssTranscriptDownloadTask = nil
+
     loadExistingTranscriptTask?.cancel()
     loadExistingTranscriptTask = nil
 
@@ -2502,6 +2536,13 @@ final class EpisodeDetailViewModel {
 
     cloudQuestionTask?.cancel()
     cloudQuestionTask = nil
+
+    // Release large transcript data
+    transcriptText = ""
+    transcriptSegments = []
+    rawTranscriptSegments = []
+    groupedSentences = []
+    wordTimingsData = nil
   }
 
   // Tasks are cancelled via cleanup() from onDisappear; deinit removed
