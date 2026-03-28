@@ -59,15 +59,9 @@ struct QuickAccessCard: View {
 struct PodcastGridCell: View {
   let podcast: PodcastInfoModel
 
-  private static let relativeDateFormatter: RelativeDateTimeFormatter = {
-    let formatter = RelativeDateTimeFormatter()
-    formatter.unitsStyle = .abbreviated
-    return formatter
-  }()
-
   private var latestEpisodeDate: String? {
     guard let date = podcast.podcastInfo.episodes.first?.pubDate else { return nil }
-    return Self.relativeDateFormatter.localizedString(for: date, relativeTo: Date())
+    return Formatters.formatRelativeDate(date)
   }
 
   var body: some View {

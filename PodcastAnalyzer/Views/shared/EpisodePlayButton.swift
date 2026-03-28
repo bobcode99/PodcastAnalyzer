@@ -166,18 +166,42 @@ struct EpisodePlayButton: View {
   }
 
   private var durationText: String? {
-      // Determine which value to format: remaining time or total duration
-      let isInProgress = playbackProgress > 0 && playbackProgress < 1
+      let isInProgress = showsPlaybackProgress
 
-      // If we have duration from the model, use it for precise calculation
       if let totalSeconds = duration, totalSeconds > 0 {
           let secondsToFormat = isInProgress ? (totalSeconds - lastPlaybackPosition) : totalSeconds
           let timeString = formatTimeUnits(Int(secondsToFormat))
-          return isInProgress ? "\(timeString) left" : timeString
+          return isInProgress ? "\(timeString)\(remainingTimeSuffix)" : timeString
       }
 
-      // Fallback to formatted duration from episode metadata (for unplayed episodes)
       return formattedDuration
+  }
+
+  private var showsPlaybackProgress: Bool {
+      playbackProgress > 0 && playbackProgress < 1 && lastPlaybackPosition >= 1
+  }
+
+  private var localeIdentifier: String {
+      Locale.current.identifier.lowercased()
+  }
+
+  private var languageCode: String {
+      Locale.current.language.languageCode?.identifier ?? "en"
+  }
+
+  private var usesChineseUnits: Bool {
+      languageCode.hasPrefix("zh")
+  }
+
+  private var usesSimplifiedChinese: Bool {
+      localeIdentifier.contains("hans")
+  }
+
+  private var remainingTimeSuffix: String {
+      if usesChineseUnits {
+          return usesSimplifiedChinese ? "剩余" : "剩餘"
+      }
+      return " left"
   }
 
   private func formatTimeUnits(_ totalSeconds: Int) -> String {
@@ -185,15 +209,14 @@ struct EpisodePlayButton: View {
       let h = seconds / 3600
       let m = (seconds % 3600) / 60
       let s = seconds % 60
+      let hourUnit = usesChineseUnits ? "時" : "h"
+      let minuteUnit = usesChineseUnits ? "分" : "m"
 
       if h > 0 {
-          // "1h 5m"
-          return "\(h)h \(m)m"
+          return "\(h)\(hourUnit) \(m)\(minuteUnit)"
       } else if m > 0 {
-          // "50m"
-          return "\(m)m"
+          return "\(m)\(minuteUnit)"
       } else {
-          // "0:44"
           return String(format: "0:%02d", s)
       }
   }
@@ -218,7 +241,7 @@ struct EpisodePlayButton: View {
         playIcon(size: 9)
 
         // Progress bar (only show when partially played)
-        if playbackProgress > 0 && playbackProgress < 1 {
+        if showsPlaybackProgress {
           ProgressView(value: playbackProgress)
             .progressViewStyle(.linear)
             .tint(.white)
@@ -267,7 +290,7 @@ struct EpisodePlayButton: View {
         playIcon(size: 14)
 
         // Progress bar (only show when partially played)
-        if playbackProgress > 0 && playbackProgress < 1 {
+        if showsPlaybackProgress {
           ProgressView(value: playbackProgress)
             .progressViewStyle(.linear)
             .tint(.white)
