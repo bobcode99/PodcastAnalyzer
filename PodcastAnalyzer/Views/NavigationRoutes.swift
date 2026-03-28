@@ -22,7 +22,15 @@ struct EpisodeDetailRoute: Hashable {
   let podcastLanguage: String?
 }
 
-// MARK: - Podcast Browse Route
+// MARK: - Library Sub-page Routes
+
+/// Identifies which library sub-page to navigate to.
+enum LibrarySubpageRoute: Hashable {
+  case saved
+  case downloaded
+  case latest
+  case downloadingEpisodes
+}
 
 /// Value-based navigation route for EpisodeListView. Using a route type
 /// prevents legacy NavigationLink(destination:) from constructing the

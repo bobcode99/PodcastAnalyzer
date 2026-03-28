@@ -356,6 +356,9 @@ struct EpisodeListView: View {
             episodeModel: viewModel.episodeModels[
               viewModel.makeEpisodeKey(episode)
             ],
+            precomputedDownloadState: viewModel.downloadStatesSnapshot[
+              viewModel.makeEpisodeKey(episode)
+            ],
             showArtwork: showEpisodeArtwork,
             onToggleStar: {
               viewModel.toggleStar(for: episode)

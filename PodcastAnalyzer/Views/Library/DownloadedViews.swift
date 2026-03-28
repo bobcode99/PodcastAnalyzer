@@ -21,7 +21,7 @@ struct DownloadedPodcastsGridView: View {
 
   var body: some View {
     Group {
-      if viewModel.podcastsWithDownloads.isEmpty {
+      if viewModel.podcastsWithDownloads.isEmpty && viewModel.downloadingEpisodes.isEmpty {
         VStack(spacing: 16) {
           Image(systemName: "arrow.down.circle")
             .font(.system(size: 50))
@@ -35,29 +35,46 @@ struct DownloadedPodcastsGridView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         ScrollView {
-          LazyVGrid(columns: columns, spacing: 16) {
-            ForEach(viewModel.podcastsWithDownloads, id: \.podcast.id) { item in
-              NavigationLink(destination: EpisodeListView(
-                podcastModel: item.podcast,
-                initialFilter: .downloaded
-              )) {
-                DownloadedPodcastCell(
-                  podcast: item.podcast,
-                  downloadCount: item.downloadCount
-                )
-              }
-              .buttonStyle(.plain)
-              .contentShape(Rectangle())
-              .podcastContextMenu(
-                podcast: item.podcast,
-                modelContext: modelContext,
-                onUnsubscribed: {
-                  Task { await viewModel.refreshDownloadedEpisodes() }
+          LazyVStack(alignment: .leading, spacing: 20) {
+            // MARK: - Downloading Section
+            if !viewModel.downloadingEpisodes.isEmpty {
+              ActiveDownloadsSectionCard(viewModel: viewModel)
+                .padding(.horizontal)
+            }
+
+            // MARK: - Downloaded Podcasts Grid
+            if !viewModel.podcastsWithDownloads.isEmpty {
+              VStack(alignment: .leading, spacing: 12) {
+                Text("Podcasts")
+                  .font(.subheadline)
+                  .fontWeight(.semibold)
+                  .foregroundStyle(.secondary)
+                  .padding(.horizontal)
+
+                LazyVGrid(columns: columns, spacing: 16) {
+                  ForEach(viewModel.podcastsWithDownloads, id: \.podcast.id) { item in
+                    NavigationLink(value: PodcastBrowseRoute(podcastModel: item.podcast)) {
+                      DownloadedPodcastCell(
+                        podcast: item.podcast,
+                        downloadCount: item.downloadCount
+                      )
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .podcastContextMenu(
+                      podcast: item.podcast,
+                      modelContext: modelContext,
+                      onUnsubscribed: {
+                        Task { await viewModel.refreshDownloadedEpisodes() }
+                      }
+                    )
+                  }
                 }
-              )
+                .padding(.horizontal)
+              }
             }
           }
-          .padding(.horizontal)
+          .padding(.vertical)
         }
       }
     }
@@ -74,6 +91,167 @@ struct DownloadedPodcastsGridView: View {
     .task {
       await viewModel.refreshDownloadedEpisodes()
     }
+  }
+}
+
+// MARK: - Active Downloads Section Card
+
+/// Compact card shown at the top of DownloadedPodcastsGridView when
+/// downloads are in progress. Tapping navigates to ActiveDownloadsView.
+struct ActiveDownloadsSectionCard: View {
+  let viewModel: LibraryViewModel
+
+  var body: some View {
+    NavigationLink(value: LibrarySubpageRoute.downloadingEpisodes) {
+      HStack(spacing: 12) {
+        ZStack {
+          Circle()
+            .fill(Color.blue.opacity(0.12))
+            .frame(width: 44, height: 44)
+          ProgressView()
+            .scaleEffect(0.7)
+            .tint(.blue)
+        }
+
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Downloading")
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .foregroundStyle(.primary)
+          Text(downloadingSubtitle)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+
+        Spacer()
+
+        Image(systemName: "chevron.right")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+      .background(.regularMaterial, in: .rect(cornerRadius: 12))
+    }
+    .buttonStyle(.plain)
+  }
+
+  private var downloadingSubtitle: String {
+    let count = viewModel.downloadingEpisodes.count
+    return count == 1 ? "1 episode" : "\(count) episodes"
+  }
+}
+
+// MARK: - Active Downloads View
+
+/// Full list of all currently downloading episodes with cancel support.
+struct ActiveDownloadsView: View {
+  let viewModel: LibraryViewModel
+  private let downloadManager = DownloadManager.shared
+
+  var body: some View {
+    Group {
+      if viewModel.downloadingEpisodes.isEmpty {
+        VStack(spacing: 16) {
+          Image(systemName: "arrow.down.circle")
+            .font(.system(size: 50))
+            .foregroundStyle(.secondary)
+          Text("No Active Downloads")
+            .font(.headline)
+          Text("Downloads in progress will appear here")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        List {
+          ForEach(viewModel.downloadingEpisodes) { episode in
+            ActiveDownloadRow(episode: episode, downloadManager: downloadManager)
+              .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+          }
+        }
+        .listStyle(.plain)
+      }
+    }
+    .navigationTitle("Downloading")
+    #if os(iOS)
+    .navigationBarTitleDisplayMode(.inline)
+    #endif
+  }
+}
+
+// MARK: - Active Download Row (with cancel button)
+
+struct ActiveDownloadRow: View {
+  let episode: DownloadingEpisode
+  let downloadManager: DownloadManager
+
+  private var statusText: String {
+    switch episode.state {
+    case .downloading(let progress):
+      return "\(Int(progress * 100))%"
+    case .finishing:
+      return "Saving..."
+    default:
+      return ""
+    }
+  }
+
+  var body: some View {
+    HStack(spacing: 12) {
+      CachedAsyncImage(url: URL(string: episode.imageURL ?? "")) { image in
+        image
+          .resizable()
+          .aspectRatio(contentMode: .fill)
+      } placeholder: {
+        Rectangle()
+          .fill(Color.gray.opacity(0.2))
+          .overlay(
+            Image(systemName: "music.note")
+              .foregroundStyle(.gray)
+          )
+      }
+      .frame(width: 56, height: 56)
+      .clipShape(.rect(cornerRadius: 8))
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text(episode.episodeTitle)
+          .font(.subheadline)
+          .fontWeight(.medium)
+          .lineLimit(2)
+
+        Text(episode.podcastTitle)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+
+        ProgressView(value: episode.progress)
+          .progressViewStyle(.linear)
+          .tint(.blue)
+      }
+
+      Spacer()
+
+      VStack(alignment: .trailing, spacing: 6) {
+        Text(statusText)
+          .font(.caption)
+          .foregroundStyle(.blue)
+          .fontWeight(.medium)
+
+        if case .downloading = episode.state {
+          Button("Cancel") {
+            downloadManager.cancelDownload(
+              episodeTitle: episode.episodeTitle,
+              podcastTitle: episode.podcastTitle
+            )
+          }
+          .font(.caption)
+          .foregroundStyle(.red)
+          .buttonStyle(.plain)
+        }
+      }
+    }
+    .padding(.vertical, 4)
   }
 }
 

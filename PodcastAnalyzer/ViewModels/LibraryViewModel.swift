@@ -527,6 +527,12 @@ final class LibraryViewModel {
   }
 
   func refreshDownloadedEpisodes() async {
+    // Ensure the podcast title map is populated so that podcastsWithDownloads
+    // can look up PodcastInfoModel by title. This is a no-op if already loaded.
+    if podcastTitleMap.isEmpty {
+      await loadAllPodcasts()
+    }
+
     // Only run the expensive disk scan once per session.  The scan is already triggered
     // by loadDownloadedSection() during initial load; calling it again on every
     // view re-appearance (tab switch) wastes significant I/O and memory.

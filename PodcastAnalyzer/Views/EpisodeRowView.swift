@@ -240,7 +240,12 @@ struct EpisodeRowView: View {
         cachedPlainDescription = plainDescription
       }
       if !hasAIAnalysis {
-        hasAIAnalysis = statusChecker.hasAIAnalysis(in: modelContext)
+        let checker = EpisodeStatusChecker(
+          episodeTitle: episode.title,
+          podcastTitle: podcastTitle,
+          audioURL: episode.audioURL
+        )
+        hasAIAnalysis = checker.hasAIAnalysis(in: modelContext)
       }
     }
   }

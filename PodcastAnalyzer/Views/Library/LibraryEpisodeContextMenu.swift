@@ -41,7 +41,7 @@ struct LibraryEpisodeContextMenu: View {
   @ViewBuilder
   private var goToShowSection: some View {
     if let podcastModel {
-      NavigationLink(destination: EpisodeListView(podcastModel: podcastModel)) {
+      NavigationLink(value: PodcastBrowseRoute(podcastModel: podcastModel)) {
         Label("Go to Show", systemImage: "square.stack")
       }
     } else {

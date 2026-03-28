@@ -53,6 +53,39 @@ struct LibraryView: View {
     }
     .navigationTitle(Constants.libraryString)
     .platformToolbarTitleDisplayMode()
+    .navigationDestination(for: LibrarySubpageRoute.self) { route in
+      switch route {
+      case .saved:
+        SavedEpisodesView(viewModel: viewModel, showEpisodeArtwork: showEpisodeArtwork)
+      case .downloaded:
+        DownloadedPodcastsGridView(viewModel: viewModel)
+      case .latest:
+        LatestEpisodesView(viewModel: viewModel, showEpisodeArtwork: showEpisodeArtwork)
+      case .downloadingEpisodes:
+        ActiveDownloadsView(viewModel: viewModel)
+      }
+    }
+    .navigationDestination(for: PodcastBrowseRoute.self) { route in
+      if let model = route.podcastModel {
+        EpisodeListView(podcastModel: model)
+      } else if let collectionId = route.collectionId {
+        EpisodeListView(
+          podcastName: route.podcastName,
+          podcastArtwork: route.artworkURL,
+          artistName: route.artistName,
+          collectionId: collectionId,
+          applePodcastUrl: route.applePodcastURL
+        )
+      }
+    }
+    .navigationDestination(for: EpisodeDetailRoute.self) { route in
+      EpisodeDetailView(
+        episode: route.episode,
+        podcastTitle: route.podcastTitle,
+        fallbackImageURL: route.fallbackImageURL,
+        podcastLanguage: route.podcastLanguage ?? "en"
+      )
+    }
     .refreshable {
       await viewModel.refreshAllPodcasts()
     }
@@ -98,7 +131,7 @@ struct LibraryView: View {
   private var quickAccessSection: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 12) {
-        NavigationLink(destination: SavedEpisodesView(viewModel: viewModel, showEpisodeArtwork: showEpisodeArtwork)) {
+        NavigationLink(value: LibrarySubpageRoute.saved) {
           QuickAccessCard(
             icon: "star.fill",
             iconColor: .yellow,
@@ -109,7 +142,7 @@ struct LibraryView: View {
         }
         .buttonStyle(.plain)
 
-        NavigationLink(destination: DownloadedPodcastsGridView(viewModel: viewModel)) {
+        NavigationLink(value: LibrarySubpageRoute.downloaded) {
           QuickAccessCard(
             icon: "arrow.down.circle.fill",
             iconColor: .green,
@@ -121,7 +154,7 @@ struct LibraryView: View {
         .buttonStyle(.plain)
       }
 
-      NavigationLink(destination: LatestEpisodesView(viewModel: viewModel, showEpisodeArtwork: showEpisodeArtwork)) {
+      NavigationLink(value: LibrarySubpageRoute.latest) {
         HStack {
           HStack(spacing: 8) {
             Image(systemName: "clock.fill")
@@ -173,7 +206,7 @@ struct LibraryView: View {
       } else {
         LazyVGrid(columns: columns, spacing: 16) {
           ForEach(sortedPodcasts) { podcast in
-            NavigationLink(destination: EpisodeListView(podcastModel: podcast)) {
+            NavigationLink(value: PodcastBrowseRoute(podcastModel: podcast)) {
               PodcastGridCell(podcast: podcast)
             }
             .buttonStyle(.plain)

@@ -57,9 +57,23 @@ final class EpisodeListViewModel {
   private var modelContext: ModelContext?
   private var downloadCompletionObserver: NSObjectProtocol?
   private var parseDescriptionTask: Task<Void, Never>?
+  @ObservationIgnored private var isCleaned = false
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
   private static let episodeKeyDelimiter = "\u{1F}"
+
+  // MARK: - Throttled Download States Snapshot
+  //
+  // PERFORMANCE: Exposing a throttled snapshot here means EpisodeRowView rows no
+  // longer subscribe directly to DownloadManager.downloadStates. Instead, only
+  // this ViewModel re-renders (once) when download progress changes significantly,
+  // and the snapshot is passed to each row as a let constant — preventing cascade
+  // re-renders of every visible row on every URLSession progress tick.
+
+  /// Throttled snapshot of download states for episodes in this podcast.
+  /// Updated at most once per 250 ms of aggregate progress, mirroring the
+  /// throttle already applied in DownloadManager's URLSession delegate.
+  private(set) var downloadStatesSnapshot: [String: DownloadState] = [:]
 
   // MARK: - Cached Filtered Episodes
 
@@ -136,9 +150,59 @@ final class EpisodeListViewModel {
     self.selectedFilter = initialFilter
     recomputeFilteredEpisodes()
     parseDescription()
+    observeDownloadStates()
     #if DEBUG
     viewModelLogger.info("📦 EpisodeListViewModel INIT: \(self.instanceId) for \(podcastModel.podcastInfo.title)")
     #endif
+  }
+
+  // MARK: - Download State Observation
+
+  /// Observe DownloadManager.downloadStates with an early-exit guard:
+  /// only rebuild the snapshot when there's a meaningful change for
+  /// episodes belonging to this podcast. This prevents every EpisodeRowView
+  /// from re-rendering on each URLSession progress callback.
+  private func observeDownloadStates() {
+    guard !isCleaned else { return }
+
+    withObservationTracking {
+      _ = downloadManager.downloadStates
+    } onChange: {
+      Task { @MainActor [weak self] in
+        guard let self, !self.isCleaned else { return }
+        self.rebuildDownloadStatesSnapshot()
+        self.observeDownloadStates()
+      }
+    }
+  }
+
+  private func rebuildDownloadStatesSnapshot() {
+    let podcastTitle = podcastModel.podcastInfo.title
+    var snapshot: [String: DownloadState] = [:]
+    for (key, state) in downloadManager.downloadStates {
+      // Only include keys that belong to this podcast
+      guard key.hasPrefix(podcastTitle) else { continue }
+      switch state {
+      case .downloading, .finishing:
+        snapshot[key] = state
+      case .downloaded(let path):
+        snapshot[key] = .downloaded(localPath: path)
+      case .failed, .notDownloaded:
+        snapshot[key] = state
+      }
+    }
+    // Only invalidate the view if something meaningful changed
+    if snapshot.keys.sorted() != downloadStatesSnapshot.keys.sorted()
+      || snapshot.contains(where: { key, newState in
+        guard let oldState = downloadStatesSnapshot[key] else { return true }
+        if case .downloading(let newP) = newState,
+           case .downloading(let oldP) = oldState {
+          return abs(newP - oldP) >= 0.05
+        }
+        return newState != oldState
+      }) {
+      downloadStatesSnapshot = snapshot
+    }
   }
 
   func setModelContext(_ context: ModelContext) {
@@ -381,6 +445,7 @@ final class EpisodeListViewModel {
     #if DEBUG
     viewModelLogger.info("🗑️ EpisodeListViewModel CLEANUP: \(self.instanceId)")
     #endif
+    isCleaned = true
     if let observer = downloadCompletionObserver {
       NotificationCenter.default.removeObserver(observer)
       downloadCompletionObserver = nil
