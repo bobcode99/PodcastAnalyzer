@@ -72,6 +72,11 @@ struct PodcastAnalyzerApp: App {
           PodcastImportManager.shared.setModelContainer(sharedModelContainer)
           NotificationNavigationManager.shared.setModelContainer(sharedModelContainer)
 
+          // Migrate flat caption files to podcast subfolders (one-time, safe to re-run)
+          Task.detached(priority: .utility) {
+            await FileStorageManager.shared.migrateFlatCaptionFilesToSubfolders()
+          }
+
           // Register low-memory warning handler to clear caches
           #if os(iOS)
           NotificationCenter.default.addObserver(

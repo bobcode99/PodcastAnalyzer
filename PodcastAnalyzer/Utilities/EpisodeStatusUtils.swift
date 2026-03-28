@@ -120,19 +120,28 @@ struct EpisodeStatusChecker {
 
   // MARK: - Transcript Status
 
-  /// Check if a transcript (SRT file) exists for this episode
+  /// Check if a transcript (SRT file) exists for this episode.
+  /// Path: Captions/{sanitizedPodcast}/{sanitizedEpisode}.srt
   var hasTranscript: Bool {
     let fm = FileManager.default
     let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
     let captionsDir = docsDir.appendingPathComponent("Captions", isDirectory: true)
 
     let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
-    let baseFileName = "\(podcastTitle)_\(episodeTitle)"
+
+    let sanitizedPodcast = podcastTitle
       .components(separatedBy: invalidCharacters)
       .joined(separator: "_")
       .trimmingCharacters(in: .whitespaces)
 
-    let srtPath = captionsDir.appendingPathComponent("\(baseFileName).srt")
+    let sanitizedEpisode = episodeTitle
+      .components(separatedBy: invalidCharacters)
+      .joined(separator: "_")
+      .trimmingCharacters(in: .whitespaces)
+
+    let srtPath = captionsDir
+      .appendingPathComponent(sanitizedPodcast, isDirectory: true)
+      .appendingPathComponent("\(sanitizedEpisode).srt")
     return fm.fileExists(atPath: srtPath.path)
   }
 

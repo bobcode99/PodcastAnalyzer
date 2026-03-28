@@ -236,18 +236,25 @@ struct GetCurrentTranscriptIntent: AppIntent {
             return "No episode is currently playing."
         }
 
-        // Try to load transcript from file
+        // Try to load transcript from file.
+        // Path: Captions/{sanitizedPodcast}/{sanitizedEpisode}.srt
         let fm = FileManager.default
         let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let captionsDir = docsDir.appendingPathComponent("Captions")
 
         let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
-        let baseFileName = "\(episode.podcastTitle)_\(episode.title)"
+        let sanitizedPodcast = episode.podcastTitle
+            .components(separatedBy: invalidCharacters)
+            .joined(separator: "_")
+            .trimmingCharacters(in: .whitespaces)
+        let sanitizedEpisode = episode.title
             .components(separatedBy: invalidCharacters)
             .joined(separator: "_")
             .trimmingCharacters(in: .whitespaces)
 
-        let srtPath = captionsDir.appendingPathComponent("\(baseFileName).srt")
+        let srtPath = captionsDir
+            .appendingPathComponent(sanitizedPodcast, isDirectory: true)
+            .appendingPathComponent("\(sanitizedEpisode).srt")
 
         if let content = try? String(contentsOf: srtPath, encoding: .utf8) {
             // Parse SRT to plain text

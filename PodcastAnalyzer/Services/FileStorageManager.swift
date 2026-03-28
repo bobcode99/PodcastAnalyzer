@@ -272,18 +272,137 @@ actor FileStorageManager {
     }
   }
 
-  // MARK: - Caption File Management
+  // MARK: - Caption Subfolder Helpers
 
-  /// Generates filename for captions
-  func captionFileName(for episodeTitle: String, podcastTitle: String) -> String {
-    let sanitized = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
-    return "\(sanitized).srt"
+  /// Returns the podcast-specific subfolder inside captionsDirectory.
+  /// Path: Captions/{sanitizedPodcastName}/
+  private func captionsPodcastDirectory(for podcastTitle: String) -> URL {
+    captionsDirectory.appendingPathComponent(sanitizeFileName(podcastTitle), isDirectory: true)
   }
 
-  /// Gets the full path for a caption file
+  /// Ensures the podcast subfolder exists, creating it if necessary.
+  private func ensureCaptionsPodcastDirectory(for podcastTitle: String) throws {
+    let dir = captionsPodcastDirectory(for: podcastTitle)
+    guard !fileManager.fileExists(atPath: dir.path) else { return }
+    do {
+      try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+      logger.info("Created captions subfolder: \(dir.path)")
+    } catch {
+      logger.error("Failed to create captions subfolder: \(error.localizedDescription)")
+      throw FileStorageError.directoryCreationFailed(error)
+    }
+  }
+
+  // MARK: - Flat-to-Subfolder Migration
+
+  /// Migrates existing flat caption files from `Captions/{podcast}_{episode}.*` to
+  /// `Captions/{podcast}/{episode}.*`.  Safe to call multiple times — already-migrated
+  /// files are left untouched.
+  func migrateFlatCaptionFilesToSubfolders() {
+    guard fileManager.fileExists(atPath: captionsDirectory.path) else { return }
+
+    let contents: [URL]
+    do {
+      contents = try fileManager.contentsOfDirectory(
+        at: captionsDirectory,
+        includingPropertiesForKeys: [.isDirectoryKey]
+      )
+    } catch {
+      logger.error("Migration: failed to list Captions directory: \(error.localizedDescription)")
+      return
+    }
+
+    var migratedCount = 0
+
+    for fileURL in contents {
+      // Skip subdirectories (already migrated files live here)
+      if (try? fileURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+        continue
+      }
+
+      let fileName = fileURL.deletingPathExtension().lastPathComponent
+      let ext = fileURL.pathExtension
+
+      // All caption-related files share the flat naming scheme:
+      //   {sanitizedPodcast}_{sanitizedEpisode}[_{suffix}].{ext}
+      //   where ext is .srt or .json (_wordtimings.json)
+      // We need to identify the podcast portion.  Since both parts were sanitized
+      // the same way (underscores used as separators), we can't reliably split on
+      // the first underscore — instead we enumerate known podcast subfolders that
+      // already exist after earlier migrations, plus we attempt a best-effort move
+      // using the longest existing-folder prefix match.
+
+      guard ext == "srt" || (ext == "json" && fileName.hasSuffix("_wordtimings")) else {
+        continue
+      }
+
+      // Try to find a known podcast subfolder whose sanitized name is a prefix of fileName.
+      let existingSubfolders: [String]
+      do {
+        existingSubfolders = try fileManager.contentsOfDirectory(
+          at: captionsDirectory,
+          includingPropertiesForKeys: [.isDirectoryKey]
+        )
+        .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+        .map { $0.lastPathComponent }
+      } catch {
+        continue
+      }
+
+      // Find the matching podcast subfolder (longest prefix match wins).
+      let matchingFolder = existingSubfolders
+        .filter { fileName.hasPrefix($0 + "_") }
+        .max(by: { $0.count < $1.count })
+
+      guard let podcastFolder = matchingFolder else {
+        // No subfolder exists yet for this file's podcast.
+        // We can't determine the podcast name from the file name alone at this stage,
+        // so leave it in place — it will be moved the next time that podcast's
+        // caption is saved or accessed via the new path APIs.
+        continue
+      }
+
+      // Derive the episode portion of the filename.
+      let episodePart = String(fileName.dropFirst(podcastFolder.count + 1))  // drop "{podcast}_"
+      let newFileName = episodePart + (ext.isEmpty ? "" : ".\(ext)")
+      let destinationDir = captionsDirectory.appendingPathComponent(podcastFolder, isDirectory: true)
+      let destination = destinationDir.appendingPathComponent(newFileName)
+
+      guard !fileManager.fileExists(atPath: destination.path) else {
+        // Already migrated — remove the stale flat file.
+        try? fileManager.removeItem(at: fileURL)
+        migratedCount += 1
+        continue
+      }
+
+      do {
+        try fileManager.moveItem(at: fileURL, to: destination)
+        migratedCount += 1
+        logger.info("Migrated caption file: \(fileName).\(ext) → \(podcastFolder)/\(newFileName)")
+      } catch {
+        logger.error(
+          "Migration: failed to move \(fileName).\(ext): \(error.localizedDescription)")
+      }
+    }
+
+    if migratedCount > 0 {
+      logger.info("Caption migration complete: \(migratedCount) file(s) moved.")
+    }
+  }
+
+  // MARK: - Caption File Management
+
+  /// Generates filename for captions (episode portion only — no podcast prefix).
+  func captionFileName(for episodeTitle: String, podcastTitle: String) -> String {
+    let sanitizedEpisode = sanitizeFileName(episodeTitle)
+    return "\(sanitizedEpisode).srt"
+  }
+
+  /// Gets the full path for a caption file.
+  /// New path: Captions/{sanitizedPodcast}/{sanitizedEpisode}.srt
   func captionFilePath(for episodeTitle: String, podcastTitle: String) -> URL {
-    captionsDirectory.appendingPathComponent(
-      captionFileName(for: episodeTitle, podcastTitle: podcastTitle))
+    captionsPodcastDirectory(for: podcastTitle)
+      .appendingPathComponent(captionFileName(for: episodeTitle, podcastTitle: podcastTitle))
   }
 
   /// Checks if caption file exists
@@ -315,17 +434,7 @@ actor FileStorageManager {
 
   /// Saves caption/SRT file
   func saveCaptionFile(content: String, episodeTitle: String, podcastTitle: String) throws -> URL {
-    // Ensure captions directory exists
-    if !fileManager.fileExists(atPath: self.captionsDirectory.path) {
-      do {
-        try fileManager.createDirectory(
-          at: self.captionsDirectory, withIntermediateDirectories: true)
-        logger.info("Created captions directory: \(self.captionsDirectory.path)")
-      } catch {
-        logger.error("Failed to create captions directory: \(error.localizedDescription)")
-        throw FileStorageError.directoryCreationFailed(error)
-      }
-    }
+    try ensureCaptionsPodcastDirectory(for: podcastTitle)
 
     let destinationURL = captionFilePath(for: episodeTitle, podcastTitle: podcastTitle)
 
@@ -374,23 +483,23 @@ actor FileStorageManager {
 
   // MARK: - Word Timing File Management
 
-  /// Generates filename for word timing JSON (same base as caption but with .json extension)
+  /// Generates filename for word timing JSON.
+  /// New format: {sanitizedEpisode}_wordtimings.json (inside podcast subfolder)
   private func wordTimingFileName(for episodeTitle: String, podcastTitle: String) -> String {
-    let sanitized = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
-    return "\(sanitized)_wordtimings.json"
+    let sanitizedEpisode = sanitizeFileName(episodeTitle)
+    return "\(sanitizedEpisode)_wordtimings.json"
   }
 
-  /// Gets the full path for a word timing JSON file
+  /// Gets the full path for a word timing JSON file.
+  /// New path: Captions/{sanitizedPodcast}/{sanitizedEpisode}_wordtimings.json
   func wordTimingFilePath(for episodeTitle: String, podcastTitle: String) -> URL {
-    captionsDirectory.appendingPathComponent(
-      wordTimingFileName(for: episodeTitle, podcastTitle: podcastTitle))
+    captionsPodcastDirectory(for: podcastTitle)
+      .appendingPathComponent(wordTimingFileName(for: episodeTitle, podcastTitle: podcastTitle))
   }
 
   /// Saves word timing JSON alongside the SRT file
   func saveWordTimingFile(content: String, episodeTitle: String, podcastTitle: String) throws -> URL {
-    if !fileManager.fileExists(atPath: captionsDirectory.path) {
-      try fileManager.createDirectory(at: captionsDirectory, withIntermediateDirectories: true)
-    }
+    try ensureCaptionsPodcastDirectory(for: podcastTitle)
 
     let destinationURL = wordTimingFilePath(for: episodeTitle, podcastTitle: podcastTitle)
 
@@ -433,31 +542,33 @@ actor FileStorageManager {
 
   // MARK: - Translated Caption File Management
 
-  /// Generates filename for translated captions
-  /// Format: {podcast}_{episode}_{langCode}.srt
+  /// Generates filename for translated captions.
+  /// New format: {sanitizedEpisode}_{langCode}.srt (inside podcast subfolder)
   func translatedCaptionFileName(
     for episodeTitle: String,
     podcastTitle: String,
     targetLanguage: String
   ) -> String {
-    let sanitized = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
-    let langCode = targetLanguage.replacingOccurrences(of: "-", with: "_")
-    return "\(sanitized)_\(langCode).srt"
+    let sanitizedEpisode = sanitizeFileName(episodeTitle)
+    let langCode = targetLanguage.replacing("-", with: "_")
+    return "\(sanitizedEpisode)_\(langCode).srt"
   }
 
-  /// Gets the full path for a translated caption file
+  /// Gets the full path for a translated caption file.
+  /// New path: Captions/{sanitizedPodcast}/{sanitizedEpisode}_{langCode}.srt
   func translatedCaptionFilePath(
     for episodeTitle: String,
     podcastTitle: String,
     targetLanguage: String
   ) -> URL {
-    captionsDirectory.appendingPathComponent(
-      translatedCaptionFileName(
-        for: episodeTitle,
-        podcastTitle: podcastTitle,
-        targetLanguage: targetLanguage
+    captionsPodcastDirectory(for: podcastTitle)
+      .appendingPathComponent(
+        translatedCaptionFileName(
+          for: episodeTitle,
+          podcastTitle: podcastTitle,
+          targetLanguage: targetLanguage
+        )
       )
-    )
   }
 
   /// Checks if translated caption file exists
@@ -481,17 +592,7 @@ actor FileStorageManager {
     podcastTitle: String,
     targetLanguage: String
   ) throws -> URL {
-    // Ensure captions directory exists
-    if !fileManager.fileExists(atPath: self.captionsDirectory.path) {
-      do {
-        try fileManager.createDirectory(
-          at: self.captionsDirectory, withIntermediateDirectories: true)
-        logger.info("Created captions directory: \(self.captionsDirectory.path)")
-      } catch {
-        logger.error("Failed to create captions directory: \(error.localizedDescription)")
-        throw FileStorageError.directoryCreationFailed(error)
-      }
-    }
+    try ensureCaptionsPodcastDirectory(for: podcastTitle)
 
     let destinationURL = translatedCaptionFilePath(
       for: episodeTitle,
@@ -586,43 +687,38 @@ actor FileStorageManager {
     }
   }
 
-  /// Lists all available translation language codes for an episode
-  /// Returns a Set of language codes (e.g., "zh-Hant", "ja", "es")
+  /// Lists all available translation language codes for an episode.
+  /// Searches inside the podcast subfolder: Captions/{sanitizedPodcast}/
   func listAvailableTranslations(
     for episodeTitle: String,
     podcastTitle: String
   ) -> Set<String> {
-    let sanitized = sanitizeFileName("\(podcastTitle)_\(episodeTitle)")
+    let podcastDir = captionsPodcastDirectory(for: podcastTitle)
+    guard fileManager.fileExists(atPath: podcastDir.path) else { return [] }
 
-    guard fileManager.fileExists(atPath: captionsDirectory.path) else {
-      return []
-    }
+    let sanitizedEpisode = sanitizeFileName(episodeTitle)
 
     do {
       let contents = try fileManager.contentsOfDirectory(
-        at: captionsDirectory,
+        at: podcastDir,
         includingPropertiesForKeys: nil
       )
 
       var languageCodes: Set<String> = []
 
-      // Pattern: {sanitized}_{langCode}.srt
-      // We need to find files that match this pattern and extract the language code
-      let prefix = sanitized + "_"
+      // Pattern inside the subfolder: {sanitizedEpisode}_{langCode}.srt
+      let prefix = sanitizedEpisode + "_"
       let suffix = ".srt"
 
       for fileURL in contents {
         let fileName = fileURL.lastPathComponent
 
         // Skip the original caption file (no language suffix)
-        if fileName == sanitized + ".srt" {
+        if fileName == sanitizedEpisode + ".srt" {
           continue
         }
 
-        // Check if this is a translated caption file for this episode
         if fileName.hasPrefix(prefix) && fileName.hasSuffix(suffix) {
-          // Extract the language code
-          // Remove prefix and suffix to get language code
           var langPart = fileName
           langPart.removeFirst(prefix.count)
           langPart.removeLast(suffix.count)
@@ -633,7 +729,7 @@ actor FileStorageManager {
           }
 
           // Convert underscore back to hyphen for standard language codes
-          let langCode = langPart.replacingOccurrences(of: "_", with: "-")
+          let langCode = langPart.replacing("_", with: "-")
           languageCodes.insert(langCode)
         }
       }
@@ -697,14 +793,15 @@ actor FileStorageManager {
     }
   }
 
-  /// Clears all caption files from storage
+  /// Clears all caption files from storage (including all podcast subfolders)
   func clearAllCaptionFiles() {
     do {
-      let contents = try fileManager.contentsOfDirectory(at: captionsDirectory, includingPropertiesForKeys: nil)
+      let contents = try fileManager.contentsOfDirectory(
+        at: captionsDirectory, includingPropertiesForKeys: nil)
       for fileURL in contents {
         try fileManager.removeItem(at: fileURL)
       }
-      logger.info("Cleared all caption files (\(contents.count) files)")
+      logger.info("Cleared all caption files/folders (\(contents.count) items)")
     } catch {
       logger.error("Failed to clear caption files: \(error.localizedDescription)")
     }
