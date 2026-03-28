@@ -402,6 +402,11 @@ final class DownloadManager {
   @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
 
+  /// Episode keys whose on-disk presence has already been checked.
+  /// Prevents `getDownloadState` from repeating 7-extension disk scans on every call.
+  @ObservationIgnored
+  private var diskCheckedKeys = Set<String>()
+
   private init() {}
 
   // MARK: - State Restoration
@@ -527,6 +532,8 @@ final class DownloadManager {
         }
 
         downloadStates[episodeKey] = .notDownloaded
+        // Reset disk-check cache so a future re-download can be discovered
+        diskCheckedKeys.remove(episodeKey)
         logger.info("Deleted download: \(episodeTitle)")
       } catch {
         logger.error("Failed to delete download: \(error.localizedDescription)")
@@ -537,8 +544,12 @@ final class DownloadManager {
   func getDownloadState(episodeTitle: String, podcastTitle: String) -> DownloadState {
     let episodeKey = sessionDelegate.makeKey(episode: episodeTitle, podcast: podcastTitle)
 
-    // If we don't have a state, check disk to restore it
-    if downloadStates[episodeKey] == nil {
+    // If we don't have a state, check disk to restore it — but only once per key.
+    // Without the cache, every call for a non-downloaded episode does 7 synchronous
+    // FileManager.fileExists checks, which blocks the MainActor when many observers
+    // fire at once during active downloads.
+    if downloadStates[episodeKey] == nil, !diskCheckedKeys.contains(episodeKey) {
+      diskCheckedKeys.insert(episodeKey)
       if let path = checkAudioFileExistsSynchronously(
         episodeTitle: episodeTitle, podcastTitle: podcastTitle)
       {

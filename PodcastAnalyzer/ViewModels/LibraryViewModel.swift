@@ -225,7 +225,6 @@ final class LibraryViewModel {
   private let downloadManager = DownloadManager.shared
   private var modelContext: ModelContext?
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "LibraryViewModel")
-  private var downloadCompletionObserver: NSObjectProtocol?
 
   // All podcasts (subscribed + browsed) for episode lookups
   private var allPodcasts: [PodcastInfoModel] = []
@@ -242,9 +241,9 @@ final class LibraryViewModel {
   // Cache for O(1) lookups
   private var podcastTitleMap: [String: PodcastInfoModel] = [:]
 
-  private var syncCompletionObserver: NSObjectProtocol?
-
   @ObservationIgnored private var initTask: Task<Void, Never>?
+  /// Tracks the latest unstructured refresh task so it can be cancelled in cleanup().
+  @ObservationIgnored private var refreshTask: Task<Void, Never>?
 
   init(modelContext: ModelContext?) {
     self.modelContext = modelContext
@@ -253,22 +252,14 @@ final class LibraryViewModel {
         await loadAll()
       }
     }
-    setupDownloadCompletionObserver()
-    setupSyncCompletionObserver()
   }
 
   /// Clean up resources. Call this from onDisappear.
   func cleanup() {
     initTask?.cancel()
     initTask = nil
-    if let observer = downloadCompletionObserver {
-      NotificationCenter.default.removeObserver(observer)
-      downloadCompletionObserver = nil
-    }
-    if let observer = syncCompletionObserver {
-      NotificationCenter.default.removeObserver(observer)
-      syncCompletionObserver = nil
-    }
+    refreshTask?.cancel()
+    refreshTask = nil
   }
 
   /// Parse episode key for downloading episodes
@@ -288,51 +279,6 @@ final class LibraryViewModel {
     }
 
     return nil
-  }
-
-  private func setupSyncCompletionObserver() {
-    // Listen for background sync completion to reload data
-    syncCompletionObserver = NotificationCenter.default.addObserver(
-      forName: .podcastSyncCompleted,
-      object: nil,
-      queue: .main
-    ) { [weak self] notification in
-      guard let self = self else { return }
-
-      let newCount = notification.userInfo?["newEpisodeCount"] as? Int ?? 0
-      self.logger.info("Sync completed notification received, \(newCount) new episodes")
-
-      Task {
-        // Reload all data sections
-        await self.loadAllPodcasts()
-        await self.loadLatestEpisodes()
-        await self.loadSavedEpisodes()
-        await self.loadDownloadedEpisodesQuick()
-      }
-    }
-  }
-
-  private func setupDownloadCompletionObserver() {
-    // Listen for download completion to update SwiftData and reload
-    downloadCompletionObserver = NotificationCenter.default.addObserver(
-      forName: .episodeDownloadCompleted,
-      object: nil,
-      queue: .main
-    ) { [weak self] notification in
-      guard let self = self,
-            let userInfo = notification.userInfo,
-            let episodeTitle = userInfo["episodeTitle"] as? String,
-            let podcastTitle = userInfo["podcastTitle"] as? String,
-            let localPath = userInfo["localPath"] as? String else { return }
-
-      Task { @MainActor in
-        self.handleDownloadCompletion(
-          episodeTitle: episodeTitle,
-          podcastTitle: podcastTitle,
-          localPath: localPath
-        )
-      }
-    }
   }
 
   private func handleDownloadCompletion(episodeTitle: String, podcastTitle: String, localPath: String) {
@@ -390,10 +336,9 @@ final class LibraryViewModel {
         downloadedEpisodes[idx] = libraryEpisode
       }
 
-      // Full async reload for proper sorting and deduplication
-      Task {
-        await loadDownloadedEpisodesQuick()
-      }
+      // Full async reload for proper sorting and deduplication.
+      refreshTask?.cancel()
+      refreshTask = Task { await loadDownloadedEpisodesQuick() }
     } catch {
       logger.error("Failed to update download model: \(error.localizedDescription)")
     }
@@ -402,61 +347,47 @@ final class LibraryViewModel {
   func setModelContext(_ context: ModelContext) {
     self.modelContext = context
 
-    // Always ensure observers and timer are running (they may have been cleaned up)
-    ensureObserversAndTimerRunning()
-
     // Prevent redundant reloading if data is already loaded
     if isAlreadyLoaded {
       return
     }
 
-    // Start loading in parallel without blocking UI flags
-    // Each section loads independently and updates its own state
+    // Start loading in parallel without blocking UI flags.
+    // Each section loads independently and updates its own state.
     isRefreshing = true
-
-    // Launch loading tasks
-    // Chain podcasts -> latest to ensure dependencies are met without polling
-    Task {
-      await loadPodcastsSection()
-      await loadLatestSection()
-    }
-
-    // Independent sections
-    Task { await loadSavedSection() }
-    Task { await loadDownloadedSection() }
-
     isAlreadyLoaded = true
-    isRefreshing = false
+
+    // Single stored task so cleanup() can cancel it.
+    // Podcasts must complete before latest (dependency), then saved/downloaded run in parallel.
+    refreshTask = Task {
+      // Chain podcasts -> latest to ensure dependencies are met without polling.
+      await loadPodcastsSection()
+      async let savedTask: () = loadSavedSection()
+      async let downloadedTask: () = loadDownloadedSection()
+      async let latestTask: () = loadLatestSection()
+      _ = await (savedTask, downloadedTask, latestTask)
+      isRefreshing = false
+    }
   }
 
-  /// Refresh all data sections - called from notification observers
+  /// Refresh all data sections - called from notification observers.
   func refreshData() {
     guard modelContext != nil else { return }
-    
-    // Reload all sections
-    Task {
+    // Cancel any in-flight refresh before starting a new one.
+    refreshTask?.cancel()
+    refreshTask = Task {
       await loadSavedSection()
       await loadDownloadedSection()
       await loadLatestSection()
     }
   }
 
-  /// Ensure observers are running - safe to call multiple times
-  private func ensureObserversAndTimerRunning() {
-    // Re-setup observers if they were cleaned up
-    if downloadCompletionObserver == nil {
-      setupDownloadCompletionObserver()
-    }
-    if syncCompletionObserver == nil {
-      setupSyncCompletionObserver()
-    }
-  }
-
-  /// Receive updated podcast list from View's @Query
+  /// Receive updated podcast list from View's @Query.
   func setPodcasts(_ podcasts: [PodcastInfoModel]) {
     self.podcastInfoModelList = podcasts
-    // Update dependent sections
-    Task { await loadLatestSection() }
+    // Cancel previous refresh; latest episodes depend on the updated podcast list.
+    refreshTask?.cancel()
+    refreshTask = Task { await loadLatestSection() }
   }
 
   // MARK: - Independent Section Loaders
@@ -532,8 +463,16 @@ final class LibraryViewModel {
   }
 
   func refreshDownloadedEpisodes() async {
-    // Always run the full sync when explicitly refreshing
-    // This discovers any downloaded files that exist but aren't tracked in SwiftData
+    // Only run the expensive disk scan once per session.  The scan is already triggered
+    // by loadDownloadedSection() during initial load; calling it again on every
+    // view re-appearance (tab switch) wastes significant I/O and memory.
+    // A pull-to-refresh calls refreshAllPodcasts → loadAll → loadDownloadedSection,
+    // which resets hasSyncedDownloads via loadDownloadedSection's detached task,
+    // so the scan will run again after a forced refresh.
+    guard !hasSyncedDownloads else {
+      await loadDownloadedEpisodesQuick()
+      return
+    }
     await syncDownloadedFilesWithSwiftData()
     await loadDownloadedEpisodesQuick()
   }

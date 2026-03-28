@@ -258,9 +258,31 @@ final class EpisodeStatusObserver {
     } onChange: {
       Task { @MainActor [weak self] in
         guard let self, !self.isCleaned else { return }
-        self.updateDownloadStatus()
+        // Fast-path: only run the expensive updateDownloadStatus (which does
+        // synchronous disk I/O) when THIS episode's state actually changed.
+        // Without this guard every progress tick for ANY download triggers
+        // disk checks for ALL visible episodes.
+        if self.stateChangedForThisEpisode() {
+          self.updateDownloadStatus()
+        }
         self.observeDownloadManager()
       }
+    }
+  }
+
+  /// Cheap dictionary lookup — no disk I/O.  Returns true when the download
+  /// state for this specific episode differs from the last value we stored.
+  private func stateChangedForThisEpisode() -> Bool {
+    let dictState = downloadManager.downloadStates[episodeKey]
+    switch (dictState, downloadState) {
+    case (nil, .notDownloaded):
+      return false                               // still absent → no change
+    case (.downloading(let newP), .downloading):
+      return abs(newP - downloadProgress) >= 0.01 // ignore sub-1 % noise
+    case let (new?, old) where new == old:
+      return false
+    default:
+      return true
     }
   }
 
