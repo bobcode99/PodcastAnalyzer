@@ -91,6 +91,12 @@ struct DownloadedPodcastsGridView: View {
     .task {
       await viewModel.refreshDownloadedEpisodes()
     }
+    .task {
+      // Refresh when a download completes so counts update in real time.
+      for await _ in NotificationCenter.default.notifications(named: .episodeDownloadCompleted) {
+        await viewModel.refreshDownloadedEpisodes()
+      }
+    }
   }
 }
 
@@ -373,6 +379,12 @@ struct DownloadedEpisodesView: View {
     }
     .task {
       await viewModel.refreshDownloadedEpisodes()
+    }
+    .task {
+      for await _ in NotificationCenter.default.notifications(named: .episodeDownloadCompleted) {
+        await viewModel.refreshDownloadedEpisodes()
+        episodeModels = LibraryEpisodeActions.batchFetchEpisodeModels(from: modelContext)
+      }
     }
     .onDisappear {
       refreshTask?.cancel()

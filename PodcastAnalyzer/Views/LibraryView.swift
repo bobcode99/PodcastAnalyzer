@@ -115,9 +115,9 @@ struct LibraryView: View {
         }
       }
     }
-    .onDisappear {
-      viewModel.cleanup()
-    }
+    // Note: Do NOT call viewModel.cleanup() here — LibraryView is a tab root,
+    // and pushing a NavigationLink fires onDisappear.  Cleaning up would cancel
+    // the download-completion observer while the user is in a sub-page.
     .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
       Button("OK", role: .cancel) { errorMessage = nil }
     } message: {
