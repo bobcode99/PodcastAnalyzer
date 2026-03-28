@@ -63,6 +63,7 @@
 		15ED5EED2EC44BC6001B6CD7 /* PodcastAnalyzer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PodcastAnalyzer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		15ED5EFC2EC44BC9001B6CD7 /* PodcastAnalyzerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PodcastAnalyzerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		15ED5F062EC44BC9001B6CD7 /* PodcastAnalyzerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PodcastAnalyzerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AC576B882F776FE9007B884A /* PodcastAnalyzer.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = PodcastAnalyzer.xctestplan; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -163,6 +164,7 @@
 		15ED5EE42EC44BC6001B6CD7 = {
 			isa = PBXGroup;
 			children = (
+				AC576B882F776FE9007B884A /* PodcastAnalyzer.xctestplan */,
 				15ED5EEF2EC44BC6001B6CD7 /* PodcastAnalyzer */,
 				15ED5EFF2EC44BC9001B6CD7 /* PodcastAnalyzerTests */,
 				15ED5F092EC44BC9001B6CD7 /* PodcastAnalyzerUITests */,

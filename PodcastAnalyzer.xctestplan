@@ -1,0 +1,38 @@
+{
+  "configurations" : [
+    {
+      "id" : "6DD4113B-05F4-4993-9338-845A12532C08",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "performanceAntipatternCheckerEnabled" : true,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:PodcastAnalyzer.xcodeproj",
+      "identifier" : "15ED5EEC2EC44BC6001B6CD7",
+      "name" : "PodcastAnalyzer"
+    }
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:PodcastAnalyzer.xcodeproj",
+        "identifier" : "15ED5EFB2EC44BC9001B6CD7",
+        "name" : "PodcastAnalyzerTests"
+      }
+    },
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:PodcastAnalyzer.xcodeproj",
+        "identifier" : "15ED5F052EC44BC9001B6CD7",
+        "name" : "PodcastAnalyzerUITests"
+      }
+    }
+  ],
+  "version" : 1
+}
