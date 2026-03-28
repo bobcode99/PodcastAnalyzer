@@ -615,12 +615,13 @@ public actor TranscriptService {
 
           defer { ChunkedTranscriptionService.cleanupTempFiles(chunks) }
 
-          // Determine concurrency limit (at least 1)
-          let maxConcurrent = max(min(
-            chunks.count,
-            ProcessInfo.processInfo.processorCount / 2,
-            4
-          ), 1)
+          // Apple Speech framework allows very few simultaneous recognition
+          // sessions. Exceeding the limit causes SFSpeechErrorDomain code 16
+          // "Maximum number of simultaneous requests reached".
+          // Apple doesn't document the exact limit; empirically it is 2 on
+          // most devices. Use 2 for ~2x throughput over sequential while
+          // staying within the system limit.
+          let maxConcurrent = 2
           self.logger.info("Processing with concurrency limit: \(maxConcurrent)")
 
           let progressTracker = ChunkProgressTracker(totalChunks: chunks.count)
