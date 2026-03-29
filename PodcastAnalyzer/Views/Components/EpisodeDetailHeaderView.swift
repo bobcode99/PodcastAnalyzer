@@ -6,12 +6,25 @@ struct EpisodeDetailHeaderView: View {
     @Bindable var viewModel: EpisodeDetailViewModel
     @Environment(\.modelContext) private var modelContext
     @State private var cachedPodcastModel: PodcastInfoModel?
+    @State private var browseCollectionId: String?
 
-    /// Value-based navigation route built lazily from the cached model.
-    /// Returns nil when the model hasn't been fetched yet, which disables the link.
+    /// Value-based navigation route built lazily.
+    /// Uses the SwiftData model if available, otherwise falls back to an unsubscribed
+    /// browse route so trending/unsubscribed episodes can still navigate to the show.
     private var podcastBrowseRoute: PodcastBrowseRoute? {
-        guard let model = cachedPodcastModel else { return nil }
-        return PodcastBrowseRoute(podcastModel: model)
+        if let model = cachedPodcastModel {
+            return PodcastBrowseRoute(podcastModel: model)
+        }
+        if let collectionId = browseCollectionId {
+            return PodcastBrowseRoute(
+                podcastName: viewModel.podcastTitle,
+                artworkURL: viewModel.imageURLString,
+                artistName: "",
+                collectionId: collectionId,
+                applePodcastURL: nil
+            )
+        }
+        return nil
     }
 
     var body: some View {
@@ -184,7 +197,18 @@ struct EpisodeDetailHeaderView: View {
             let descriptor = FetchDescriptor<PodcastInfoModel>(
                 predicate: #Predicate { $0.title == title }
             )
-            cachedPodcastModel = try? modelContext.fetch(descriptor).first
+            if let model = try? modelContext.fetch(descriptor).first {
+                cachedPodcastModel = model
+            } else {
+                // No local model — look up Apple collection ID so we can browse the show
+                let service = ApplePodcastService()
+                if let results = try? await service.searchPodcasts(term: title, limit: 5),
+                   let match = results.first(where: {
+                       $0.collectionName.lowercased() == title.lowercased()
+                   }) ?? results.first {
+                    browseCollectionId = String(match.collectionId)
+                }
+            }
         }
     }
 }
