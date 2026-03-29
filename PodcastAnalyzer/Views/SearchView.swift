@@ -157,12 +157,12 @@ struct PodcastSearchView: View {
             } else {
                 List {
                     ForEach(viewModel.podcasts, id: \.collectionId) { podcast in
-                        NavigationLink(destination: EpisodeListView(
+                        NavigationLink(value: PodcastBrowseRoute(
                             podcastName: podcast.collectionName,
-                            podcastArtwork: podcast.artworkUrl100 ?? "",
+                            artworkURL: podcast.artworkUrl100 ?? "",
                             artistName: podcast.artistName,
                             collectionId: String(podcast.collectionId),
-                            applePodcastUrl: nil
+                            applePodcastURL: nil
                         )) {
                             ApplePodcastRow(
                                 podcast: podcast,

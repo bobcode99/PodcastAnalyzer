@@ -31,13 +31,11 @@ enum ExpandedPlayerNavigation: Equatable {
 struct MiniPlayerBar: View {
   @Environment(\.tabViewBottomAccessoryPlacement) var placement
   @Environment(\.modelContext) private var modelContext
+  @Environment(\.tabNavigationCoordinator) private var coordinator
   // Access singleton directly without @State to avoid unnecessary observation overhead
   private var audioManager: EnhancedAudioManager { .shared }
   @State private var showExpandedPlayer = false
   @State private var deferredNavigation: ExpandedPlayerNavigation = .none
-
-  // Pending navigation after expanded player dismisses
-  @Binding var pendingNavigation: ExpandedPlayerNavigation
 
   private var progress: Double {
     guard audioManager.duration > 0 else { return 0 }
@@ -176,8 +174,26 @@ struct MiniPlayerBar: View {
 
   private func handleExpandedPlayerDismissed() {
     guard deferredNavigation != .none else { return }
-    pendingNavigation = deferredNavigation
+    let navigation = deferredNavigation
     deferredNavigation = .none
+
+    switch navigation {
+    case .none:
+      break
+    case let .episodeDetail(episode, podcastTitle, imageURL):
+      coordinator?.activeRouter.push(
+        EpisodeDetailRoute(
+          episode: episode,
+          podcastTitle: podcastTitle,
+          fallbackImageURL: imageURL,
+          podcastLanguage: nil
+        )
+      )
+    case let .podcastEpisodeList(podcastModel):
+      coordinator?.activeRouter.push(
+        PodcastBrowseRoute(podcastModel: podcastModel)
+      )
+    }
   }
 
   /// Finds an episode to play when there's no previous playback history
@@ -242,5 +258,5 @@ struct MiniPlayerBar: View {
 // MARK: - Preview
 
 #Preview {
-  MiniPlayerBar(pendingNavigation: .constant(.none))
+  MiniPlayerBar()
 }

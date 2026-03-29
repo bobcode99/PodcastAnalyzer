@@ -30,53 +30,45 @@ struct iOSContentView: View {
 
   @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
-  // Tab selection + per-tab NavigationPath for programmatic pushes
-  @State private var selectedTab = 0
-  @State private var homePath = NavigationPath()
-  @State private var libraryPath = NavigationPath()
-  @State private var settingsPath = NavigationPath()
-  @State private var searchPath = NavigationPath()
-
-  // Navigation state for expanded player navigation (set by MiniPlayerBar on dismiss)
-  @State private var expandedPlayerNavigation: ExpandedPlayerNavigation = .none
+  @State private var coordinator = TabNavigationCoordinator()
 
   var body: some View {
-    TabView(selection: $selectedTab) {
-      Tab(Constants.homeString, systemImage: Constants.homeIconName, value: 0) {
-        NavigationStack(path: $homePath) {
+    TabView {
+      Tab(Constants.homeString, systemImage: Constants.homeIconName) {
+        NavigationStack(path: $coordinator.homeRouter.path) {
           HomeView()
             .navigationDestinations()
+            .onAppear { coordinator.visibleTab = .home }
         }
       }
 
-      Tab(Constants.libraryString, systemImage: Constants.libraryIconName, value: 1) {
-        NavigationStack(path: $libraryPath) {
+      Tab(Constants.libraryString, systemImage: Constants.libraryIconName) {
+        NavigationStack(path: $coordinator.libraryRouter.path) {
           LibraryView()
             .navigationDestinations()
+            .onAppear { coordinator.visibleTab = .library }
         }
       }
 
-      Tab(Constants.settingsString, systemImage: Constants.settingsIconName, value: 2) {
-        NavigationStack(path: $settingsPath) {
+      Tab(Constants.settingsString, systemImage: Constants.settingsIconName) {
+        NavigationStack(path: $coordinator.settingsRouter.path) {
           SettingsView()
             .navigationDestinations()
+            .onAppear { coordinator.visibleTab = .settings }
         }
       }
 
-      Tab(value: 3) {
-        NavigationStack(path: $searchPath) {
+      Tab(role: .search) {
+        NavigationStack(path: $coordinator.searchRouter.path) {
           PodcastSearchView()
             .navigationDestinations()
+            .onAppear { coordinator.visibleTab = .search }
         }
-      } label: {
-        Label("Search", systemImage: "magnifyingglass")
       }
     }
+    .environment(\.tabNavigationCoordinator, coordinator)
     .tabViewBottomAccessory {
-      MiniPlayerBar(pendingNavigation: $expandedPlayerNavigation)
-    }
-    .onChange(of: expandedPlayerNavigation) { _, newValue in
-      handleExpandedPlayerNavigation(newValue)
+      MiniPlayerBar()
     }
     .tabBarMinimizeBehavior(.onScrollDown)
     .onAppear {
@@ -96,16 +88,6 @@ struct iOSContentView: View {
       if shouldNavigate, let target = notificationManager.navigationTarget {
         handleNotificationNavigation(target: target)
       }
-    }
-  }
-
-  /// Returns a binding to the currently selected tab's NavigationPath.
-  private var currentPath: Binding<NavigationPath> {
-    switch selectedTab {
-    case 0: return $homePath
-    case 1: return $libraryPath
-    case 2: return $settingsPath
-    default: return $searchPath
     }
   }
 
@@ -139,33 +121,11 @@ struct iOSContentView: View {
       )
     }
 
-    // Push to the current tab's navigation stack
-    selectedTab = 0
-    homePath.append(route)
+    // Notifications always push to the home tab
+    coordinator.homeRouter.push(route)
     notificationManager.clearNavigation()
   }
 
-  private func handleExpandedPlayerNavigation(_ navigation: ExpandedPlayerNavigation) {
-    switch navigation {
-    case .none:
-      break
-    case let .episodeDetail(episode, podcastTitle, imageURL):
-      currentPath.wrappedValue.append(
-        EpisodeDetailRoute(
-          episode: episode,
-          podcastTitle: podcastTitle,
-          fallbackImageURL: imageURL,
-          podcastLanguage: nil
-        )
-      )
-      expandedPlayerNavigation = .none
-    case let .podcastEpisodeList(podcastModel):
-      currentPath.wrappedValue.append(
-        PodcastBrowseRoute(podcastModel: podcastModel)
-      )
-      expandedPlayerNavigation = .none
-    }
-  }
 }
 #endif
 

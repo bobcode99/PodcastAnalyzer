@@ -12,6 +12,7 @@
 //    - ExpandedPlayerNavigation -> PodcastBrowseRoute mapping
 //    - Route equality / hashing (NavigationLink deduplication depends on this)
 //    - NavigationPath programmatic push (route types are appendable)
+//    - TabNavigationCoordinator: per-tab routers, active router, push/pop/popToRoot
 //
 //  No SwiftUI view rendering is performed. All tests are pure data-model logic.
 //
@@ -580,5 +581,137 @@ struct NavigationPathProgrammaticPushTests {
         // Removing last simulates back navigation
         path.removeLast()
         #expect(path.count == 1)
+    }
+}
+
+// MARK: - TabNavigationCoordinator Tests
+
+@MainActor
+struct TabRouterTests {
+
+    @Test func push_appendsToPath() {
+        let router = TabRouter()
+        let route = EpisodeDetailRoute(
+            episode: makeEpisode(title: "Router Episode"),
+            podcastTitle: "Podcast",
+            fallbackImageURL: nil,
+            podcastLanguage: nil
+        )
+
+        router.push(route)
+        #expect(router.path.count == 1)
+    }
+
+    @Test func pop_removesLastFromPath() {
+        let router = TabRouter()
+        router.push(EpisodeDetailRoute(
+            episode: makeEpisode(),
+            podcastTitle: "Podcast",
+            fallbackImageURL: nil,
+            podcastLanguage: nil
+        ))
+        router.push(EpisodeDetailRoute(
+            episode: makeEpisode(title: "Second"),
+            podcastTitle: "Podcast",
+            fallbackImageURL: nil,
+            podcastLanguage: nil
+        ))
+        #expect(router.path.count == 2)
+
+        router.pop()
+        #expect(router.path.count == 1)
+    }
+
+    @Test func pop_onEmptyPath_doesNotCrash() {
+        let router = TabRouter()
+        router.pop()
+        #expect(router.path.count == 0)
+    }
+
+    @Test func popToRoot_clearsEntirePath() {
+        let router = TabRouter()
+        router.push(EpisodeDetailRoute(
+            episode: makeEpisode(),
+            podcastTitle: "Podcast",
+            fallbackImageURL: nil,
+            podcastLanguage: nil
+        ))
+        router.push(EpisodeDetailRoute(
+            episode: makeEpisode(title: "Second"),
+            podcastTitle: "Podcast",
+            fallbackImageURL: nil,
+            podcastLanguage: nil
+        ))
+
+        router.popToRoot()
+        #expect(router.path.count == 0)
+    }
+}
+
+@MainActor
+struct TabNavigationCoordinatorTests {
+
+    @Test func activeRouter_defaultsToHomeRouter() {
+        let coordinator = TabNavigationCoordinator()
+        #expect(coordinator.visibleTab == .home)
+        #expect(coordinator.activeRouter === coordinator.homeRouter)
+    }
+
+    @Test func activeRouter_reflectsVisibleTab() {
+        let coordinator = TabNavigationCoordinator()
+
+        coordinator.visibleTab = .library
+        #expect(coordinator.activeRouter === coordinator.libraryRouter)
+
+        coordinator.visibleTab = .settings
+        #expect(coordinator.activeRouter === coordinator.settingsRouter)
+
+        coordinator.visibleTab = .search
+        #expect(coordinator.activeRouter === coordinator.searchRouter)
+
+        coordinator.visibleTab = .home
+        #expect(coordinator.activeRouter === coordinator.homeRouter)
+    }
+
+    @Test func routerForTab_returnsCorrectRouter() {
+        let coordinator = TabNavigationCoordinator()
+        #expect(coordinator.router(for: .home) === coordinator.homeRouter)
+        #expect(coordinator.router(for: .library) === coordinator.libraryRouter)
+        #expect(coordinator.router(for: .settings) === coordinator.settingsRouter)
+        #expect(coordinator.router(for: .search) === coordinator.searchRouter)
+    }
+
+    @Test func pushToActiveRouter_addsToCorrectTab() {
+        let coordinator = TabNavigationCoordinator()
+        coordinator.visibleTab = .library
+
+        let route = EpisodeDetailRoute(
+            episode: makeEpisode(title: "Library Episode"),
+            podcastTitle: "Podcast",
+            fallbackImageURL: nil,
+            podcastLanguage: nil
+        )
+        coordinator.activeRouter.push(route)
+
+        #expect(coordinator.libraryRouter.path.count == 1)
+        #expect(coordinator.homeRouter.path.count == 0)
+    }
+
+    @Test func eachTab_hasIndependentPath() throws {
+        let coordinator = TabNavigationCoordinator()
+        let model = try makePodcastInfoModel(title: "Independent Test")
+
+        coordinator.homeRouter.push(EpisodeDetailRoute(
+            episode: makeEpisode(),
+            podcastTitle: "Home",
+            fallbackImageURL: nil,
+            podcastLanguage: nil
+        ))
+        coordinator.libraryRouter.push(PodcastBrowseRoute(podcastModel: model))
+
+        #expect(coordinator.homeRouter.path.count == 1)
+        #expect(coordinator.libraryRouter.path.count == 1)
+        #expect(coordinator.settingsRouter.path.count == 0)
+        #expect(coordinator.searchRouter.path.count == 0)
     }
 }

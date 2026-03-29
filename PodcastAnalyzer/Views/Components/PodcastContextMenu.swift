@@ -19,7 +19,7 @@ struct PodcastContextMenu: ViewModifier {
   func body(content: Content) -> some View {
     content
       .contextMenu {
-        NavigationLink(destination: EpisodeListView(podcastModel: podcast)) {
+        NavigationLink(value: PodcastBrowseRoute(podcastModel: podcast)) {
           Label("View Episodes", systemImage: "list.bullet")
         }
 
