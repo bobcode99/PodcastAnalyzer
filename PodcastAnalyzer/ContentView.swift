@@ -273,14 +273,15 @@ extension View {
       }
       .navigationDestination(for: PodcastBrowseRoute.self) { route in
         if let model = route.podcastModel {
-          EpisodeListView(podcastModel: model)
+          EpisodeListView(podcastModel: model, initialFilter: route.initialFilter)
         } else {
           EpisodeListView(
             podcastName: route.podcastName,
             podcastArtwork: route.artworkURL,
             artistName: route.artistName,
             collectionId: route.collectionId ?? "",
-            applePodcastUrl: route.applePodcastURL
+            applePodcastUrl: route.applePodcastURL,
+            initialFilter: route.initialFilter
           )
         }
       }

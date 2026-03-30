@@ -176,7 +176,12 @@ final class LibraryViewModel {
       guard let podcast = podcastTitleMap[title] else { return nil }
       return (podcast: podcast, downloadCount: count)
     }
-    .sorted { $0.downloadCount > $1.downloadCount }
+    .sorted {
+      if $0.downloadCount != $1.downloadCount {
+        return $0.downloadCount > $1.downloadCount
+      }
+      return $0.podcast.podcastInfo.title.localizedCaseInsensitiveCompare($1.podcast.podcastInfo.title) == .orderedAscending
+    }
   }
 
   /// Podcasts sorted by most recent update (combines lastUpdated and latest episode date)

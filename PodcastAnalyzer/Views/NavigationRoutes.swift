@@ -48,15 +48,17 @@ struct PodcastBrowseRoute: Hashable, Identifiable {
   let artistName: String
   let artworkURL: String
   let applePodcastURL: String?
+  let initialFilter: EpisodeFilter
 
   /// Convenience init for a subscribed PodcastInfoModel.
-  init(podcastModel: PodcastInfoModel) {
+  init(podcastModel: PodcastInfoModel, initialFilter: EpisodeFilter = .all) {
     self.podcastModel = podcastModel
     self.collectionId = nil
     self.podcastName = podcastModel.podcastInfo.title
     self.artistName = ""
     self.artworkURL = podcastModel.podcastInfo.imageURL
     self.applePodcastURL = nil
+    self.initialFilter = initialFilter
   }
 
   /// Convenience init for an unsubscribed podcast from the Apple Podcasts directory.
@@ -65,7 +67,8 @@ struct PodcastBrowseRoute: Hashable, Identifiable {
     artworkURL: String,
     artistName: String,
     collectionId: String,
-    applePodcastURL: String?
+    applePodcastURL: String?,
+    initialFilter: EpisodeFilter = .all
   ) {
     self.podcastModel = nil
     self.collectionId = collectionId
@@ -73,6 +76,7 @@ struct PodcastBrowseRoute: Hashable, Identifiable {
     self.artistName = artistName
     self.artworkURL = artworkURL
     self.applePodcastURL = applePodcastURL
+    self.initialFilter = initialFilter
   }
 
   var id: String {
@@ -85,17 +89,21 @@ struct PodcastBrowseRoute: Hashable, Identifiable {
   // Hashable conformance — PodcastInfoModel is a class so use ObjectIdentifier.
   static func == (lhs: PodcastBrowseRoute, rhs: PodcastBrowseRoute) -> Bool {
     if let lm = lhs.podcastModel, let rm = rhs.podcastModel {
-      return ObjectIdentifier(lm) == ObjectIdentifier(rm)
+      return ObjectIdentifier(lm) == ObjectIdentifier(rm) && lhs.initialFilter == rhs.initialFilter
     }
-    return lhs.collectionId == rhs.collectionId && lhs.podcastName == rhs.podcastName
+    return lhs.collectionId == rhs.collectionId
+      && lhs.podcastName == rhs.podcastName
+      && lhs.initialFilter == rhs.initialFilter
   }
 
   func hash(into hasher: inout Hasher) {
     if let model = podcastModel {
       hasher.combine(ObjectIdentifier(model))
+      hasher.combine(initialFilter)
     } else {
       hasher.combine(collectionId)
       hasher.combine(podcastName)
+      hasher.combine(initialFilter)
     }
   }
 }

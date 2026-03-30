@@ -53,7 +53,7 @@ struct DownloadedPodcastsGridView: View {
 
                 LazyVGrid(columns: columns, spacing: 16) {
                   ForEach(viewModel.podcastsWithDownloads, id: \.podcast.id) { item in
-                    NavigationLink(value: PodcastBrowseRoute(podcastModel: item.podcast)) {
+                    NavigationLink(value: PodcastBrowseRoute(podcastModel: item.podcast, initialFilter: .downloaded)) {
                       DownloadedPodcastCell(
                         podcast: item.podcast,
                         downloadCount: item.downloadCount
