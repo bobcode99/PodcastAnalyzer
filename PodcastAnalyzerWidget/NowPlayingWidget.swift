@@ -203,7 +203,8 @@ struct SmallWidgetView: View {
 }
 
 // MARK: - Medium Widget View
-// Left: full-bleed artwork panel. Right: info with widgetContentMargins.
+// Left: square artwork panel sized to widget height. Right: info with widgetContentMargins.
+// GeometryReader reads the full widget height so the artwork is never cropped.
 
 struct MediumWidgetView: View {
   let entry: NowPlayingEntry
@@ -211,61 +212,63 @@ struct MediumWidgetView: View {
 
   var body: some View {
     if let data = entry.playbackData {
-      HStack(spacing: 0) {
-        // Left: full-bleed artwork (no leading/vertical margin — contentMarginsDisabled)
-        artworkPanel
-          .frame(width: 120)
-          .frame(maxHeight: .infinity)
-          .clipped()
+      GeometryReader { geo in
+        HStack(spacing: 0) {
+          // Left: square artwork — width equals widget height so the 1:1 artwork
+          // fills exactly without cropping (avoids the .fill + taller-frame clip).
+          artworkPanel
+            .frame(width: geo.size.height, height: geo.size.height)
+            .clipped()
 
-        // Right: episode info, padded using widgetContentMargins
-        VStack(alignment: .leading, spacing: 0) {
-          Text(data.episodeTitle)
-            .font(.subheadline)
-            .fontWeight(.semibold)
-            .lineLimit(2)
-            .foregroundStyle(.primary)
+          // Right: episode info, padded using widgetContentMargins
+          VStack(alignment: .leading, spacing: 0) {
+            Text(data.episodeTitle)
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .lineLimit(2)
+              .foregroundStyle(.primary)
 
-          Text(data.podcastTitle)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .padding(.top, 4)
+            Text(data.podcastTitle)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .padding(.top, 4)
 
-          Spacer(minLength: 8)
+            Spacer(minLength: 8)
 
-          // Progress bar
-          GeometryReader { geo in
-            ZStack(alignment: .leading) {
-              Capsule()
-                .fill(Color.primary.opacity(0.12))
-                .frame(height: 3)
-              Capsule()
-                .fill(Color.blue)
-                .frame(width: max(geo.size.width * data.progress, 0), height: 3)
+            // Progress bar
+            GeometryReader { barGeo in
+              ZStack(alignment: .leading) {
+                Capsule()
+                  .fill(Color.primary.opacity(0.12))
+                  .frame(height: 3)
+                Capsule()
+                  .fill(Color.blue)
+                  .frame(width: max(barGeo.size.width * data.progress, 0), height: 3)
+              }
+            }
+            .frame(height: 3)
+            .padding(.bottom, 6)
+
+            // Play/pause button — trailing
+            HStack {
+              Spacer()
+              Button(intent: TogglePlaybackIntent()) {
+                Image(systemName: data.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                  .font(.system(size: 36))
+                  .foregroundStyle(.blue)
+                  .frame(width: 44, height: 44)
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel(data.isPlaying ? "Pause" : "Play")
             }
           }
-          .frame(height: 3)
-          .padding(.bottom, 6)
-
-          // Play/pause button — trailing
-          HStack {
-            Spacer()
-            Button(intent: TogglePlaybackIntent()) {
-              Image(systemName: data.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                .font(.system(size: 36))
-                .foregroundStyle(.blue)
-                .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(data.isPlaying ? "Pause" : "Play")
-          }
+          .padding(.leading, 14)
+          .padding(.trailing, margins.trailing)
+          .padding(.top, margins.top)
+          .padding(.bottom, margins.bottom)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .padding(.leading, 14)
-        .padding(.trailing, margins.trailing)
-        .padding(.top, margins.top)
-        .padding(.bottom, margins.bottom)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
       }
       .widgetURL(data.episodeDetailURL)
     } else {

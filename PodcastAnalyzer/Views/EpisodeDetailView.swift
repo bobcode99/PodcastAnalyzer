@@ -136,14 +136,6 @@ struct EpisodeDetailView: View {
                             onPlayNext: { viewModel.addToPlayNext() }
                         )
 
-                        Divider()
-
-                        Button(action: { viewModel.reportIssue() }) {
-                            Label(
-                                "Report Issue",
-                                systemImage: "exclamationmark.triangle"
-                            )
-                        }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }

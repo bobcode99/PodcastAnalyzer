@@ -1094,11 +1094,6 @@ final class EpisodeDetailViewModel {
     logger.info("Added to play next: \(self.episode.title)")
   }
 
-  func reportIssue() {
-    // TODO: Implement issue reporting
-    logger.debug("Report issue for: \(self.episode.title)")
-  }
-
   // MARK: - RSS Transcript Methods
 
   /// Check if RSS transcript is available from the feed

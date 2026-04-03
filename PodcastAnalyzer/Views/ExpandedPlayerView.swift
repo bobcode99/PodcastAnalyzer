@@ -273,11 +273,6 @@ struct ExpandedPlayerView: View {
       }
     }
 
-    Section {
-      Button(role: .destructive, action: { viewModel.reportConcern() }) {
-        Label("Report a Concern", systemImage: "exclamationmark.bubble")
-      }
-    }
   }
 
   // MARK: - Progress Section
