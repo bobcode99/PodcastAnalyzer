@@ -32,21 +32,12 @@ nonisolated struct WidgetPlaybackData: Codable, Sendable {
     URL(string: "podcastanalyzer://expandplayer")
   }
 
-  /// Deep link URL to navigate directly to the episode detail screen.
-  /// Returns nil when audioURL is missing so the widget doesn't fire
-  /// a navigation URL from placeholder or incomplete data.
+  /// Deep link URL for widget background tap.
+  /// Always routes to "nowplaying" so the app navigates to whatever episode is
+  /// currently active — not the (possibly stale) episode baked into the widget entry.
   var episodeDetailURL: URL? {
     guard let audioURL, !audioURL.isEmpty else { return nil }
-    var components = URLComponents()
-    components.scheme = "podcastanalyzer"
-    components.host = "episodedetail"
-    components.queryItems = [
-      URLQueryItem(name: "title", value: episodeTitle),
-      URLQueryItem(name: "podcast", value: podcastTitle),
-      URLQueryItem(name: "audio", value: audioURL),
-      URLQueryItem(name: "image", value: imageURL),
-    ]
-    return components.url
+    return URL(string: "podcastanalyzer://nowplaying")
   }
 
   /// Formatted current time string

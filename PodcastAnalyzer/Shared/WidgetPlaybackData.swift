@@ -8,11 +8,14 @@
 
 import Foundation
 import Nuke
+import WidgetKit
 
 #if os(iOS)
 import UIKit
+private typealias WidgetImage = UIImage
 #else
 import AppKit
+private typealias WidgetImage = NSImage
 #endif
 
 // MARK: - Widget Playback Data
@@ -39,21 +42,12 @@ nonisolated struct WidgetPlaybackData: Codable, Sendable {
     URL(string: "podcastanalyzer://expandplayer")
   }
 
-  /// Deep link URL to navigate directly to the episode detail screen.
-  /// Returns nil when audioURL is missing (e.g. placeholder data) so the
-  /// widget falls back to .widgetURL on the parent view.
+  /// Deep link URL for widget background tap.
+  /// Always routes to "nowplaying" so the app navigates to whatever episode is
+  /// currently active — not the (possibly stale) episode baked into the widget entry.
   var episodeDetailURL: URL? {
     guard let audioURL, !audioURL.isEmpty else { return nil }
-    var components = URLComponents()
-    components.scheme = "podcastanalyzer"
-    components.host = "episodedetail"
-    components.queryItems = [
-      URLQueryItem(name: "title", value: episodeTitle),
-      URLQueryItem(name: "podcast", value: podcastTitle),
-      URLQueryItem(name: "audio", value: audioURL),
-      URLQueryItem(name: "image", value: imageURL),
-    ]
-    return components.url
+    return URL(string: "podcastanalyzer://nowplaying")
   }
 
   /// Formatted current time string
@@ -172,6 +166,26 @@ nonisolated enum WidgetDataManager {
   /// Download and cache artwork image from URL using Nuke.
   /// Skips download if the same URL was already cached.
   /// Called from @MainActor context (EnhancedAudioManager).
+  /// Resize an image to at most 300×300 points so it stays within WidgetKit's
+  /// pixel-area limit (~2,275,490 px²). Images already smaller are returned as-is.
+  private static func resizedForWidget(_ image: WidgetImage) -> WidgetImage {
+    let maxDimension: CGFloat = 300
+    let size = image.size
+    guard size.width > maxDimension || size.height > maxDimension else { return image }
+    let scale = min(maxDimension / size.width, maxDimension / size.height)
+    let newSize = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
+    #if os(iOS)
+    let renderer = UIGraphicsImageRenderer(size: newSize)
+    return renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: newSize)) }
+    #else
+    let resized = NSImage(size: newSize)
+    resized.lockFocus()
+    image.draw(in: CGRect(origin: .zero, size: newSize))
+    resized.unlockFocus()
+    return resized
+    #endif
+  }
+
   @MainActor private static var lastCachedArtworkURL: String?
 
   @MainActor static func cacheArtworkIfNeeded(from imageURLString: String?) {
@@ -183,15 +197,26 @@ nonisolated enum WidgetDataManager {
     Task.detached(priority: .utility) {
       do {
         let image = try await ImagePipeline.shared.image(for: imageURL)
+        // WidgetKit rejects images whose pixel area exceeds ~2,275,490 px²
+        // (roughly 1508×1508). Resize to 300×300 pt — enough for any widget
+        // size at 3× scale — before saving to the shared container.
+        let widgetImage = Self.resizedForWidget(image)
         #if os(iOS)
-        if let jpegData = image.jpegData(compressionQuality: 0.8) {
+        if let jpegData = widgetImage.jpegData(compressionQuality: 0.85) {
           writeArtworkData(jpegData)
+          // Trigger a second reload now that the artwork file is on disk.
+          await MainActor.run {
+            WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+          }
         }
         #else
-        if let tiffData = image.tiffRepresentation,
+        if let tiffData = widgetImage.tiffRepresentation,
            let bitmap = NSBitmapImageRep(data: tiffData),
-           let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.8]) {
+           let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) {
           writeArtworkData(jpegData)
+          await MainActor.run {
+            WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+          }
         }
         #endif
       } catch {

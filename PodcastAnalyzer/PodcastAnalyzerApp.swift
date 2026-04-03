@@ -8,6 +8,7 @@
 import SwiftData
 import SwiftUI
 import OSLog
+import WidgetKit
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "App")
 
@@ -103,6 +104,8 @@ struct PodcastAnalyzerApp: App {
       case .active:
         // App became active - handle widget play request (covers cold launch from widget)
         EnhancedAudioManager.shared.handleWidgetToggleOnActive()
+        // Force widget to re-read latest playback data every time app becomes active
+        WidgetCenter.shared.reloadAllTimelines()
         // Start foreground sync
         if BackgroundSyncManager.shared.isBackgroundSyncEnabled {
           BackgroundSyncManager.shared.startForegroundSync()

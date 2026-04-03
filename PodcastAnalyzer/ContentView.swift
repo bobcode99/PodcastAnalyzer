@@ -74,6 +74,8 @@ struct iOSContentView: View {
     .onAppear {
       // Restore last played episode on app launch
       audioManager.restoreLastEpisode()
+      // Ensure model context is available early (before the async task in PodcastAnalyzerApp)
+      notificationManager.setModelContext(modelContext)
     }
     .sheet(isPresented: $importManager.showImportSheet) {
       PodcastImportSheet()
@@ -99,7 +101,17 @@ struct iOSContentView: View {
 
   private func handleNotificationNavigation(target: NotificationNavigationTarget) {
     let route: EpisodeDetailRoute
-    if let result = notificationManager.findEpisode(
+    // Prefer lookup by audioURL (unique key) so we always get the full episode
+    // including description, transcript, and AI analysis — even for non-ASCII titles.
+    if !target.audioURL.isEmpty,
+       let result = notificationManager.findEpisodeByAudioURL(target.audioURL) {
+      route = EpisodeDetailRoute(
+        episode: result.episode,
+        podcastTitle: result.podcastTitle,
+        fallbackImageURL: result.imageURL,
+        podcastLanguage: result.language
+      )
+    } else if let result = notificationManager.findEpisode(
       podcastTitle: target.podcastTitle,
       episodeTitle: target.episodeTitle
     ) {
@@ -135,7 +147,7 @@ struct iOSContentView: View {
     }
 
     coordinator.lastDeepLinkedEpisodeRouteID = route.id
-    coordinator.homeRouter.push(route)
+    coordinator.activeRouter.push(route)
     notificationManager.clearNavigation()
   }
 

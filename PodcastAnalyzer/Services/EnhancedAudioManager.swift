@@ -13,6 +13,7 @@
 //
 
 import AVFoundation
+import CoreFoundation
 import Foundation
 import MediaPlayer
 import OSLog
@@ -164,6 +165,26 @@ class EnhancedAudioManager: NSObject {
     UIApplication.shared.beginReceivingRemoteControlEvents()
     #endif
     loadPlaybackRate()
+    registerWidgetNotifications()
+  }
+
+  /// Register a Darwin notification observer so the widget can signal a play/pause
+  /// toggle without bringing the app to the foreground.
+  private func registerWidgetNotifications() {
+    #if os(iOS)
+    CFNotificationCenterAddObserver(
+      CFNotificationCenterGetDarwinNotifyCenter(),
+      nil,
+      { _, _, _, _, _ in
+        Task { @MainActor in
+          EnhancedAudioManager.shared.checkWidgetTogglePlayback()
+        }
+      },
+      "com.jn.PodcastAnalyzer.togglePlayback" as CFString,
+      nil,
+      .deliverImmediately
+    )
+    #endif
   }
 
   private func setupAudioSession() {
@@ -981,6 +1002,7 @@ private func handleAudioInterruption(_ notification: Notification) {
   /// to avoid exhausting WidgetKit's daily reload budget.
   private func updateWidgetPlaybackData() {
     guard let episode = currentEpisode else {
+      logger.debug("Widget: no current episode — clearing widget data")
       WidgetDataManager.clearPlaybackData()
       if lastWidgetAudioURL != nil {
         WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
@@ -1003,12 +1025,14 @@ private func handleAudioInterruption(_ notification: Notification) {
 
     // Always write data so progress bar stays current
     WidgetDataManager.writePlaybackData(data)
+    logger.debug("Widget: wrote data — episode=\"\(episode.title)\" isPlaying=\(self.isPlaying) progress=\(String(format: "%.1f%%", data.progress * 100))")
 
     // Only trigger a timeline reload (expensive, budget-limited) when the
     // episode or play/pause state actually changed — not on every 5-second tick
     let episodeChanged = episode.audioURL != lastWidgetAudioURL
     let playStateChanged = isPlaying != lastWidgetIsPlaying
     if episodeChanged || playStateChanged {
+      logger.info("Widget: reloading timeline — episodeChanged=\(episodeChanged) playStateChanged=\(playStateChanged) episode=\"\(episode.title)\"")
       WidgetDataManager.cacheArtworkIfNeeded(from: episode.imageURL)
       WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
       lastWidgetAudioURL = episode.audioURL
@@ -1043,6 +1067,7 @@ private func handleAudioInterruption(_ notification: Notification) {
     guard let defaults = WidgetDataManager.sharedDefaults,
           defaults.bool(forKey: "widgetTogglePlayback") else { return }
     defaults.set(false, forKey: "widgetTogglePlayback")
+    logger.info("Widget: Darwin notification received — isPlaying=\(self.isPlaying), toggling")
     if isPlaying {
       pause()
     } else {
