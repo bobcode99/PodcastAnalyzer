@@ -96,6 +96,7 @@ final class CloudAIService {
         podcastTitle: String,
         analysisType: CloudAnalysisType,
         podcastLanguage: String? = nil,
+        formatHint: String? = nil,
         progressCallback: (@Sendable (String, Double) -> Void)? = nil
     ) async throws -> CloudAnalysisResult {
         progressCallback?("Starting Shortcuts analysis...", 0.2)
@@ -110,7 +111,8 @@ final class CloudAIService {
             episodeTitle: episodeTitle,
             podcastTitle: podcastTitle,
             analysisType: analysisType,
-            podcastLanguage: podcastLanguage
+            podcastLanguage: podcastLanguage,
+            formatHint: formatHint
         )
 
         progressCallback?("Running shortcut...", 0.4)
@@ -286,10 +288,18 @@ final class CloudAIService {
         episodeTitle: String,
         podcastTitle: String,
         analysisType: CloudAnalysisType,
-        podcastLanguage: String? = nil
+        podcastLanguage: String? = nil,
+        formatHint: String? = nil
     ) -> String {
         let languageInstruction = settings.analysisLanguage.getLanguageInstruction(podcastLanguage: podcastLanguage)
         let languageLine = languageInstruction.isEmpty ? "" : "\n\nLanguage: \(languageInstruction)"
+
+        let formatHintLine: String
+        if let hint = formatHint, !hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            formatHintLine = "\n\nPodcast Format Context: \(hint)\nUse this to understand the episode structure and skip any sponsored/advertisement segments in your analysis."
+        } else {
+            formatHintLine = "\n\nNote: If the transcript contains sponsored or advertisement segments, ignore them — do not include ads in topics, takeaways, highlights, or quotes."
+        }
 
         let useTimestamps = settings.transcriptFormat == .segmentBased
         let quotesSchema = useTimestamps
@@ -330,8 +340,9 @@ final class CloudAIService {
             "actionItems": ["action1", "action2"],
             "controversialPoints": ["point1"] or null,
             "entertainingMoments": ["moment1"] or null,
+            "qaHighlights": [{"question": "question text", "answer": "answer text"}] or null if no Q&A section exists,
             "conclusion": "Overall assessment and who would benefit from this episode"
-        }\(quotesNote)\(languageLine)
+        }\(quotesNote)\(formatHintLine)\(languageLine)
 
         Transcript:
         \(transcript)
@@ -347,6 +358,7 @@ final class CloudAIService {
         podcastTitle: String,
         analysisType: CloudAnalysisType,
         podcastLanguage: String? = nil,
+        formatHint: String? = nil,
         onChunk: @escaping @Sendable (String) -> Void,
         progressCallback: (@Sendable (String, Double) -> Void)? = nil
     ) async throws -> CloudAnalysisResult {
@@ -367,6 +379,7 @@ final class CloudAIService {
                 podcastTitle: podcastTitle,
                 analysisType: analysisType,
                 podcastLanguage: podcastLanguage,
+                formatHint: formatHint,
                 progressCallback: progressCallback
             )
         }
@@ -383,12 +396,13 @@ final class CloudAIService {
         let languageInstruction = settings.analysisLanguage.getLanguageInstruction(podcastLanguage: podcastLanguage)
         logger.info("Streaming Analysis Request - Provider: \(provider.displayName), Type: \(analysisType.rawValue), Language setting: \(self.settings.analysisLanguage.rawValue), Instruction: \(languageInstruction.isEmpty ? "None" : languageInstruction)")
 
-        let systemPrompt = buildSystemPrompt(for: analysisType, podcastLanguage: podcastLanguage)
+        let systemPrompt = buildSystemPrompt(for: analysisType, podcastLanguage: podcastLanguage, formatHint: formatHint)
         let userPrompt = buildUserPrompt(
             transcript: formattedTranscript,
             episodeTitle: episodeTitle,
             podcastTitle: podcastTitle,
-            analysisType: analysisType
+            analysisType: analysisType,
+            formatHint: formatHint
         )
 
         progressCallback?("Connecting to \(provider.displayName)...", 0.15)
@@ -435,6 +449,7 @@ final class CloudAIService {
         podcastTitle: String,
         analysisType: CloudAnalysisType,
         podcastLanguage: String? = nil,
+        formatHint: String? = nil,
         progressCallback: (@Sendable (String, Double) -> Void)? = nil
     ) async throws -> CloudAnalysisResult {
         let provider = settings.selectedProvider
@@ -452,12 +467,13 @@ final class CloudAIService {
         // Format transcript based on user's preference (segment-based vs sentence-based)
         let formattedTranscript = settings.transcriptFormat.formatTranscript(transcript)
 
-        let systemPrompt = buildSystemPrompt(for: analysisType, podcastLanguage: podcastLanguage)
+        let systemPrompt = buildSystemPrompt(for: analysisType, podcastLanguage: podcastLanguage, formatHint: formatHint)
         let userPrompt = buildUserPrompt(
             transcript: formattedTranscript,
             episodeTitle: episodeTitle,
             podcastTitle: podcastTitle,
-            analysisType: analysisType
+            analysisType: analysisType,
+            formatHint: formatHint
         )
 
         progressCallback?("Sending to \(provider.displayName)...", 0.3)
@@ -629,10 +645,17 @@ final class CloudAIService {
 
     // MARK: - Private: Build Prompts
 
-    private func buildSystemPrompt(for type: CloudAnalysisType, podcastLanguage: String? = nil) -> String {
+    private func buildSystemPrompt(for type: CloudAnalysisType, podcastLanguage: String? = nil, formatHint: String? = nil) -> String {
         // Get language instruction based on user setting
         let languageInstruction = settings.analysisLanguage.getLanguageInstruction(podcastLanguage: podcastLanguage)
         let languageLine = languageInstruction.isEmpty ? "" : "\n\n\(languageInstruction)"
+
+        let formatHintLine: String
+        if let hint = formatHint, !hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            formatHintLine = "\n\nPodcast Format Context: \(hint)\nUse this to understand the episode structure and skip any sponsored/advertisement segments in your analysis."
+        } else {
+            formatHintLine = "\n\nNote: If the transcript contains sponsored or advertisement segments, ignore them — do not include ads in topics, takeaways, highlights, or quotes."
+        }
 
         switch type {
         case .analysis:
@@ -672,8 +695,9 @@ final class CloudAIService {
                 "actionItems": ["action1", "action2"],
                 "controversialPoints": ["point1"] or null,
                 "entertainingMoments": ["moment1"] or null,
+                "qaHighlights": [{"question": "question text", "answer": "answer text"}] or null if no Q&A section exists,
                 "conclusion": "Overall assessment and who would benefit from this episode"
-            }\(quotesNote)\(languageLine)
+            }\(quotesNote)\(formatHintLine)\(languageLine)
             """
         }
     }
@@ -682,7 +706,8 @@ final class CloudAIService {
         transcript: String,
         episodeTitle: String,
         podcastTitle: String,
-        analysisType: CloudAnalysisType
+        analysisType: CloudAnalysisType,
+        formatHint: String? = nil
     ) -> String {
         let instruction: String
         switch analysisType {

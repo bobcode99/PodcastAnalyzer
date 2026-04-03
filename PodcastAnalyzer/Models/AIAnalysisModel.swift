@@ -190,6 +190,14 @@ final class EpisodeQuickTagsModel {
     }
 }
 
+// MARK: - Q&A Highlight
+
+/// A structured Q&A pair extracted from a podcast episode
+nonisolated struct QAHighlight: Codable, Sendable {
+    let question: String
+    let answer: String
+}
+
 // MARK: - Timestamped Quote
 
 /// A quote with an optional timestamp for playback seeking
@@ -231,6 +239,7 @@ nonisolated struct ParsedEpisodeAnalysisResponse: Codable {
     let actionItems: [String]
     let controversialPoints: [String]?
     let entertainingMoments: [String]?
+    let qaHighlights: [QAHighlight]?
     let conclusion: String
 
     nonisolated struct TopicDetail: Codable {
@@ -256,6 +265,7 @@ nonisolated struct ParsedEpisodeAnalysisResponse: Codable {
         actionItems: [String],
         controversialPoints: [String]?,
         entertainingMoments: [String]?,
+        qaHighlights: [QAHighlight]? = nil,
         conclusion: String
     ) {
         self.overview = overview
@@ -274,6 +284,7 @@ nonisolated struct ParsedEpisodeAnalysisResponse: Codable {
         self.actionItems = actionItems
         self.controversialPoints = controversialPoints
         self.entertainingMoments = entertainingMoments
+        self.qaHighlights = qaHighlights
         self.conclusion = conclusion
     }
 
@@ -300,6 +311,7 @@ nonisolated struct ParsedEpisodeAnalysisResponse: Codable {
         }
         controversialPoints = try container.decodeIfPresent([String].self, forKey: .controversialPoints)
         entertainingMoments = try container.decodeIfPresent([String].self, forKey: .entertainingMoments)
+        qaHighlights = try container.decodeIfPresent([QAHighlight].self, forKey: .qaHighlights)
         conclusion = try container.decode(String.self, forKey: .conclusion)
 
         if let quotes = try? container.decode([TimestampedQuote].self, forKey: .notableQuotes) {
@@ -329,6 +341,7 @@ nonisolated struct ParsedEpisodeAnalysisResponse: Codable {
         try container.encode(actionItems, forKey: .actionItems)
         try container.encodeIfPresent(controversialPoints, forKey: .controversialPoints)
         try container.encodeIfPresent(entertainingMoments, forKey: .entertainingMoments)
+        try container.encodeIfPresent(qaHighlights, forKey: .qaHighlights)
         try container.encode(conclusion, forKey: .conclusion)
     }
 
@@ -350,6 +363,7 @@ nonisolated struct ParsedEpisodeAnalysisResponse: Codable {
         case actionableAdvice  // decode-only alias for actionItems
         case controversialPoints
         case entertainingMoments
+        case qaHighlights
         case conclusion
     }
 
@@ -430,6 +444,15 @@ nonisolated struct ParsedEpisodeAnalysisResponse: Codable {
             lines.append("")
             lines.append("Entertaining Moments")
             for item in entertaining { lines.append("  - \(item)") }
+        }
+
+        if let qa = qaHighlights, !qa.isEmpty {
+            lines.append("")
+            lines.append("Q&A Highlights")
+            for item in qa {
+                lines.append("  Q: \(item.question)")
+                lines.append("  A: \(item.answer)")
+            }
         }
 
         lines.append("")

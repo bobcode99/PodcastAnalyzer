@@ -1958,7 +1958,7 @@ final class EpisodeDetailViewModel {
   var currentStreamingType: CloudAnalysisType?
 
   /// Generate cloud-based transcript analysis with streaming
-  func generateCloudAnalysis(type: CloudAnalysisType) {
+  func generateCloudAnalysis(type: CloudAnalysisType, formatHint: String? = nil) {
     let settings = AISettingsManager.shared
 
     guard settings.hasConfiguredProvider else {
@@ -1987,6 +1987,7 @@ final class EpisodeDetailViewModel {
           podcastTitle: podcastTitle,
           analysisType: type,
           podcastLanguage: podcastLanguage,
+          formatHint: formatHint,
           onChunk: { [weak self] text in
             Task { @MainActor in
               self?.streamingText = text

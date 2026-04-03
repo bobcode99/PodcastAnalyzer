@@ -33,6 +33,8 @@ struct EpisodeAIAnalysisView: View {
   @State private var selectedTab: CloudAnalysisTab = .analysis
   @State private var questionInput: String = ""
   @State private var showSettingsSheet = false
+  @State private var formatHintDraft: String = ""
+  @State private var formatHintSaved: Bool = false
 
   private let settings = AISettingsManager.shared
 
@@ -80,6 +82,9 @@ struct EpisodeAIAnalysisView: View {
       } else {
         aiContentView
       }
+    }
+    .onAppear {
+      formatHintDraft = settings.formatHint(for: viewModel.podcastTitle)
     }
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
@@ -208,13 +213,62 @@ struct EpisodeAIAnalysisView: View {
       } else if let result = viewModel.cloudAnalysisCache.analysis {
         analysisResultCard(result)
       } else {
+        // Format hint field
+        formatHintField
+
         generateButton(
           title: "Analyze Episode",
-          action: { viewModel.generateCloudAnalysis(type: .analysis) }
+          action: {
+            viewModel.generateCloudAnalysis(
+              type: .analysis,
+              formatHint: formatHintDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : formatHintDraft
+            )
+          }
         )
       }
 
       analysisStateView(for: viewModel.cloudAnalysisState, type: .analysis)
+    }
+  }
+
+  // MARK: - Format Hint Field
+
+  private var formatHintField: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack {
+        Label("Show Format (optional)", systemImage: "text.alignleft")
+          .font(.caption)
+          .fontWeight(.semibold)
+          .foregroundStyle(.secondary)
+        Spacer()
+        if !formatHintDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+          Button("Save as default") {
+            settings.saveFormatHint(formatHintDraft, for: viewModel.podcastTitle)
+            formatHintSaved = true
+            Task {
+              try? await Task.sleep(for: .seconds(1.5))
+              formatHintSaved = false
+            }
+          }
+          .font(.caption)
+          .foregroundStyle(formatHintSaved ? .green : .blue)
+          #if os(macOS)
+          .buttonStyle(.plain)
+          #endif
+        }
+      }
+
+      TextField(
+        "e.g. Starts with sponsor, then market news, guest interview, listener Q&A, closing",
+        text: $formatHintDraft,
+        axis: .vertical
+      )
+      .font(.caption)
+      .lineLimit(2...4)
+      .textFieldStyle(.plain)
+      .padding(10)
+      .background(Color.platformSystemGray6)
+      .clipShape(.rect(cornerRadius: 8))
     }
   }
 
@@ -667,6 +721,38 @@ struct EpisodeAIAnalysisView: View {
                   .font(.caption)
                 selectableText(moment)
               }
+            }
+          }
+        }
+
+        if let qaItems = parsed.qaHighlights, !qaItems.isEmpty {
+          VStack(alignment: .leading, spacing: 8) {
+            Label("Q&A Highlights", systemImage: "bubble.left.and.bubble.right.fill")
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .foregroundStyle(.cyan)
+
+            ForEach(Array(qaItems.enumerated()), id: \.offset) { _, item in
+              VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                  Image(systemName: "questionmark.circle.fill")
+                    .foregroundStyle(.cyan)
+                    .font(.caption)
+                  selectableText(item.question)
+                    .fontWeight(.medium)
+                }
+                HStack(alignment: .top, spacing: 8) {
+                  Image(systemName: "arrow.turn.down.right")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                    .padding(.leading, 2)
+                  selectableText(item.answer)
+                    .foregroundStyle(.secondary)
+                }
+              }
+              .padding()
+              .background(Color.cyan.opacity(0.05))
+              .clipShape(.rect(cornerRadius: 8))
             }
           }
         }

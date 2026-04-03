@@ -373,6 +373,35 @@ final class AISettingsManager {
         didSet { UserDefaults.standard.set(shortcutsTimeout, forKey: "ai_shortcuts_timeout") }
     }
 
+    // MARK: - Podcast Format Hints
+
+    /// Returns the saved format hint for a given podcast title, or empty string if none set.
+    func formatHint(for podcastTitle: String) -> String {
+        let hints = loadFormatHints()
+        return hints[podcastTitle] ?? ""
+    }
+
+    /// Saves a format hint for a podcast title.
+    func saveFormatHint(_ hint: String, for podcastTitle: String) {
+        var hints = loadFormatHints()
+        if hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            hints.removeValue(forKey: podcastTitle)
+        } else {
+            hints[podcastTitle] = hint
+        }
+        if let data = try? JSONEncoder().encode(hints) {
+            UserDefaults.standard.set(data, forKey: "ai_podcast_format_hints")
+        }
+    }
+
+    private func loadFormatHints() -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: "ai_podcast_format_hints"),
+              let hints = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return hints
+    }
+
     // MARK: - Local Server URLs
 
     var lmstudioBaseURL: URL {
