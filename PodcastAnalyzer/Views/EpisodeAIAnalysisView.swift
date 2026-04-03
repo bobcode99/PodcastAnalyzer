@@ -35,6 +35,8 @@ struct EpisodeAIAnalysisView: View {
   @State private var showSettingsSheet = false
   @State private var formatHintDraft: String = ""
   @State private var formatHintSaved: Bool = false
+  @State private var isRegenerating: Bool = false
+  @FocusState private var isFormatFieldFocused: Bool
 
   private let settings = AISettingsManager.shared
 
@@ -85,6 +87,7 @@ struct EpisodeAIAnalysisView: View {
     }
     .onAppear {
       formatHintDraft = settings.formatHint(for: viewModel.podcastTitle)
+      isRegenerating = false
     }
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
@@ -209,25 +212,152 @@ struct EpisodeAIAnalysisView: View {
       )
 
       if viewModel.isStreaming && viewModel.currentStreamingType == .analysis {
+        // Currently streaming — reset regenerating flag and show progress
         streamingResponseView
-      } else if let result = viewModel.cloudAnalysisCache.analysis {
-        analysisResultCard(result)
-      } else {
-        // Format hint field
+          .onAppear { isRegenerating = false }
+
+      } else if isRegenerating, let result = viewModel.cloudAnalysisCache.analysis {
+        // User tapped Regenerate — show hint editor above the existing result
+        shortcutPickerRow
         formatHintField
 
         generateButton(
-          title: "Analyze Episode",
+          title: "Run Analysis",
           action: {
+            isRegenerating = false
+            isFormatFieldFocused = false
             viewModel.generateCloudAnalysis(
               type: .analysis,
-              formatHint: formatHintDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : formatHintDraft
+              formatHint: formatHintDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? nil : formatHintDraft
             )
           }
         )
-      }
 
-      analysisStateView(for: viewModel.cloudAnalysisState, type: .analysis)
+        Button("Cancel") {
+          isRegenerating = false
+          isFormatFieldFocused = false
+        }
+        .font(.subheadline)
+        .frame(maxWidth: .infinity)
+        #if os(macOS)
+        .buttonStyle(.plain)
+        #endif
+        .foregroundStyle(.secondary)
+
+        Divider()
+          .padding(.vertical, 4)
+
+        Text("Current Result")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+
+        analysisResultCard(result)
+
+      } else if case .error(let errorMsg) = viewModel.cloudAnalysisState,
+                let result = viewModel.cloudAnalysisCache.analysis {
+        // Regeneration failed — show inline warning + keep old result
+        HStack(alignment: .top, spacing: 10) {
+          Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundStyle(.orange)
+            .font(.subheadline)
+          VStack(alignment: .leading, spacing: 3) {
+            Text("Analysis failed — showing previous result")
+              .font(.caption)
+              .fontWeight(.semibold)
+              .foregroundStyle(.orange)
+            Text(errorMsg)
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+          }
+          Spacer()
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.1))
+        .clipShape(.rect(cornerRadius: 8))
+
+        analysisResultCard(result)
+
+      } else if let result = viewModel.cloudAnalysisCache.analysis {
+        // Normal completed state
+        analysisResultCard(result)
+
+      } else {
+        // Show analysis error prominently at the top so it's not missed
+        if case .error(let errorMsg) = viewModel.cloudAnalysisState {
+          analysisErrorBanner(message: errorMsg, isRetry: viewModel.cloudAnalysisCache.analysis == nil)
+        }
+
+        // Show progress indicator while analyzing (no previous result to show)
+        if case .analyzing = viewModel.cloudAnalysisState {
+          analysisStateView(for: viewModel.cloudAnalysisState, type: .analysis)
+        } else {
+          // No result yet — show hint field + analyze button
+          shortcutPickerRow
+          formatHintField
+
+          generateButton(
+            title: "Analyze Episode",
+            action: {
+              isFormatFieldFocused = false
+              viewModel.generateCloudAnalysis(
+                type: .analysis,
+                formatHint: formatHintDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                  ? nil : formatHintDraft
+              )
+            }
+          )
+        }
+      }
+    }
+  }
+
+  // MARK: - Shortcut Picker Row
+
+  /// Quick-switch picker shown only when Shortcuts provider is active with ≥2 saved names.
+  @ViewBuilder
+  private var shortcutPickerRow: some View {
+    let service = ShortcutsAIService.shared
+    if settings.selectedProvider == .applePCC, service.shortcutNames.count > 1 {
+      HStack(spacing: 10) {
+        Label("Shortcut", systemImage: "square.on.square")
+          .font(.caption)
+          .fontWeight(.semibold)
+          .foregroundStyle(.secondary)
+
+        Spacer()
+
+        Menu {
+          ForEach(service.shortcutNames, id: \.self) { name in
+            Button {
+              service.shortcutName = name
+            } label: {
+              HStack {
+                Text(name)
+                if service.shortcutName == name {
+                  Image(systemName: "checkmark")
+                }
+              }
+            }
+          }
+        } label: {
+          HStack(spacing: 4) {
+            Text(service.shortcutName)
+              .font(.caption)
+              .fontWeight(.medium)
+            Image(systemName: "chevron.up.chevron.down")
+              .font(.system(size: 10))
+          }
+          .padding(.horizontal, 10)
+          .padding(.vertical, 6)
+          .background(Color.blue.opacity(0.1))
+          .foregroundStyle(.blue)
+          .clipShape(.rect(cornerRadius: 8))
+        }
+        #if os(macOS)
+        .menuStyle(.borderlessButton)
+        #endif
+      }
     }
   }
 
@@ -258,17 +388,39 @@ struct EpisodeAIAnalysisView: View {
         }
       }
 
-      TextField(
-        "e.g. Starts with sponsor, then market news, guest interview, listener Q&A, closing",
-        text: $formatHintDraft,
-        axis: .vertical
-      )
-      .font(.caption)
-      .lineLimit(2...4)
-      .textFieldStyle(.plain)
+      HStack(alignment: .top, spacing: 0) {
+        TextField(
+          "e.g. Starts with sponsor, then market news, guest interview, listener Q&A, closing",
+          text: $formatHintDraft,
+          axis: .vertical
+        )
+        .font(.caption)
+        .lineLimit(2...4)
+        .textFieldStyle(.plain)
+        .focused($isFormatFieldFocused)
+
+        // Dismiss keyboard button — only visible while the field is focused
+        if isFormatFieldFocused {
+          Button {
+            isFormatFieldFocused = false
+          } label: {
+            Image(systemName: "keyboard.chevron.compact.down")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .padding(4)
+          }
+          #if os(macOS)
+          .buttonStyle(.plain)
+          #endif
+        }
+      }
       .padding(10)
       .background(Color.platformSystemGray6)
       .clipShape(.rect(cornerRadius: 8))
+      .overlay(
+        RoundedRectangle(cornerRadius: 8)
+          .strokeBorder(isFormatFieldFocused ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
+      )
     }
   }
 
@@ -321,6 +473,38 @@ struct EpisodeAIAnalysisView: View {
       .submitLabel(.send)
       #endif
 
+      // Q&A error — show above history so it's immediately visible
+      if case .error(let errorMsg) = viewModel.cloudQuestionState {
+        HStack(alignment: .top, spacing: 10) {
+          Image(systemName: "xmark.circle.fill")
+            .foregroundStyle(.red)
+            .font(.subheadline)
+          VStack(alignment: .leading, spacing: 3) {
+            Text("Question failed")
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .foregroundStyle(.red)
+            Text(errorMsg)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color.red.opacity(0.08))
+        .clipShape(.rect(cornerRadius: 10))
+        .overlay(
+          RoundedRectangle(cornerRadius: 10)
+            .strokeBorder(Color.red.opacity(0.2), lineWidth: 1)
+        )
+      }
+
+      // Progress indicator while waiting for answer
+      if case .analyzing = viewModel.cloudQuestionState {
+        analysisStateView(for: viewModel.cloudQuestionState)
+      }
+
       // Previous Q&A history
       if !viewModel.cloudAnalysisCache.questionAnswers.isEmpty {
         VStack(alignment: .leading, spacing: 12) {
@@ -335,8 +519,6 @@ struct EpisodeAIAnalysisView: View {
           }
         }
       }
-
-      analysisStateView(for: viewModel.cloudQuestionState)
     }
   }
 
@@ -448,10 +630,7 @@ struct EpisodeAIAnalysisView: View {
         }
 
         Button(action: {
-          if let type = selectedTab.analysisType {
-            viewModel.clearCloudAnalysis(type: type)
-            viewModel.generateCloudAnalysis(type: type)
-          }
+          isRegenerating = true
         }) {
           Label("Regenerate", systemImage: "arrow.clockwise")
             .font(.caption)
@@ -1116,6 +1295,43 @@ struct EpisodeAIAnalysisView: View {
     case "low": return .red
     default: return .gray
     }
+  }
+
+  /// Prominent error banner with optional retry messaging.
+  /// `isRetry` = false means there's no previous result, so label as "Analysis failed".
+  private func analysisErrorBanner(message: String, isRetry: Bool) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: "xmark.circle.fill")
+          .foregroundStyle(.red)
+          .font(.subheadline)
+
+        VStack(alignment: .leading, spacing: 3) {
+          Text(isRetry ? "Analysis failed" : "Regeneration failed")
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .foregroundStyle(.red)
+
+          Text(message)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+
+        Spacer(minLength: 0)
+      }
+
+      Text("Fix the issue above and tap Analyze to retry.")
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+    }
+    .padding(12)
+    .background(Color.red.opacity(0.08))
+    .clipShape(.rect(cornerRadius: 10))
+    .overlay(
+      RoundedRectangle(cornerRadius: 10)
+        .strokeBorder(Color.red.opacity(0.2), lineWidth: 1)
+    )
   }
 
   private func analysisStateView(for state: AnalysisState, type: CloudAnalysisType? = nil) -> some View {

@@ -27,10 +27,21 @@ class ShortcutsAIService {
     var isProcessing = false
     var lastResult: String?
     var lastError: String?
+
+    /// The currently selected (active) shortcut name.
     var shortcutName: String {
         didSet {
             UserDefaults.standard.set(shortcutName, forKey: "shortcuts_ai_name")
+            // Keep it present in the saved list
+            if !shortcutNames.contains(shortcutName) {
+                shortcutNames.append(shortcutName)
+            }
         }
+    }
+
+    /// All saved shortcut names (the selectable list).
+    var shortcutNames: [String] {
+        didSet { saveShortcutNames() }
     }
 
     // Continuation for async/await support
@@ -41,9 +52,51 @@ class ShortcutsAIService {
     static let defaultShortcutName = "PA-WithAIViaGPT" // CHANGE THIS TO THE NAME OF YOUR SHORTCUT
 
     private init() {
-        self.shortcutName = UserDefaults.standard.string(forKey: "shortcuts_ai_name")
-            ?? Self.defaultShortcutName
+        // Load the saved list, falling back to the legacy single-name key.
+        // Use a local variable so the assignment to shortcutName below
+        // never reads self.shortcutNames through @Observable during init.
+        let loadedNames: [String]
+        if let data = UserDefaults.standard.data(forKey: "shortcuts_ai_names"),
+           let decoded = try? JSONDecoder().decode([String].self, from: data),
+           !decoded.isEmpty {
+            loadedNames = decoded
+        } else {
+            let legacy = UserDefaults.standard.string(forKey: "shortcuts_ai_name")
+                ?? Self.defaultShortcutName
+            loadedNames = [legacy]
+        }
+        self.shortcutNames = loadedNames
+
+        // Resolve the active name without touching self.shortcutNames
+        let saved = UserDefaults.standard.string(forKey: "shortcuts_ai_name") ?? loadedNames[0]
+        self.shortcutName = loadedNames.contains(saved) ? saved : loadedNames[0]
+
         setupNotificationObserver()
+    }
+
+    // MARK: - Shortcut List Management
+
+    func addShortcutName(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !shortcutNames.contains(trimmed) else { return }
+        shortcutNames.append(trimmed)
+        shortcutName = trimmed  // auto-select the newly added shortcut
+    }
+
+    func removeShortcutName(_ name: String) {
+        shortcutNames.removeAll { $0 == name }
+        if shortcutNames.isEmpty {
+            shortcutNames = [Self.defaultShortcutName]
+        }
+        if shortcutName == name {
+            shortcutName = shortcutNames[0]
+        }
+    }
+
+    private func saveShortcutNames() {
+        if let data = try? JSONEncoder().encode(shortcutNames) {
+            UserDefaults.standard.set(data, forKey: "shortcuts_ai_names")
+        }
     }
 
     // MARK: - Setup

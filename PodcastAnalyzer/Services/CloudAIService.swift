@@ -154,16 +154,18 @@ final class CloudAIService {
                 content: displayContent,
                 parsedAnalysis: parsedAnalysis,
                 provider: .applePCC,
-                model: "Shortcuts",
+                model: ShortcutsAIService.shared.shortcutName,
                 timestamp: Date(),
                 jsonParseWarning: jsonParseWarning
             )
 
         } catch let error as ShortcutsError {
-            progressCallback?("Error", 1.0)
+            // Do NOT call progressCallback here — the outer catch in generateCloudAnalysis
+            // sets cloudAnalysisState = .error(...) synchronously. If we dispatch a
+            // progressCallback task first, it runs after the catch and overwrites .error
+            // with .analyzing("Error"), hiding the error banner from the user.
             throw CloudAIError.apiError(statusCode: 0, message: error.localizedDescription)
         } catch {
-            progressCallback?("Error", 1.0)
             throw error
         }
     }
@@ -268,16 +270,16 @@ final class CloudAIService {
                 relatedTopics: parsed?.relatedTopics,
                 sources: parsed?.sources,
                 provider: .applePCC,
-                model: "Shortcuts",
+                model: ShortcutsAIService.shared.shortcutName,
                 timestamp: Date(),
                 jsonParseWarning: jsonParseWarning
             )
 
         } catch let error as ShortcutsError {
-            progressCallback?("Error", 1.0)
+            // Same race-condition fix as analyzeWithShortcuts — do not dispatch
+            // a progressCallback here or it will overwrite the outer .error state.
             throw CloudAIError.apiError(statusCode: 0, message: error.localizedDescription)
         } catch {
-            progressCallback?("Error", 1.0)
             throw error
         }
     }
