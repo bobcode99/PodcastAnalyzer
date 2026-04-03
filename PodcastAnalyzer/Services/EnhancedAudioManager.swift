@@ -1213,20 +1213,21 @@ private func handleAudioInterruption(_ notification: Notification) {
           self.currentTime = newTime
         }
 
-        // Track if duration was previously unknown
-        let previousDuration = self.duration
-
         if let newDuration = self.player?.currentItem?.duration.seconds,
-          newDuration.isFinite
+          newDuration.isFinite, newDuration > 0
         {
           if self.duration != newDuration {
             self.duration = newDuration
-          }
 
-          // Update Now Playing duration when it first becomes available
-          // (transition from 0 or invalid to valid duration)
-          if previousDuration <= 0 && newDuration > 0 {
+            // Update Now Playing info whenever duration changes — covers both the
+            // initial load (0 → real) and the RSS-metadata-vs-actual-file mismatch
+            // case (e.g. 28 min metadata → 34 min actual due to ads).
             self.updateNowPlayingDuration()
+
+            // Persist the corrected duration immediately so the next session
+            // restores the accurate value rather than the stale RSS metadata.
+            self.savePlaybackState()
+            self.updateWidgetPlaybackData()
           }
         }
 
