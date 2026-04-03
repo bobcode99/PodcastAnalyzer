@@ -6,13 +6,6 @@
 	<array>
 		<string>group.com.jn.PodcastAnalyzer</string>
 	</array>
-	<key>com.apple.developer.icloud-services</key>
-	<array>
-		<string>CloudKit</string>
-	</array>
-	<key>com.apple.developer.icloud-container-identifiers</key>
-	<array>
-		<string>iCloud.com.jn.PodcastAnalyzer</string>
-	</array>
+
 </dict>
 </plist>

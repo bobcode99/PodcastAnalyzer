@@ -749,8 +749,9 @@ final class HomeViewModel {
     regionChangeTask = nil
     recommendationsTask?.cancel()
     recommendationsTask = nil
-    loadTask?.cancel()
-    loadTask = nil
+    // loadTask intentionally NOT cancelled — it's a one-shot initialization that must
+    // complete regardless of tab switches. Cancelling it with isAlreadyLoaded=true would
+    // leave trendingEpisodes empty forever (no retry path).
     subscribeTask?.cancel()
     subscribeTask = nil
     completionObserverTask?.cancel()

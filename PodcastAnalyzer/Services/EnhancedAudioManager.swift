@@ -115,6 +115,10 @@ class EnhancedAudioManager: NSObject {
   // Audio interruption handling - track if we should resume after interruption ends
   private var wasPlayingBeforeInterruption: Bool = false
 
+  // Track last values pushed to widget to avoid burning WidgetKit reload budget
+  private var lastWidgetAudioURL: String?
+  private var lastWidgetIsPlaying: Bool?
+
   private var timeObserver: Any?
   // Task-based observers for Swift 6 concurrency
   private var interruptionTask: Task<Void, Never>?
@@ -971,11 +975,18 @@ private func handleAudioInterruption(_ notification: Notification) {
 
   // MARK: - Widget Data Updates
 
-  /// Update widget with current playback state
+  /// Update widget with current playback state.
+  /// Always writes fresh data to shared UserDefaults (for progress bar).
+  /// Only reloads the WidgetKit timeline when episode or play/pause state changes
+  /// to avoid exhausting WidgetKit's daily reload budget.
   private func updateWidgetPlaybackData() {
     guard let episode = currentEpisode else {
       WidgetDataManager.clearPlaybackData()
-      WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+      if lastWidgetAudioURL != nil {
+        WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+        lastWidgetAudioURL = nil
+        lastWidgetIsPlaying = nil
+      }
       return
     }
 
@@ -990,9 +1001,19 @@ private func handleAudioInterruption(_ notification: Notification) {
       lastUpdated: Date()
     )
 
+    // Always write data so progress bar stays current
     WidgetDataManager.writePlaybackData(data)
-    WidgetDataManager.cacheArtworkIfNeeded(from: episode.imageURL)
-    WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+
+    // Only trigger a timeline reload (expensive, budget-limited) when the
+    // episode or play/pause state actually changed — not on every 5-second tick
+    let episodeChanged = episode.audioURL != lastWidgetAudioURL
+    let playStateChanged = isPlaying != lastWidgetIsPlaying
+    if episodeChanged || playStateChanged {
+      WidgetDataManager.cacheArtworkIfNeeded(from: episode.imageURL)
+      WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+      lastWidgetAudioURL = episode.audioURL
+      lastWidgetIsPlaying = isPlaying
+    }
   }
 
   /// Update widget to show paused state (preserves last episode info)

@@ -19,6 +19,8 @@ struct TogglePlaybackIntent: AppIntent {
     }
     // Set a flag that the main app will pick up when it becomes active
     defaults.set(true, forKey: "widgetTogglePlayback")
+    // Force flush so the main app process reads the flag immediately on open
+    defaults.synchronize()
     return .result()
   }
 }

@@ -3,7 +3,8 @@
 //  PodcastAnalyzerWidget
 //
 //  Now Playing widget showing current episode with artwork and playback control.
-//  Uses Link for background navigation and Button(intent:) for play/pause isolation.
+//  Uses .widgetURL for background navigation and Button(intent:) for play/pause isolation.
+//  Uses contentMarginsDisabled() for full-bleed artwork; widgetContentMargins for overlay content.
 //
 
 import AppIntents
@@ -68,8 +69,12 @@ struct NowPlayingProvider: AppIntentTimelineProvider {
   func timeline(for configuration: NowPlayingConfiguration, in context: Context) async -> Timeline<NowPlayingEntry> {
     let entry = createEntry()
 
+    // When playing: refresh every 30s so episode changes appear quickly.
+    // When paused: refresh every 5 minutes (low priority).
+    // The app also calls WidgetCenter.reloadTimelines() on every episode
+    // change/play/pause which triggers an immediate re-render.
     let refreshInterval: TimeInterval = if let data = entry.playbackData, data.isPlaying {
-      60
+      30
     } else {
       300
     }
@@ -85,71 +90,6 @@ struct NowPlayingProvider: AppIntentTimelineProvider {
     }
     let artworkData = WidgetDataManager.readArtworkData()
     return NowPlayingEntry(date: Date(), playbackData: data, artworkData: artworkData)
-  }
-}
-
-// MARK: - Artwork View
-
-struct WidgetArtworkView: View {
-  let artworkData: Data?
-  let size: CGFloat
-  let cornerRadius: CGFloat
-
-  private var artworkImage: Image? {
-    guard let artworkData, let uiImage = UIImage(data: artworkData) else {
-      return nil
-    }
-    return Image(uiImage: uiImage)
-  }
-
-  var body: some View {
-    Group {
-      if let image = artworkImage {
-        image.resizable().aspectRatio(contentMode: .fill)
-      } else {
-        Rectangle()
-          .fill(Color.blue.opacity(0.3))
-          .overlay {
-            Image(systemName: "music.note")
-              .font(size > 60 ? .largeTitle : .title2)
-              .foregroundStyle(.blue)
-          }
-      }
-    }
-    .frame(width: size, height: size)
-    .clipShape(.rect(cornerRadius: cornerRadius))
-  }
-}
-
-// MARK: - Widget Play Button with Progress Ring
-
-struct WidgetPlayButton: View {
-  let progress: Double
-  let isPlaying: Bool
-  let size: CGFloat
-
-  init(progress: Double, isPlaying: Bool, size: CGFloat = 36) {
-    self.progress = progress
-    self.isPlaying = isPlaying
-    self.size = size
-  }
-
-  var body: some View {
-    ZStack {
-      Circle()
-        .stroke(Color.blue.opacity(0.2), lineWidth: 3)
-
-      Circle()
-        .trim(from: 0, to: CGFloat(progress))
-        .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-        .rotationEffect(.degrees(-90))
-
-      Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-        .font(.system(size: size * 0.38, weight: .bold))
-        .foregroundStyle(.blue)
-        .offset(x: isPlaying ? 0 : 1)
-    }
-    .frame(width: size, height: size)
   }
 }
 
@@ -172,86 +112,133 @@ struct NowPlayingWidgetEntryView: View {
 }
 
 // MARK: - Small Widget View
+// Full-bleed artwork + gradient, overlay content uses widgetContentMargins for safe placement
 
 struct SmallWidgetView: View {
   let entry: NowPlayingEntry
+  @Environment(\.widgetContentMargins) private var margins
 
   var body: some View {
     if let data = entry.playbackData {
-      VStack(alignment: .leading, spacing: 0) {
-        // Top row: artwork + play button
-        HStack(alignment: .top) {
-          WidgetArtworkView(artworkData: entry.artworkData, size: 44, cornerRadius: 8)
-          Spacer()
-          Button(intent: TogglePlaybackIntent()) {
-            WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying, size: 28)
+      ZStack {
+        // Layer 1: full-bleed artwork (no padding — contentMarginsDisabled on config)
+        artworkBackground
+
+        // Layer 2: gradient scrim over bottom half
+        LinearGradient(
+          colors: [.clear, .black.opacity(0.72)],
+          startPoint: .center,
+          endPoint: .bottom
+        )
+
+        // Layer 3: overlay content using widgetContentMargins
+        VStack(spacing: 0) {
+          // Play button — top-right
+          HStack {
+            Spacer()
+            Button(intent: TogglePlaybackIntent()) {
+              ZStack {
+                Circle()
+                  .fill(.black.opacity(0.38))
+                  .frame(width: 34, height: 34)
+                Image(systemName: data.isPlaying ? "pause.fill" : "play.fill")
+                  .font(.system(size: 13, weight: .bold))
+                  .foregroundStyle(.white)
+                  .offset(x: data.isPlaying ? 0 : 1)
+              }
               .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(data.isPlaying ? "Pause" : "Play")
           }
-          .buttonStyle(.plain)
-          .accessibilityLabel(data.isPlaying ? "Pause" : "Play")
+
+          Spacer()
+
+          // Episode info — bottom-left
+          HStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(data.episodeTitle)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .lineLimit(2)
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.4), radius: 2, x: 0, y: 1)
+
+              Text(data.podcastTitle)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.8))
+                .lineLimit(1)
+                .shadow(color: .black.opacity(0.4), radius: 2, x: 0, y: 1)
+            }
+            Spacer()
+          }
         }
-
-        Spacer(minLength: 4)
-
-        // Episode title
-        Text(data.episodeTitle)
-          .font(.caption)
-          .fontWeight(.semibold)
-          .lineLimit(2)
-          .foregroundStyle(.primary)
-
-        // Podcast name
-        Text(data.podcastTitle)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .padding(.top, 1)
-
-        Spacer(minLength: 2)
-
-        // Remaining time badge
-//        WidgetRemainingBadge(data: data)
+        .padding(margins)
       }
-      .padding(12)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
       .widgetURL(data.episodeDetailURL)
     } else {
       EmptyWidgetView()
     }
   }
+
+  @ViewBuilder
+  private var artworkBackground: some View {
+    if let artworkData = entry.artworkData, let uiImage = UIImage(data: artworkData) {
+      Image(uiImage: uiImage)
+        .resizable()
+        .aspectRatio(contentMode: .fill)
+    } else {
+      LinearGradient(
+        colors: [Color(white: 0.18), Color(white: 0.10)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+      .overlay {
+        Image(systemName: "headphones")
+          .font(.system(size: 32))
+          .foregroundStyle(.white.opacity(0.25))
+      }
+    }
+  }
 }
 
 // MARK: - Medium Widget View
+// Left: full-bleed artwork panel. Right: info with widgetContentMargins.
 
 struct MediumWidgetView: View {
   let entry: NowPlayingEntry
+  @Environment(\.widgetContentMargins) private var margins
 
   var body: some View {
     if let data = entry.playbackData {
-      HStack(spacing: 12) {
-        WidgetArtworkView(artworkData: entry.artworkData, size: 80, cornerRadius: 10)
+      HStack(spacing: 0) {
+        // Left: full-bleed artwork (no leading/vertical margin — contentMarginsDisabled)
+        artworkPanel
+          .frame(width: 120)
+          .frame(maxHeight: .infinity)
+          .clipped()
 
-        VStack(alignment: .leading, spacing: 3) {
-          // Episode title
+        // Right: episode info, padded using widgetContentMargins
+        VStack(alignment: .leading, spacing: 0) {
           Text(data.episodeTitle)
             .font(.subheadline)
             .fontWeight(.semibold)
             .lineLimit(2)
             .foregroundStyle(.primary)
 
-          // Podcast name
           Text(data.podcastTitle)
             .font(.caption)
             .foregroundStyle(.secondary)
             .lineLimit(1)
+            .padding(.top, 4)
 
-          Spacer(minLength: 0)
+          Spacer(minLength: 8)
 
           // Progress bar
           GeometryReader { geo in
             ZStack(alignment: .leading) {
               Capsule()
-                .fill(Color.blue.opacity(0.2))
+                .fill(Color.primary.opacity(0.12))
                 .frame(height: 3)
               Capsule()
                 .fill(Color.blue)
@@ -259,69 +246,50 @@ struct MediumWidgetView: View {
             }
           }
           .frame(height: 3)
+          .padding(.bottom, 6)
 
-          // Bottom row: remaining badge + play button
-          HStack(alignment: .center) {
-            WidgetRemainingBadge(data: data)
+          // Play/pause button — trailing
+          HStack {
             Spacer()
             Button(intent: TogglePlaybackIntent()) {
-              WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying, size: 28)
+              Image(systemName: data.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                .font(.system(size: 36))
+                .foregroundStyle(.blue)
                 .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(data.isPlaying ? "Pause" : "Play")
           }
         }
+        .padding(.leading, 14)
+        .padding(.trailing, margins.trailing)
+        .padding(.top, margins.top)
+        .padding(.bottom, margins.bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
       }
-      .padding(.leading, 12)
-      .padding(.trailing, 8)
-      .padding(.vertical, 10)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
       .widgetURL(data.episodeDetailURL)
     } else {
       EmptyWidgetView()
     }
   }
-}
 
-// MARK: - Remaining Time Badge (visual, not plain text)
-
-struct WidgetRemainingBadge: View {
-  let data: WidgetPlaybackData
-
-  private var remainingSeconds: TimeInterval {
-    max(0, data.duration - data.currentTime)
-  }
-
-  private var remainingText: String {
-    let total = Int(remainingSeconds)
-    let hours = total / 3600
-    let minutes = (total % 3600) / 60
-    if hours > 0 {
-      return "\(hours)h \(minutes)m left"
-    } else if minutes > 0 {
-      return "\(minutes)m left"
+  @ViewBuilder
+  private var artworkPanel: some View {
+    if let artworkData = entry.artworkData, let uiImage = UIImage(data: artworkData) {
+      Image(uiImage: uiImage)
+        .resizable()
+        .aspectRatio(contentMode: .fill)
     } else {
-      return "<1m left"
-    }
-  }
-
-  var body: some View {
-    HStack(spacing: 4) {
-      // Mini progress ring
-      ZStack {
-        Circle()
-          .stroke(Color.blue.opacity(0.2), lineWidth: 2)
-        Circle()
-          .trim(from: 0, to: data.progress)
-          .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-          .rotationEffect(.degrees(-90))
+      LinearGradient(
+        colors: [Color(white: 0.18), Color(white: 0.10)],
+        startPoint: .top,
+        endPoint: .bottom
+      )
+      .overlay {
+        Image(systemName: "headphones")
+          .font(.system(size: 24))
+          .foregroundStyle(.white.opacity(0.25))
       }
-      .frame(width: 14, height: 14)
-
-//      Text(remainingText)
-//        .font(.caption2)
-//        .foregroundStyle(.secondary)
     }
   }
 }
@@ -329,6 +297,8 @@ struct WidgetRemainingBadge: View {
 // MARK: - Empty Widget View
 
 struct EmptyWidgetView: View {
+  @Environment(\.widgetContentMargins) private var margins
+
   var body: some View {
     VStack(spacing: 8) {
       Image(systemName: "headphones")
@@ -359,6 +329,7 @@ struct NowPlayingWidget: Widget {
     .configurationDisplayName("Now Playing")
     .description("Shows the currently playing podcast episode with progress.")
     .supportedFamilies([.systemSmall, .systemMedium])
+    .contentMarginsDisabled()
   }
 }
 

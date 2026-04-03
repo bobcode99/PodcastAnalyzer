@@ -39,8 +39,11 @@ nonisolated struct WidgetPlaybackData: Codable, Sendable {
     URL(string: "podcastanalyzer://expandplayer")
   }
 
-  /// Deep link URL to navigate directly to the episode detail screen
+  /// Deep link URL to navigate directly to the episode detail screen.
+  /// Returns nil when audioURL is missing (e.g. placeholder data) so the
+  /// widget falls back to .widgetURL on the parent view.
   var episodeDetailURL: URL? {
+    guard let audioURL, !audioURL.isEmpty else { return nil }
     var components = URLComponents()
     components.scheme = "podcastanalyzer"
     components.host = "episodedetail"
@@ -105,6 +108,8 @@ nonisolated enum WidgetDataManager {
     do {
       let encoded = try JSONEncoder().encode(data)
       defaults.set(encoded, forKey: playbackDataKey)
+      // Force flush to disk so the widget extension (separate process) reads fresh data
+      defaults.synchronize()
     } catch {
       // Silently fail - widget will show placeholder
     }

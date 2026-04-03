@@ -32,7 +32,7 @@
 	</dict>
 	<key>Privacy - Microphone Usage Description  </key>
 	<string>Required for speech recognition processing (if needed)</string>
-	<key>UIBackgroundModes</key>
+<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
 		<string>fetch</string>
