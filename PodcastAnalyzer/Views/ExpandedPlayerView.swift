@@ -137,10 +137,6 @@ struct ExpandedPlayerView: View {
       }
       .onAppear {
         viewModel.setModelContext(modelContext)
-          let shared = UserDefaults(suiteName: "group.com.jn.PodcastAnalyzer")
-  print("App Group accessible: \(shared != nil)")
-  print("Widget data: \(WidgetDataManager.readPlaybackData()?.episodeTitle ?? "nil")")
-
       }
       .onDisappear {
         viewModel.cleanup()
