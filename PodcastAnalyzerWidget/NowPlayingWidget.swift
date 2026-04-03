@@ -2,11 +2,13 @@
 //  NowPlayingWidget.swift
 //  PodcastAnalyzerWidget
 //
-//  Now Playing widget showing current episode with artwork and progress
+//  Now Playing widget showing current episode with artwork and playback control.
+//  Uses Link for background navigation and Button(intent:) for play/pause isolation.
 //
 
 import AppIntents
 import SwiftUI
+import UIKit
 import WidgetKit
 
 // MARK: - Widget Entry
@@ -14,6 +16,8 @@ import WidgetKit
 struct NowPlayingEntry: TimelineEntry {
   let date: Date
   let playbackData: WidgetPlaybackData?
+  /// Artwork image data loaded from shared container at timeline creation time
+  let artworkData: Data?
 
   static var placeholder: NowPlayingEntry {
     NowPlayingEntry(
@@ -27,72 +31,82 @@ struct NowPlayingEntry: TimelineEntry {
         duration: 1800,
         isPlaying: true,
         lastUpdated: Date()
-      )
+      ),
+      artworkData: nil
     )
   }
 
   static var empty: NowPlayingEntry {
-    NowPlayingEntry(date: Date(), playbackData: nil)
+    NowPlayingEntry(date: Date(), playbackData: nil, artworkData: nil)
   }
 }
 
-// MARK: - Timeline Provider
+// MARK: - Configuration Intent (required by AppIntentTimelineProvider)
 
-struct NowPlayingProvider: TimelineProvider {
+struct NowPlayingConfiguration: WidgetConfigurationIntent {
+  static let title: LocalizedStringResource = "Now Playing"
+  static let description: IntentDescription = "Shows the currently playing podcast episode."
+}
+
+// MARK: - Timeline Provider (iOS 17+ async)
+
+struct NowPlayingProvider: AppIntentTimelineProvider {
+  typealias Entry = NowPlayingEntry
+  typealias Intent = NowPlayingConfiguration
+
   func placeholder(in context: Context) -> NowPlayingEntry {
     .placeholder
   }
 
-  func getSnapshot(in context: Context, completion: @escaping (NowPlayingEntry) -> Void) {
+  func snapshot(for configuration: NowPlayingConfiguration, in context: Context) async -> NowPlayingEntry {
     if context.isPreview {
-      completion(.placeholder)
-    } else {
-      let entry = createEntry()
-      completion(entry)
+      return .placeholder
     }
+    return createEntry()
   }
 
-  func getTimeline(in context: Context, completion: @escaping (Timeline<NowPlayingEntry>) -> Void) {
+  func timeline(for configuration: NowPlayingConfiguration, in context: Context) async -> Timeline<NowPlayingEntry> {
     let entry = createEntry()
 
-    // Refresh every 60 seconds when playing, every 5 minutes when paused
-    let refreshInterval: TimeInterval
-    if let data = entry.playbackData, data.isPlaying {
-      refreshInterval = 60
+    let refreshInterval: TimeInterval = if let data = entry.playbackData, data.isPlaying {
+      60
     } else {
-      refreshInterval = 300
+      300
     }
 
     let nextUpdate = Date().addingTimeInterval(refreshInterval)
-    let timeline = Timeline(entries: [entry], policy: .after(nextUpdate))
-    completion(timeline)
+    return Timeline(entries: [entry], policy: .after(nextUpdate))
   }
 
   private func createEntry() -> NowPlayingEntry {
-    let playbackData = WidgetDataManager.readPlaybackData()
-
-    // Check if data is stale
-    if let data = playbackData, WidgetDataManager.isDataStale(data) {
+    guard let data = WidgetDataManager.readPlaybackData(),
+          !WidgetDataManager.isDataStale(data) else {
       return .empty
     }
-
-    return NowPlayingEntry(date: Date(), playbackData: playbackData)
+    let artworkData = WidgetDataManager.readArtworkData()
+    return NowPlayingEntry(date: Date(), playbackData: data, artworkData: artworkData)
   }
 }
 
 // MARK: - Artwork View
 
 struct WidgetArtworkView: View {
-  let imageURL: String?
+  let artworkData: Data?
   let size: CGFloat
   let cornerRadius: CGFloat
 
+  private var artworkImage: Image? {
+    guard let artworkData, let uiImage = UIImage(data: artworkData) else {
+      return nil
+    }
+    return Image(uiImage: uiImage)
+  }
+
   var body: some View {
-    AsyncImage(url: URL(string: imageURL ?? "")) { phase in
-      switch phase {
-      case .success(let image):
+    Group {
+      if let image = artworkImage {
         image.resizable().aspectRatio(contentMode: .fill)
-      default:
+      } else {
         Rectangle()
           .fill(Color.blue.opacity(0.3))
           .overlay {
@@ -107,7 +121,39 @@ struct WidgetArtworkView: View {
   }
 }
 
-// MARK: - Widget Views
+// MARK: - Widget Play Button with Progress Ring
+
+struct WidgetPlayButton: View {
+  let progress: Double
+  let isPlaying: Bool
+  let size: CGFloat
+
+  init(progress: Double, isPlaying: Bool, size: CGFloat = 36) {
+    self.progress = progress
+    self.isPlaying = isPlaying
+    self.size = size
+  }
+
+  var body: some View {
+    ZStack {
+      Circle()
+        .stroke(Color.blue.opacity(0.2), lineWidth: 3)
+
+      Circle()
+        .trim(from: 0, to: CGFloat(progress))
+        .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+        .rotationEffect(.degrees(-90))
+
+      Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+        .font(.system(size: size * 0.38, weight: .bold))
+        .foregroundStyle(.blue)
+        .offset(x: isPlaying ? 0 : 1)
+    }
+    .frame(width: size, height: size)
+  }
+}
+
+// MARK: - Entry View Router
 
 struct NowPlayingWidgetEntryView: View {
   var entry: NowPlayingEntry
@@ -132,33 +178,43 @@ struct SmallWidgetView: View {
 
   var body: some View {
     if let data = entry.playbackData {
-      VStack(alignment: .leading, spacing: 6) {
-        HStack(spacing: 8) {
-          // Artwork
-          WidgetArtworkView(imageURL: data.imageURL, size: 50, cornerRadius: 8)
-
-          // Play button with progress
+      VStack(alignment: .leading, spacing: 0) {
+        // Top row: artwork + play button
+        HStack(alignment: .top) {
+          WidgetArtworkView(artworkData: entry.artworkData, size: 44, cornerRadius: 8)
+          Spacer()
           Button(intent: TogglePlaybackIntent()) {
-            WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying)
+            WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying, size: 28)
+              .frame(width: 44, height: 44)
           }
           .buttonStyle(.plain)
+          .accessibilityLabel(data.isPlaying ? "Pause" : "Play")
         }
 
-        // Title
+        Spacer(minLength: 4)
+
+        // Episode title
         Text(data.episodeTitle)
           .font(.caption)
           .fontWeight(.semibold)
           .lineLimit(2)
           .foregroundStyle(.primary)
 
-        // Duration: current / total
-        Text("\(data.formattedCurrentTime) / \(data.formattedDuration)")
-          .font(.caption)
+        // Podcast name
+        Text(data.podcastTitle)
+          .font(.caption2)
           .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .padding(.top, 1)
+
+        Spacer(minLength: 2)
+
+        // Remaining time badge
+//        WidgetRemainingBadge(data: data)
       }
       .padding(12)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-      .widgetURL(data.deepLinkURL)
+      .widgetURL(data.episodeDetailURL)
     } else {
       EmptyWidgetView()
     }
@@ -173,10 +229,9 @@ struct MediumWidgetView: View {
   var body: some View {
     if let data = entry.playbackData {
       HStack(spacing: 12) {
-        // Artwork
-        WidgetArtworkView(imageURL: data.imageURL, size: 90, cornerRadius: 12)
+        WidgetArtworkView(artworkData: entry.artworkData, size: 80, cornerRadius: 10)
 
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
           // Episode title
           Text(data.episodeTitle)
             .font(.subheadline)
@@ -190,85 +245,83 @@ struct MediumWidgetView: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
 
-          Spacer()
+          Spacer(minLength: 0)
 
-          // Progress bar with times
-          VStack(alignment: .leading, spacing: 4) {
-            GeometryReader { geo in
-              ZStack(alignment: .leading) {
-                Capsule()
-                  .fill(Color.blue.opacity(0.2))
-                  .frame(height: 4)
-                Capsule()
-                  .fill(Color.blue)
-                  .frame(width: geo.size.width * data.progress, height: 4)
-              }
-            }
-            .frame(height: 4)
-
-            // Time labels: current / total
-            HStack {
-              Text("\(data.formattedCurrentTime) / \(data.formattedDuration)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              Spacer()
+          // Progress bar
+          GeometryReader { geo in
+            ZStack(alignment: .leading) {
+              Capsule()
+                .fill(Color.blue.opacity(0.2))
+                .frame(height: 3)
+              Capsule()
+                .fill(Color.blue)
+                .frame(width: max(geo.size.width * data.progress, 0), height: 3)
             }
           }
+          .frame(height: 3)
 
-          // Play button row
-          HStack(spacing: 8) {
+          // Bottom row: remaining badge + play button
+          HStack(alignment: .center) {
+            WidgetRemainingBadge(data: data)
+            Spacer()
             Button(intent: TogglePlaybackIntent()) {
-              WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying)
+              WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying, size: 28)
+                .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
-
-            Text(data.isPlaying ? "Playing" : "Paused")
-              .font(.caption)
-              .foregroundStyle(.blue)
-
-            Spacer()
-
-            Text(data.formattedRemainingTime)
-              .font(.caption)
-              .foregroundStyle(.secondary)
+            .accessibilityLabel(data.isPlaying ? "Pause" : "Play")
           }
         }
-        .padding(.vertical, 4)
       }
-      .padding(12)
+      .padding(.leading, 12)
+      .padding(.trailing, 8)
+      .padding(.vertical, 10)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .widgetURL(data.deepLinkURL)
+      .widgetURL(data.episodeDetailURL)
     } else {
       EmptyWidgetView()
     }
   }
 }
 
-// MARK: - Widget Play Button with Progress
+// MARK: - Remaining Time Badge (visual, not plain text)
 
-struct WidgetPlayButton: View {
-  let progress: Double
-  let isPlaying: Bool
+struct WidgetRemainingBadge: View {
+  let data: WidgetPlaybackData
+
+  private var remainingSeconds: TimeInterval {
+    max(0, data.duration - data.currentTime)
+  }
+
+  private var remainingText: String {
+    let total = Int(remainingSeconds)
+    let hours = total / 3600
+    let minutes = (total % 3600) / 60
+    if hours > 0 {
+      return "\(hours)h \(minutes)m left"
+    } else if minutes > 0 {
+      return "\(minutes)m left"
+    } else {
+      return "<1m left"
+    }
+  }
 
   var body: some View {
-    ZStack {
-      // Background circle
-      Circle()
-        .stroke(Color.blue.opacity(0.2), lineWidth: 3)
-        .frame(width: 36, height: 36)
+    HStack(spacing: 4) {
+      // Mini progress ring
+      ZStack {
+        Circle()
+          .stroke(Color.blue.opacity(0.2), lineWidth: 2)
+        Circle()
+          .trim(from: 0, to: data.progress)
+          .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+          .rotationEffect(.degrees(-90))
+      }
+      .frame(width: 14, height: 14)
 
-      // Progress arc
-      Circle()
-        .trim(from: 0, to: CGFloat(progress))
-        .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-        .frame(width: 36, height: 36)
-        .rotationEffect(.degrees(-90))
-
-      // Play/Pause icon
-      Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-        .font(.system(size: 14, weight: .bold))
-        .foregroundStyle(.blue)
-        .offset(x: isPlaying ? 0 : 1) // Slight offset for play icon visual balance
+//      Text(remainingText)
+//        .font(.caption2)
+//        .foregroundStyle(.secondary)
     }
   }
 }
@@ -285,7 +338,7 @@ struct EmptyWidgetView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       Text("Open app to start listening")
-        .font(.caption)
+        .font(.caption2)
         .foregroundStyle(.secondary.opacity(0.8))
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -299,7 +352,7 @@ struct NowPlayingWidget: Widget {
   let kind: String = "NowPlayingWidget"
 
   var body: some WidgetConfiguration {
-    StaticConfiguration(kind: kind, provider: NowPlayingProvider()) { entry in
+    AppIntentConfiguration(kind: kind, intent: NowPlayingConfiguration.self, provider: NowPlayingProvider()) { entry in
       NowPlayingWidgetEntryView(entry: entry)
         .containerBackground(.fill.tertiary, for: .widget)
     }

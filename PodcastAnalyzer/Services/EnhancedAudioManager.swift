@@ -991,6 +991,7 @@ private func handleAudioInterruption(_ notification: Notification) {
     )
 
     WidgetDataManager.writePlaybackData(data)
+    WidgetDataManager.cacheArtworkIfNeeded(from: episode.imageURL)
     WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
   }
 

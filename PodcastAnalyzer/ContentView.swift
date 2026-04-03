@@ -89,6 +89,12 @@ struct iOSContentView: View {
         handleNotificationNavigation(target: target)
       }
     }
+    .onChange(of: coordinator.homeRouter.path.count) { oldCount, newCount in
+      // Clear deep link tracker when user navigates back so future widget taps work
+      if newCount < oldCount {
+        coordinator.lastDeepLinkedEpisodeRouteID = nil
+      }
+    }
   }
 
   private func handleNotificationNavigation(target: NotificationNavigationTarget) {
@@ -121,7 +127,14 @@ struct iOSContentView: View {
       )
     }
 
-    // Notifications always push to the home tab
+    // Skip if the same episode detail is already the most recent deep-linked route
+    // This prevents stacking duplicate screens when the user taps the widget repeatedly
+    if coordinator.lastDeepLinkedEpisodeRouteID == route.id {
+      notificationManager.clearNavigation()
+      return
+    }
+
+    coordinator.lastDeepLinkedEpisodeRouteID = route.id
     coordinator.homeRouter.push(route)
     notificationManager.clearNavigation()
   }

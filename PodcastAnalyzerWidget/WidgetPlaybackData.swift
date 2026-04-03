@@ -11,7 +11,7 @@ import Foundation
 // MARK: - Widget Playback Data
 
 /// Data structure representing current playback state for the widget
-struct WidgetPlaybackData: Codable {
+nonisolated struct WidgetPlaybackData: Codable, Sendable {
   let episodeTitle: String
   let podcastTitle: String
   let imageURL: String?
@@ -30,6 +30,20 @@ struct WidgetPlaybackData: Codable {
   /// Deep link URL to open the expanded player in the app
   var deepLinkURL: URL? {
     URL(string: "podcastanalyzer://expandplayer")
+  }
+
+  /// Deep link URL to navigate directly to the episode detail screen
+  var episodeDetailURL: URL? {
+    var components = URLComponents()
+    components.scheme = "podcastanalyzer"
+    components.host = "episodedetail"
+    components.queryItems = [
+      URLQueryItem(name: "title", value: episodeTitle),
+      URLQueryItem(name: "podcast", value: podcastTitle),
+      URLQueryItem(name: "audio", value: audioURL),
+      URLQueryItem(name: "image", value: imageURL),
+    ]
+    return components.url
   }
 
   /// Formatted current time string
@@ -65,7 +79,7 @@ struct WidgetPlaybackData: Codable {
 // MARK: - Widget Data Manager
 
 /// Manages reading/writing widget data via App Group UserDefaults
-enum WidgetDataManager {
+nonisolated enum WidgetDataManager {
   /// App Group identifier - must match the App Group configured in Xcode
   static let appGroupIdentifier = "group.com.jn.PodcastAnalyzer"
 
@@ -111,5 +125,23 @@ enum WidgetDataManager {
   /// Check if playback data is stale (more than 24 hours old)
   static func isDataStale(_ data: WidgetPlaybackData) -> Bool {
     Date().timeIntervalSince(data.lastUpdated) > 86400
+  }
+
+  // MARK: - Artwork Image File (shared container)
+
+  /// URL for the shared App Group container directory
+  private static var sharedContainerURL: URL? {
+    FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+  }
+
+  /// File URL for the cached widget artwork image
+  static var artworkFileURL: URL? {
+    sharedContainerURL?.appending(path: "widget_artwork.jpg")
+  }
+
+  /// Read artwork image data from the shared container (called from widget)
+  static func readArtworkData() -> Data? {
+    guard let fileURL = artworkFileURL else { return nil }
+    return try? Data(contentsOf: fileURL)
   }
 }

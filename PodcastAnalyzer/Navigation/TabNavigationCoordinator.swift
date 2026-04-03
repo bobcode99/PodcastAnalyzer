@@ -24,6 +24,10 @@ final class TabNavigationCoordinator {
 
   var visibleTab: TabIdentifier = .home
 
+  /// Tracks the last episode detail route ID pushed via deep link / widget
+  /// to prevent stacking duplicates when the user taps the widget repeatedly.
+  var lastDeepLinkedEpisodeRouteID: String?
+
   var activeRouter: TabRouter {
     router(for: visibleTab)
   }

@@ -7,11 +7,18 @@
 //
 
 import Foundation
+import Nuke
+
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
 
 // MARK: - Widget Playback Data
 
 /// Data structure representing current playback state for the widget
-struct WidgetPlaybackData: Codable {
+nonisolated struct WidgetPlaybackData: Codable, Sendable {
   let episodeTitle: String
   let podcastTitle: String
   let imageURL: String?
@@ -30,6 +37,20 @@ struct WidgetPlaybackData: Codable {
   /// Deep link URL to open the expanded player in the app
   var deepLinkURL: URL? {
     URL(string: "podcastanalyzer://expandplayer")
+  }
+
+  /// Deep link URL to navigate directly to the episode detail screen
+  var episodeDetailURL: URL? {
+    var components = URLComponents()
+    components.scheme = "podcastanalyzer"
+    components.host = "episodedetail"
+    components.queryItems = [
+      URLQueryItem(name: "title", value: episodeTitle),
+      URLQueryItem(name: "podcast", value: podcastTitle),
+      URLQueryItem(name: "audio", value: audioURL),
+      URLQueryItem(name: "image", value: imageURL),
+    ]
+    return components.url
   }
 
   /// Formatted current time string
@@ -65,7 +86,7 @@ struct WidgetPlaybackData: Codable {
 // MARK: - Widget Data Manager
 
 /// Manages reading/writing widget data via App Group UserDefaults
-enum WidgetDataManager {
+nonisolated enum WidgetDataManager {
   /// App Group identifier - must match the App Group configured in Xcode
   static let appGroupIdentifier = "group.com.jn.PodcastAnalyzer"
 
@@ -111,5 +132,66 @@ enum WidgetDataManager {
   /// Check if playback data is stale (more than 24 hours old)
   static func isDataStale(_ data: WidgetPlaybackData) -> Bool {
     Date().timeIntervalSince(data.lastUpdated) > 86400
+  }
+
+  // MARK: - Artwork Image File (shared container)
+
+  /// URL for the shared App Group container directory
+  private static var sharedContainerURL: URL? {
+    FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+  }
+
+  /// File URL for the cached widget artwork image
+  static var artworkFileURL: URL? {
+    sharedContainerURL?.appending(path: "widget_artwork.jpg")
+  }
+
+  /// Write artwork image data to the shared container (called from main app)
+  static func writeArtworkData(_ data: Data) {
+    guard let fileURL = artworkFileURL else { return }
+    try? data.write(to: fileURL, options: .atomic)
+  }
+
+  /// Read artwork image data from the shared container (called from widget)
+  static func readArtworkData() -> Data? {
+    guard let fileURL = artworkFileURL else { return nil }
+    return try? Data(contentsOf: fileURL)
+  }
+
+  /// Clear the cached artwork file
+  static func clearArtwork() {
+    guard let fileURL = artworkFileURL else { return }
+    try? FileManager.default.removeItem(at: fileURL)
+  }
+
+  /// Download and cache artwork image from URL using Nuke.
+  /// Skips download if the same URL was already cached.
+  /// Called from @MainActor context (EnhancedAudioManager).
+  @MainActor private static var lastCachedArtworkURL: String?
+
+  @MainActor static func cacheArtworkIfNeeded(from imageURLString: String?) {
+    guard let imageURLString, imageURLString != lastCachedArtworkURL,
+          let imageURL = URL(string: imageURLString) else {
+      return
+    }
+    lastCachedArtworkURL = imageURLString
+    Task.detached(priority: .utility) {
+      do {
+        let image = try await ImagePipeline.shared.image(for: imageURL)
+        #if os(iOS)
+        if let jpegData = image.jpegData(compressionQuality: 0.8) {
+          writeArtworkData(jpegData)
+        }
+        #else
+        if let tiffData = image.tiffRepresentation,
+           let bitmap = NSBitmapImageRep(data: tiffData),
+           let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.8]) {
+          writeArtworkData(jpegData)
+        }
+        #endif
+      } catch {
+        // Image download failed — widget will show placeholder
+      }
+    }
   }
 }

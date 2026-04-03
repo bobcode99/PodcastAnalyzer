@@ -100,6 +100,29 @@ class NotificationNavigationManager {
         shouldExpandPlayer = true
     }
 
+    /// Navigate to episode detail from widget deep link
+    func navigateToEpisodeDetail(title: String, podcastTitle: String, audioURL: String, imageURL: String) {
+        // Try to find the full episode in SwiftData first
+        if !audioURL.isEmpty, let result = findEpisodeByAudioURL(audioURL) {
+            navigationTarget = NotificationNavigationTarget(
+                podcastTitle: result.podcastTitle,
+                episodeTitle: result.episode.title,
+                audioURL: audioURL,
+                imageURL: result.imageURL ?? imageURL,
+                language: result.language
+            )
+        } else {
+            navigationTarget = NotificationNavigationTarget(
+                podcastTitle: podcastTitle,
+                episodeTitle: title,
+                audioURL: audioURL,
+                imageURL: imageURL,
+                language: "en"
+            )
+        }
+        shouldNavigate = true
+    }
+
     /// Navigate to currently playing episode
     func navigateToNowPlaying() {
         guard let currentEpisode = EnhancedAudioManager.shared.currentEpisode else { return }

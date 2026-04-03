@@ -157,6 +157,21 @@ struct PodcastAnalyzerApp: App {
              let audioParam = components.queryItems?.first(where: { $0.name == "audio" })?.value {
             NotificationNavigationManager.shared.navigateToEpisode(audioURL: audioParam)
           }
+        case "episodedetail":
+          // Widget background tap: navigate to episode detail screen
+          if let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            let params = Dictionary(
+              uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+                item.value.map { (item.name, $0) }
+              }
+            )
+            NotificationNavigationManager.shared.navigateToEpisodeDetail(
+              title: params["title"] ?? "",
+              podcastTitle: params["podcast"] ?? "",
+              audioURL: params["audio"] ?? "",
+              imageURL: params["image"] ?? ""
+            )
+          }
         case "expandplayer":
           // Widget tap: open expanded player directly
           NotificationNavigationManager.shared.requestExpandPlayer()
