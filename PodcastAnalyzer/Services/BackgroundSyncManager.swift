@@ -90,15 +90,14 @@ class BackgroundSyncManager {
     // Check if user has explicitly set the preference
     let isFirstLaunch = UserDefaults.standard.object(forKey: Keys.backgroundSyncEnabled) == nil
     if isFirstLaunch {
-      // First launch: enable background sync by default
       self.isBackgroundSyncEnabled = true
       UserDefaults.standard.set(true, forKey: Keys.backgroundSyncEnabled)
+      self.isNotificationsEnabled = true
+      UserDefaults.standard.set(true, forKey: Keys.notificationsEnabled)
     } else {
-      // User has made a choice, respect it
       self.isBackgroundSyncEnabled = UserDefaults.standard.bool(forKey: Keys.backgroundSyncEnabled)
+      self.isNotificationsEnabled = UserDefaults.standard.bool(forKey: Keys.notificationsEnabled)
     }
-
-    self.isNotificationsEnabled = UserDefaults.standard.bool(forKey: Keys.notificationsEnabled)
     if let date = UserDefaults.standard.object(forKey: Keys.lastSyncDate) as? Date {
       self.lastSyncDate = date
     }
@@ -307,7 +306,7 @@ class BackgroundSyncManager {
       }
 
       // Send push notification if there are new episodes and enabled
-      if totalNewEpisodes > 0 && isNotificationsEnabled {
+      if totalNewEpisodes > 0 && isNotificationsEnabled && notificationPermissionStatus == .authorized {
         await sendNewEpisodesNotification(
           totalCount: totalNewEpisodes,
           details: newEpisodeDetails

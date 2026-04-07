@@ -9,6 +9,10 @@ import SwiftData
 import SwiftUI
 import OSLog
 import WidgetKit
+import Speech
+#if os(iOS)
+import UIKit
+#endif
 
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "App")
 
@@ -77,6 +81,18 @@ struct PodcastAnalyzerApp: App {
           Task.detached(priority: .utility) {
             await FileStorageManager.shared.migrateFlatCaptionFilesToSubfolders()
           }
+
+          // Request critical permissions early so they don't interrupt mid-session
+          #if os(iOS)
+          // Speech recognition (used by on-device transcription)
+          SFSpeechRecognizer.requestAuthorization { _ in }
+          // Notification permission if enabled in settings
+          if BackgroundSyncManager.shared.isNotificationsEnabled {
+            BackgroundSyncManager.shared.requestNotificationPermission()
+          }
+          // Trigger paste permission prompt (used by AI Shortcuts clipboard fallback)
+          _ = UIPasteboard.general.hasStrings
+          #endif
 
           // Register low-memory warning handler to clear caches
           #if os(iOS)

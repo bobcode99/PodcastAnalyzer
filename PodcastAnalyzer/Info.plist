@@ -30,8 +30,10 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
-	<key>Privacy - Microphone Usage Description  </key>
+	<key>NSMicrophoneUsageDescription</key>
 	<string>Required for speech recognition processing (if needed)</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Required for on-device podcast transcription</string>
 <key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
