@@ -23,6 +23,8 @@ final class HomeViewModel {
 
   // Up Next episodes (unplayed from subscribed podcasts)
   var upNextEpisodes: [LibraryEpisode] = []
+  // Scored version — used by HomeView cards to show reason badges
+  var scoredUpNextEpisodes: [ScoredEpisode] = []
 
   // Top podcasts from Apple RSS - observable instance properties that sync with static cache
   var topPodcasts: [AppleRSSPodcast] = []
@@ -242,52 +244,60 @@ final class HomeViewModel {
       modelsByKey[model.id] = model
     }
 
-    // Get up to 20 most recent unplayed episodes from subscribed podcasts
-    var allEpisodes: [LibraryEpisode] = []
-    var lastPlayedDates: [String: Date] = [:]
-
-    for podcastModel in podcastInfoModelList {
-      let podcastTitle = podcastModel.podcastInfo.title
-
-      // Get recent episodes (limit 10 per podcast for performance)
-      for episode in podcastModel.podcastInfo.episodes.prefix(10) {
-        let key = Self.makeEpisodeKey(podcastTitle: podcastTitle, episodeTitle: episode.title)
-        let model = modelsByKey[key]
-
-        // Only include unplayed episodes
-        if model?.isCompleted != true {
-          allEpisodes.append(LibraryEpisode(
-            id: key,
-            podcastTitle: podcastTitle,
-            imageURL: episode.imageURL ?? podcastModel.podcastInfo.imageURL,
-            language: podcastModel.podcastInfo.language,
-            episodeInfo: episode,
-            isStarred: model?.isStarred ?? false,
-            isDownloaded: Self.hasLocalAudioFile(model?.localAudioPath),
-            isCompleted: model?.isCompleted ?? false,
-            lastPlaybackPosition: model?.lastPlaybackPosition ?? 0,
-            savedDuration: model?.duration ?? 0
-          ))
-          if let playedDate = model?.lastPlayedDate {
-            lastPlayedDates[key] = playedDate
-          }
+    // Compute per-podcast aggregates for UpNextSuggestionEngine signals
+    var podcastPlayCounts: [String: Int] = [:]
+    var podcastRecentPlayDates: [String: Date] = [:]
+    for model in allModels {
+      podcastPlayCounts[model.podcastTitle, default: 0] += model.playCount
+      if let d = model.lastPlayedDate {
+        if let existing = podcastRecentPlayDates[model.podcastTitle] {
+          if d > existing { podcastRecentPlayDates[model.podcastTitle] = d }
+        } else {
+          podcastRecentPlayDates[model.podcastTitle] = d
         }
       }
     }
 
-    // Sort by last-played date (most recent first), then by pub date for unplayed
-    allEpisodes.sort { ep1, ep2 in
-      let date1 = lastPlayedDates[ep1.id]
-      let date2 = lastPlayedDates[ep2.id]
-      switch (date1, date2) {
-      case let (d1?, d2?): return d1 > d2
-      case (_?, nil): return true
-      case (nil, _?): return false
-      case (nil, nil):
-        return (ep1.episodeInfo.pubDate ?? .distantPast) > (ep2.episodeInfo.pubDate ?? .distantPast)
+    // Build EpisodeInput candidates (unplayed, up to 10 per podcast)
+    var inputs: [EpisodeInput] = []
+
+    for podcastModel in podcastInfoModelList {
+      let podcastTitle = podcastModel.podcastInfo.title
+
+      for episode in podcastModel.podcastInfo.episodes.prefix(10) {
+        let key = Self.makeEpisodeKey(podcastTitle: podcastTitle, episodeTitle: episode.title)
+        let model = modelsByKey[key]
+
+        // Skip completed episodes
+        guard model?.isCompleted != true else { continue }
+
+        let libraryEpisode = LibraryEpisode(
+          id: key,
+          podcastTitle: podcastTitle,
+          imageURL: episode.imageURL ?? podcastModel.podcastInfo.imageURL,
+          language: podcastModel.podcastInfo.language,
+          episodeInfo: episode,
+          isStarred: model?.isStarred ?? false,
+          isDownloaded: Self.hasLocalAudioFile(model?.localAudioPath),
+          isCompleted: model?.isCompleted ?? false,
+          lastPlaybackPosition: model?.lastPlaybackPosition ?? 0,
+          savedDuration: model?.duration ?? 0
+        )
+
+        inputs.append(EpisodeInput(
+          episode: libraryEpisode,
+          downloadModel: model,
+          podcastTotalPlayCount: podcastPlayCounts[podcastTitle] ?? 0,
+          podcastMostRecentPlayDate: podcastRecentPlayDates[podcastTitle]
+        ))
       }
     }
-    var result = Array(allEpisodes.prefix(20))
+
+    // Score and rank via UpNextSuggestionEngine
+    let scored = UpNextSuggestionEngine().score(inputs: inputs, limit: 25)
+    var scoredByKey: [String: ScoredEpisode] = [:]
+    for s in scored { scoredByKey[s.id] = s }
+    var result = scored.map(\.episode).prefix(20).map { $0 }
 
     // Ensure the currently playing episode is at the top of Up Next
     if let currentEpisode = EnhancedAudioManager.shared.currentEpisode {
@@ -329,7 +339,13 @@ final class HomeViewModel {
     }
 
     upNextEpisodes = result
-    logger.info("Loaded \(self.upNextEpisodes.count) up next episodes")
+    // Rebuild scoredUpNextEpisodes in the same order as result (respects the pinned-to-top episode)
+    scoredUpNextEpisodes = result.compactMap { episode in
+      if let existing = scoredByKey[episode.id] { return existing }
+      // Currently playing episode injected from outside scored list — wrap with .none reason
+      return ScoredEpisode(episode: episode, downloadModel: modelsByKey[episode.id], score: .infinity, reason: .none, progressRatio: 0)
+    }
+    logger.info("Loaded \(self.upNextEpisodes.count) up next episodes (scored)")
 
     // Populate auto-play candidates from up next episodes
     let autoPlayEpisodes = upNextEpisodes.compactMap { episode -> PlaybackEpisode? in

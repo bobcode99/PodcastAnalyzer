@@ -16,6 +16,7 @@ import UIKit
 struct UpNextCard: View {
   let episode: LibraryEpisode
   let onPlay: () -> Void
+  var reason: SuggestionReason = .none
   @Environment(\.modelContext) private var modelContext
   @State private var statusObserver: EpisodeStatusObserver?
 
@@ -53,7 +54,21 @@ struct UpNextCard: View {
         .lineLimit(2)
         .multilineTextAlignment(.leading)
 
-      Spacer(minLength: 0)
+      // Suggestion reason badge
+      switch reason {
+      case .inProgress, .starred, .downloaded, .listenOften, .newEpisode, .recentPodcast:
+        HStack(spacing: 3) {
+          Image(systemName: reason.systemImage)
+            .font(.system(size: 9))
+          Text(reason.label)
+            .font(.system(size: 10))
+            .lineLimit(1)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.top, 1)
+      default:
+        Spacer(minLength: 0)
+      }
 
       // Play button with progress - uses live audio manager state
       LivePlaybackButton(

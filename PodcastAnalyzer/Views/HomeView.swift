@@ -268,27 +268,31 @@ struct HomeView: View {
       } else {
         ScrollView(.horizontal) {
           HStack(spacing: 12) {
-            ForEach(viewModel.upNextEpisodes.prefix(10)) { episode in
+            ForEach(viewModel.scoredUpNextEpisodes.prefix(10)) { scored in
               NavigationLink(
                 value: EpisodeDetailRoute(
-                  episode: episode.episodeInfo,
-                  podcastTitle: episode.podcastTitle,
-                  fallbackImageURL: episode.imageURL,
-                  podcastLanguage: episode.language
+                  episode: scored.episode.episodeInfo,
+                  podcastTitle: scored.episode.podcastTitle,
+                  fallbackImageURL: scored.episode.imageURL,
+                  podcastLanguage: scored.episode.language
                 )
               ) {
-                UpNextCard(episode: episode, onPlay: { viewModel.playEpisode(episode) })
+                UpNextCard(
+                  episode: scored.episode,
+                  onPlay: { viewModel.playEpisode(scored.episode) },
+                  reason: scored.reason
+                )
               }
               .buttonStyle(.plain)
               .contextMenu {
-                upNextContextMenu(for: episode)
+                upNextContextMenu(for: scored.episode)
               }
             }
           }
           .padding(.horizontal)
         }
         .scrollIndicators(.hidden)
-        .animation(.default, value: viewModel.upNextEpisodes.map(\.id))
+        .animation(.default, value: viewModel.scoredUpNextEpisodes.map(\.id))
       }
     }
   }

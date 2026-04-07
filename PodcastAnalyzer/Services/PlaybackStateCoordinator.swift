@@ -161,6 +161,9 @@ class PlaybackStateCoordinator {
 
       // Notify when completion state changes so UI (e.g. Up Next) can refresh
       if model.isCompleted != wasCompleted {
+        if model.isCompleted {
+          model.playCount += 1
+        }
         NotificationCenter.default.post(name: .episodeCompletionChanged, object: nil)
       }
 

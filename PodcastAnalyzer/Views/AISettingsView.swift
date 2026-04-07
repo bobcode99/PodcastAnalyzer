@@ -34,6 +34,8 @@ struct AISettingsView: View {
     @State private var newShortcutName: String = ""
     @State private var isAddingShortcut: Bool = false
 
+    private let shortcuts = ShortcutsAIService.shared
+
     var body: some View {
         #if os(macOS)
         macOSBody
@@ -230,24 +232,86 @@ struct AISettingsView: View {
 
             // MARK: - Apple PCC Configuration
             if settings.selectedProvider == .applePCC {
+                // Section 1: info
                 Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("No API key needed!")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                        }
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("No API key needed!")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                    Text("Shortcuts calls your configured shortcut to process AI requests. You can use any AI provider (Apple Intelligence, ChatGPT, Gemini, etc.) inside your shortcut.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Shortcut Configuration")
+                }
 
-                        Text("Shortcuts calls your configured shortcut to process AI requests. You can use any AI provider (Apple Intelligence, ChatGPT, Gemini, etc.) inside your shortcut.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                // Section 2: shortcut names list — ForEach as direct Section children
+                Section {
+                    ForEach(shortcuts.shortcutNames, id: \.self) { name in
+                        HStack(spacing: 12) {
+                            Image(systemName: shortcuts.shortcutName == name ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(shortcuts.shortcutName == name ? .blue : .secondary)
+                                .font(.system(size: 18))
+                                .animation(.easeInOut(duration: 0.15), value: shortcuts.shortcutName)
+                            Text(name)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if shortcuts.shortcutNames.count > 1 {
+                                Button(role: .destructive) {
+                                    shortcuts.removeShortcutName(name)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.red.opacity(0.7))
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            shortcuts.shortcutName = name
+                        }
                     }
 
-                    // Shortcut names list
-                    shortcutNamesSection
+                    if isAddingShortcut {
+                        HStack(spacing: 10) {
+                            TextField("Shortcut name", text: $newShortcutName)
+                                .textFieldStyle(.plain)
+                                .autocorrectionDisabled()
+                                #if os(iOS)
+                                .textInputAutocapitalization(.never)
+                                .onSubmit { commitAddShortcut() }
+                                #endif
+                            Button("Add") { commitAddShortcut() }
+                                .disabled(newShortcutName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(.blue)
+                            Button("Cancel") {
+                                newShortcutName = ""
+                                isAddingShortcut = false
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Button {
+                            newShortcutName = ""
+                            isAddingShortcut = true
+                        } label: {
+                            Label("Add Shortcut", systemImage: "plus.circle.fill")
+                        }
+                    }
+                } header: {
+                    Text("Shortcuts")
+                } footer: {
+                    Text("Tap a shortcut to make it active. Add as many as you need to switch between providers quickly.")
+                }
 
+                // Section 3: open shortcuts + timeout
+                Section {
                     Button(action: {
                         ShortcutsAIService.shared.openShortcutsApp()
                     }) {
@@ -257,7 +321,6 @@ struct AISettingsView: View {
                         }
                     }
 
-                    // Timeout setting
                     HStack {
                         Text("Timeout")
                         Spacer()
@@ -269,12 +332,11 @@ struct AISettingsView: View {
                         }
                         .pickerStyle(.menu)
                     }
-                } header: {
-                    Text("Shortcut Configuration")
                 } footer: {
-                    Text("Tap a shortcut name to select it as active. Swipe left to delete. How long to wait for Shortcuts to return a result before timing out.")
+                    Text("How long to wait for Shortcuts to return a result before timing out.")
                 }
 
+                // Section 4: setup instructions
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Setup Instructions:")
@@ -605,96 +667,12 @@ struct AISettingsView: View {
         checkOnDeviceAvailability()
     }
 
-    // MARK: - Shortcut Names Section
-
-    @ViewBuilder
-    private var shortcutNamesSection: some View {
-        let service = ShortcutsAIService.shared
-        VStack(alignment: .leading, spacing: 0) {
-            // Header row
-            HStack {
-                Text("Shortcuts")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                Spacer()
-                Button {
-                    newShortcutName = ""
-                    isAddingShortcut = true
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .foregroundStyle(.blue)
-                }
-                #if os(macOS)
-                .buttonStyle(.plain)
-                #endif
-            }
-            .padding(.bottom, 8)
-
-            // Existing names list
-            ForEach(service.shortcutNames, id: \.self) { name in
-                HStack(spacing: 12) {
-                    // Active indicator
-                    Image(systemName: service.shortcutName == name
-                          ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(service.shortcutName == name ? .blue : .secondary)
-                        .font(.system(size: 16))
-
-                    Text(name)
-                        .font(.subheadline)
-                        .foregroundStyle(service.shortcutName == name ? .primary : .secondary)
-
-                    Spacer()
-
-                    // Delete button (only if more than one exists)
-                    if service.shortcutNames.count > 1 {
-                        Button {
-                            service.removeShortcutName(name)
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                        #if os(macOS)
-                        .buttonStyle(.plain)
-                        #endif
-                    }
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    service.shortcutName = name
-                }
-                .padding(.vertical, 6)
-                Divider()
-            }
-
-            // Add new shortcut inline form
-            if isAddingShortcut {
-                HStack(spacing: 8) {
-                    TextField("Shortcut name", text: $newShortcutName)
-                        .textFieldStyle(.roundedBorder)
-                        #if os(iOS)
-                        .autocorrectionDisabled()
-                        #endif
-
-                    Button("Add") {
-                        service.addShortcutName(newShortcutName)
-                        newShortcutName = ""
-                        isAddingShortcut = false
-                    }
-                    .disabled(newShortcutName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-
-                    Button("Cancel") {
-                        newShortcutName = ""
-                        isAddingShortcut = false
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-                .padding(.top, 8)
-            }
-        }
+    private func commitAddShortcut() {
+        let name = newShortcutName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        shortcuts.addShortcutName(name)
+        newShortcutName = ""
+        isAddingShortcut = false
     }
 
     // MARK: - Helper Views
