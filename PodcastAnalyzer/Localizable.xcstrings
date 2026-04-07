@@ -654,6 +654,9 @@
         }
       }
     },
+    "Add Shortcut" : {
+
+    },
     "Additional Providers" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3438,7 +3441,6 @@
       }
     },
     "How long to wait for Shortcuts to return a result before timing out." : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -6972,7 +6974,7 @@
         }
       }
     },
-    "Tap a shortcut name to select it as active. Swipe left to delete. How long to wait for Shortcuts to return a result before timing out." : {
+    "Tap a shortcut to make it active. Add as many as you need to switch between providers quickly." : {
 
     },
     "Tap the refresh button to fetch the latest available models from the API." : {

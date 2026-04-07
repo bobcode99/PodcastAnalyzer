@@ -362,7 +362,8 @@ final class HomeViewModel {
         guid: episode.episodeInfo.guid
       )
     }
-    EnhancedAudioManager.shared.addToAutoPlayCandidates(autoPlayEpisodes)
+    // Replace (not append) so the scored Up Next order is authoritative
+    EnhancedAudioManager.shared.updateAutoPlayCandidates(autoPlayEpisodes)
   }
 
   private static func makeEpisodeKey(podcastTitle: String, episodeTitle: String) -> String {

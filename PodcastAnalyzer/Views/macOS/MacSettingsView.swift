@@ -266,7 +266,7 @@ struct PlaybackSettingsTab: View {
           viewModel.setDefaultPlaybackSpeed(newValue)
         }
 
-        Toggle("Auto-Play Random Episode", isOn: $viewModel.autoPlayNextEpisode)
+        Toggle("Auto-Play Next Episode", isOn: $viewModel.autoPlayNextEpisode)
           .onChange(of: viewModel.autoPlayNextEpisode) { _, newValue in
             viewModel.setAutoPlayNextEpisode(newValue)
           }

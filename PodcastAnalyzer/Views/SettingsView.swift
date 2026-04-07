@@ -211,16 +211,16 @@ struct SettingsView: View {
             set: { viewModel.setAutoPlayNextEpisode($0) }
           )) {
             HStack {
-              Image(systemName: "shuffle")
+              Image(systemName: "play.circle.fill")
                 .foregroundStyle(.purple)
                 .frame(width: 24)
-              Text("Auto-Play Random Episode")
+              Text("Auto-Play Next Episode")
             }
           }
         } header: {
           Text("Playback")
         } footer: {
-          Text("When enabled, a random unplayed episode will play when the queue is empty")
+          Text("When enabled, the top-ranked unplayed episode from Up Next will play when the queue is empty")
         }
 
         // MARK: - Region Section

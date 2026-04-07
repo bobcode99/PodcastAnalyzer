@@ -1305,14 +1305,13 @@ private func handleAudioInterruption(_ notification: Notification) {
       // Check auto-play setting and try to play random unplayed episode
       let autoPlayEnabled = UserDefaults.standard.bool(forKey: Keys.autoPlayNextEpisode)
       if autoPlayEnabled, !autoPlayCandidates.isEmpty {
-        // Pick a random episode from candidates
-        let randomIndex = Int.random(in: 0..<autoPlayCandidates.count)
-        let nextEpisode = autoPlayCandidates[randomIndex]
+        // Pick the top-scored episode (candidates are kept in Up Next order)
+        let nextEpisode = autoPlayCandidates[0]
         let savedPosition = PlaybackStateCoordinator.savedPlaybackPosition(
           podcastTitle: nextEpisode.podcastTitle,
           episodeTitle: nextEpisode.title
         )
-        logger.info("Auto-playing random episode: \(nextEpisode.title) at \(Int(savedPosition))s")
+        logger.info("Auto-playing next episode: \(nextEpisode.title) at \(Int(savedPosition))s")
         play(
           episode: nextEpisode,
           audioURL: nextEpisode.audioURL,

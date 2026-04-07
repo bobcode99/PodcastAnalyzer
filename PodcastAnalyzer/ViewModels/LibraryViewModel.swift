@@ -1041,9 +1041,20 @@ final class LibraryViewModel {
     updateAutoPlayCandidates()
   }
 
-  /// Update the audio manager's auto-play candidates with unplayed episodes
+  /// Update the audio manager's auto-play candidates with unplayed episodes.
+  /// Sorted: in-progress first (by saved position desc), then newest by pubDate.
+  /// HomeViewModel will replace this list with the fully-scored Up Next order
+  /// once the Home tab loads; this acts as a sensible fallback.
   private func updateAutoPlayCandidates() {
-    let unplayedEpisodes = latestEpisodes.filter { !$0.isCompleted }
+    let unplayedEpisodes = latestEpisodes
+      .filter { !$0.isCompleted }
+      .sorted { a, b in
+        let aInProgress = a.lastPlaybackPosition > 60
+        let bInProgress = b.lastPlaybackPosition > 60
+        if aInProgress != bInProgress { return aInProgress }
+        if aInProgress && bInProgress { return a.lastPlaybackPosition > b.lastPlaybackPosition }
+        return (a.episodeInfo.pubDate ?? .distantPast) > (b.episodeInfo.pubDate ?? .distantPast)
+      }
     let playbackEpisodes = unplayedEpisodes.compactMap { episode -> PlaybackEpisode? in
       guard let audioURL = episode.episodeInfo.audioURL else { return nil }
       return PlaybackEpisode(
