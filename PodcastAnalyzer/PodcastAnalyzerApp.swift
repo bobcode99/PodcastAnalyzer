@@ -88,8 +88,12 @@ struct PodcastAnalyzerApp: App {
 
           // Request critical permissions early so they don't interrupt mid-session
           #if os(iOS)
-          // Speech recognition (used by on-device transcription)
-          SFSpeechRecognizer.requestAuthorization { _ in }
+          // Speech recognition (used by on-device transcription).
+          // Must be detached: requestAuthorization delivers its callback on a non-main
+          // thread, which would crash under Swift 6 MainActor isolation if called inline.
+          Task.detached(priority: .utility) {
+            SFSpeechRecognizer.requestAuthorization { _ in }
+          }
           // Notification permission if enabled in settings
           if BackgroundSyncManager.shared.isNotificationsEnabled {
             BackgroundSyncManager.shared.requestNotificationPermission()
