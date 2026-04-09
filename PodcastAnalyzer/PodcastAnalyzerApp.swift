@@ -82,6 +82,10 @@ struct PodcastAnalyzerApp: App {
             await FileStorageManager.shared.migrateFlatCaptionFilesToSubfolders()
           }
 
+          // Fallback: if the widget play flag was set but scene .active fired before
+          // initialization completed, handle it now that everything is ready.
+          EnhancedAudioManager.shared.handleWidgetToggleOnActive()
+
           // Request critical permissions early so they don't interrupt mid-session
           #if os(iOS)
           // Speech recognition (used by on-device transcription)

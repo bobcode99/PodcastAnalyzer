@@ -13,6 +13,27 @@ import CoreFoundation
 import Foundation
 import WidgetKit
 
+// MARK: - Resume Playback Intent (opens app — used for play button when app is terminated)
+
+/// Opens the main app and signals it to start playback from saved state.
+/// Must use openAppWhenRun = true so iOS launches the app when it is fully terminated.
+/// perform() runs in the widget extension process *before* the app opens, so the flag
+/// is guaranteed to be in shared UserDefaults by the time handleWidgetToggleOnActive() fires.
+struct ResumePlaybackIntent: AppIntent {
+  static let title: LocalizedStringResource = "Resume Playback"
+  static let description: IntentDescription = "Opens the app and resumes podcast playback"
+  static let openAppWhenRun: Bool = true
+
+  func perform() async throws -> some IntentResult {
+    guard let defaults = WidgetDataManager.sharedDefaults else { return .result() }
+    defaults.set(true, forKey: "widgetTogglePlayback")
+    defaults.synchronize()
+    return .result()
+  }
+}
+
+// MARK: - Toggle Playback Intent (background only — used for pause button when app is alive)
+
 struct TogglePlaybackIntent: AudioPlaybackIntent {
   static let title: LocalizedStringResource = "Toggle Playback"
   static let description: IntentDescription = "Play or pause the current episode"

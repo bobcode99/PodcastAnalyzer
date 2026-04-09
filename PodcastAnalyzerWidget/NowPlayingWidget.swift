@@ -136,20 +136,38 @@ struct SmallWidgetView: View {
           // Play button — top-right
           HStack {
             Spacer()
-            Button(intent: TogglePlaybackIntent()) {
-              ZStack {
-                Circle()
-                  .fill(.black.opacity(0.38))
-                  .frame(width: 34, height: 34)
-                Image(systemName: data.isPlaying ? "pause.fill" : "play.fill")
-                  .font(.system(size: 13, weight: .bold))
-                  .foregroundStyle(.white)
-                  .offset(x: data.isPlaying ? 0 : 1)
+            Group {
+              if data.isPlaying {
+                Button(intent: TogglePlaybackIntent()) {
+                  ZStack {
+                    Circle()
+                      .fill(.black.opacity(0.38))
+                      .frame(width: 34, height: 34)
+                    Image(systemName: "pause.fill")
+                      .font(.system(size: 13, weight: .bold))
+                      .foregroundStyle(.white)
+                  }
+                  .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Pause")
+              } else {
+                Button(intent: ResumePlaybackIntent()) {
+                  ZStack {
+                    Circle()
+                      .fill(.black.opacity(0.38))
+                      .frame(width: 34, height: 34)
+                    Image(systemName: "play.fill")
+                      .font(.system(size: 13, weight: .bold))
+                      .foregroundStyle(.white)
+                      .offset(x: 1)
+                  }
+                  .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Play")
               }
-              .frame(width: 44, height: 44)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(data.isPlaying ? "Pause" : "Play")
           }
 
           Spacer()
@@ -253,14 +271,27 @@ struct MediumWidgetView: View {
             // Play/pause button — trailing
             HStack {
               Spacer()
-              Button(intent: TogglePlaybackIntent()) {
-                Image(systemName: data.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                  .font(.system(size: 36))
-                  .foregroundStyle(.blue)
-                  .frame(width: 44, height: 44)
+              Group {
+                if data.isPlaying {
+                  Button(intent: TogglePlaybackIntent()) {
+                    Image(systemName: "pause.circle.fill")
+                      .font(.system(size: 36))
+                      .foregroundStyle(.blue)
+                      .frame(width: 44, height: 44)
+                  }
+                  .buttonStyle(.plain)
+                  .accessibilityLabel("Pause")
+                } else {
+                  Button(intent: ResumePlaybackIntent()) {
+                    Image(systemName: "play.circle.fill")
+                      .font(.system(size: 36))
+                      .foregroundStyle(.blue)
+                      .frame(width: 44, height: 44)
+                  }
+                  .buttonStyle(.plain)
+                  .accessibilityLabel("Play")
+                }
               }
-              .buttonStyle(.plain)
-              .accessibilityLabel(data.isPlaying ? "Pause" : "Play")
             }
           }
           .padding(.leading, 14)
