@@ -13,21 +13,42 @@ import CoreFoundation
 import Foundation
 import WidgetKit
 
-// MARK: - Resume Playback Intent (opens app — used for play button when app is terminated)
+// MARK: - Resume Playback Intent (background — used for play button)
 
-/// Opens the main app and signals it to start playback from saved state.
-/// Must use openAppWhenRun = true so iOS launches the app when it is fully terminated.
-/// perform() runs in the widget extension process *before* the app opens, so the flag
-/// is guaranteed to be in shared UserDefaults by the time handleWidgetToggleOnActive() fires.
-struct ResumePlaybackIntent: AppIntent {
+/// Resumes playback without opening the app (AudioPlaybackIntent).
+/// The main app target has a matching ResumePlaybackIntent where perform()
+/// directly calls EnhancedAudioManager. This widget-side version is a
+/// fallback that uses cross-process signaling.
+struct ResumePlaybackIntent: AudioPlaybackIntent {
   static let title: LocalizedStringResource = "Resume Playback"
-  static let description: IntentDescription = "Opens the app and resumes podcast playback"
-  static let openAppWhenRun: Bool = true
+  static let description: IntentDescription = "Resumes podcast playback in the background"
+  static let openAppWhenRun: Bool = false
 
   func perform() async throws -> some IntentResult {
-    guard let defaults = WidgetDataManager.sharedDefaults else { return .result() }
-    defaults.set(true, forKey: "widgetTogglePlayback")
-    defaults.synchronize()
+    // Post Darwin notification so the main app can resume immediately
+    let name = "com.jn.PodcastAnalyzer.resumePlayback" as CFString
+    CFNotificationCenterPostNotification(
+      CFNotificationCenterGetDarwinNotifyCenter(),
+      CFNotificationName(rawValue: name),
+      nil, nil, true
+    )
+
+    // Optimistically set isPlaying to true so the widget re-renders with pause icon
+    if let current = WidgetDataManager.readPlaybackData() {
+      let optimistic = WidgetPlaybackData(
+        episodeTitle: current.episodeTitle,
+        podcastTitle: current.podcastTitle,
+        imageURL: current.imageURL,
+        audioURL: current.audioURL,
+        currentTime: current.currentTime,
+        duration: current.duration,
+        isPlaying: true,
+        lastUpdated: current.lastUpdated
+      )
+      WidgetDataManager.writePlaybackData(optimistic)
+    }
+
+    WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
     return .result()
   }
 }

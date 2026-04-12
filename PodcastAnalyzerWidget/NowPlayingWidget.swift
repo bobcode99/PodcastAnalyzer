@@ -133,40 +133,38 @@ struct SmallWidgetView: View {
 
         // Layer 3: overlay content using widgetContentMargins
         VStack(spacing: 0) {
-          // Play button — top-right
+          // Play/pause button — top-right
           HStack {
             Spacer()
-            Group {
-              if data.isPlaying {
-                Button(intent: TogglePlaybackIntent()) {
-                  ZStack {
-                    Circle()
-                      .fill(.black.opacity(0.38))
-                      .frame(width: 34, height: 34)
-                    Image(systemName: "pause.fill")
-                      .font(.system(size: 13, weight: .bold))
-                      .foregroundStyle(.white)
-                  }
-                  .frame(width: 44, height: 44)
+            if data.isPlaying {
+              Button(intent: TogglePlaybackIntent()) {
+                ZStack {
+                  Circle()
+                    .fill(.black.opacity(0.38))
+                    .frame(width: 34, height: 34)
+                  Image(systemName: "pause.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Pause")
-              } else {
-                Button(intent: ResumePlaybackIntent()) {
-                  ZStack {
-                    Circle()
-                      .fill(.black.opacity(0.38))
-                      .frame(width: 34, height: 34)
-                    Image(systemName: "play.fill")
-                      .font(.system(size: 13, weight: .bold))
-                      .foregroundStyle(.white)
-                      .offset(x: 1)
-                  }
-                  .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Play")
+                .frame(width: 44, height: 44)
               }
+              .buttonStyle(.plain)
+              .accessibilityLabel("Pause")
+            } else {
+              Button(intent: ResumePlaybackIntent()) {
+                ZStack {
+                  Circle()
+                    .fill(.black.opacity(0.38))
+                    .frame(width: 34, height: 34)
+                  Image(systemName: "play.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .offset(x: 1)
+                }
+                .frame(width: 44, height: 44)
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel("Play")
             }
           }
 
@@ -271,26 +269,24 @@ struct MediumWidgetView: View {
             // Play/pause button — trailing
             HStack {
               Spacer()
-              Group {
-                if data.isPlaying {
-                  Button(intent: TogglePlaybackIntent()) {
-                    Image(systemName: "pause.circle.fill")
-                      .font(.system(size: 36))
-                      .foregroundStyle(.blue)
-                      .frame(width: 44, height: 44)
-                  }
-                  .buttonStyle(.plain)
-                  .accessibilityLabel("Pause")
-                } else {
-                  Button(intent: ResumePlaybackIntent()) {
-                    Image(systemName: "play.circle.fill")
-                      .font(.system(size: 36))
-                      .foregroundStyle(.blue)
-                      .frame(width: 44, height: 44)
-                  }
-                  .buttonStyle(.plain)
-                  .accessibilityLabel("Play")
+              if data.isPlaying {
+                Button(intent: TogglePlaybackIntent()) {
+                  Image(systemName: "pause.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.blue)
+                    .frame(width: 44, height: 44)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Pause")
+              } else {
+                Button(intent: ResumePlaybackIntent()) {
+                  Image(systemName: "play.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.blue)
+                    .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Play")
               }
             }
           }

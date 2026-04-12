@@ -122,14 +122,17 @@ struct iOSContentView: View {
         podcastLanguage: result.language
       )
     } else {
+      // Episode not found in SwiftData — use data from the current playback episode
+      // (restored from UserDefaults) so we still have the description and metadata.
+      let currentEp = EnhancedAudioManager.shared.currentEpisode
       let episode = PodcastEpisodeInfo(
         title: target.episodeTitle,
-        podcastEpisodeDescription: nil,
-        pubDate: nil,
+        podcastEpisodeDescription: currentEp?.episodeDescription,
+        pubDate: currentEp?.pubDate,
         audioURL: target.audioURL.isEmpty ? nil : target.audioURL,
         imageURL: target.imageURL.isEmpty ? nil : target.imageURL,
-        duration: nil,
-        guid: nil
+        duration: currentEp?.duration,
+        guid: currentEp?.guid
       )
       route = EpisodeDetailRoute(
         episode: episode,

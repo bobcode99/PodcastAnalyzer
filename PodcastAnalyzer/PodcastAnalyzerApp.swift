@@ -82,8 +82,7 @@ struct PodcastAnalyzerApp: App {
             await FileStorageManager.shared.migrateFlatCaptionFilesToSubfolders()
           }
 
-          // Fallback: if the widget play flag was set but scene .active fired before
-          // initialization completed, handle it now that everything is ready.
+          // Handle any pending widget toggle (pause) flag from cold launch.
           EnhancedAudioManager.shared.handleWidgetToggleOnActive()
 
           // Request critical permissions early so they don't interrupt mid-session
@@ -126,7 +125,7 @@ struct PodcastAnalyzerApp: App {
     .onChange(of: scenePhase) { _, newPhase in
       switch newPhase {
       case .active:
-        // App became active - handle widget play request (covers cold launch from widget)
+        // App became active - handle widget toggle (pause) flag if pending
         EnhancedAudioManager.shared.handleWidgetToggleOnActive()
         // Force widget to re-read latest playback data every time app becomes active
         WidgetCenter.shared.reloadAllTimelines()

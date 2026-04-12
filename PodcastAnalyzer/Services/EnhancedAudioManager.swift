@@ -1064,9 +1064,12 @@ private func handleAudioInterruption(_ notification: Notification) {
 
   /// Check if the widget requested a playback toggle
   private func checkWidgetTogglePlayback() {
-    guard let defaults = WidgetDataManager.sharedDefaults,
-          defaults.bool(forKey: "widgetTogglePlayback") else { return }
+    guard let defaults = WidgetDataManager.sharedDefaults else { return }
+    // Force refresh — the widget extension writes from a different process
+    defaults.synchronize()
+    guard defaults.bool(forKey: "widgetTogglePlayback") else { return }
     defaults.set(false, forKey: "widgetTogglePlayback")
+    defaults.synchronize()
     logger.info("Widget: Darwin notification received — isPlaying=\(self.isPlaying), toggling")
     if isPlaying {
       pause()
@@ -1075,29 +1078,20 @@ private func handleAudioInterruption(_ notification: Notification) {
     }
   }
 
-  /// Called when the app becomes active (e.g. launched from widget button tap).
-  /// Handles the widget toggle flag — resumes or starts playback from saved state
-  /// when the app was previously quit.
+  /// Called when the app becomes active — handles the TOGGLE (pause) flag
+  /// from TogglePlaybackIntent (Darwin notification fallback for cold launch).
   func handleWidgetToggleOnActive() {
-    guard let defaults = WidgetDataManager.sharedDefaults,
-          defaults.bool(forKey: "widgetTogglePlayback") else { return }
+    guard let defaults = WidgetDataManager.sharedDefaults else { return }
+    defaults.synchronize()
+    guard defaults.bool(forKey: "widgetTogglePlayback") else { return }
     defaults.set(false, forKey: "widgetTogglePlayback")
+    defaults.synchronize()
 
+    logger.info("Widget: toggle on active — isPlaying=\(self.isPlaying)")
     if isPlaying {
       pause()
-    } else if player != nil {
-      // App was backgrounded but player exists — just resume
-      resume()
     } else {
-      // App was quit — load last saved state and start playing
-      guard let state = loadLastPlaybackState() else { return }
-      play(
-        episode: state.episode,
-        audioURL: state.episode.audioURL,
-        startTime: state.time,
-        imageURL: state.imageURL,
-        useDefaultSpeed: false
-      )
+      resume()
     }
   }
 
