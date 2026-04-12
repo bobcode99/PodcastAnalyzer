@@ -14,6 +14,7 @@ import SwiftUI
 enum SearchTab: String, CaseIterable {
     case applePodcasts = "Apple Podcasts"
     case library = "Library"
+    case transcripts = "Transcripts"
 }
 
 // MARK: - Main Search View
@@ -31,6 +32,7 @@ struct PodcastSearchView: View {
     // Cached library filter results (updated only when searchText changes)
     @State private var filteredPodcasts: [PodcastInfoModel] = []
     @State private var filteredEpisodes: [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
+    @State private var transcriptSearchVM = TranscriptSearchViewModel()
     @State private var subscribeTask: Task<Void, Never>?
     @State private var debounceTask: Task<Void, Never>?
     @State private var subscribeError: String?
@@ -51,6 +53,8 @@ struct PodcastSearchView: View {
                     applePodcastsResultsView
                 case .library:
                     libraryResultsView
+                case .transcripts:
+                    transcriptResultsView
                 }
             }
         }
@@ -62,18 +66,28 @@ struct PodcastSearchView: View {
                 viewModel.performSearch()
             }
         }
+        .task(id: TranscriptSearchKey(tab: selectedTab, query: searchText)) {
+            guard selectedTab == .transcripts, !searchText.isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            await transcriptSearchVM.performSearch(query: searchText, podcasts: subscribedPodcasts)
+        }
         .onChange(of: searchText) { _, newValue in
             viewModel.searchText = newValue
-            // Debounce: wait before firing search/filter to avoid lag on every keystroke
-            debounceTask?.cancel()
-            debounceTask = Task {
-                try? await Task.sleep(for: .milliseconds(400))
-                guard !Task.isCancelled else { return }
-                if selectedTab == .applePodcasts && !newValue.isEmpty {
-                    viewModel.performSearch()
-                }
-                if selectedTab == .library {
-                    updateLibraryFilters()
+            if selectedTab == .transcripts {
+                // task(id:) handles transcript search re-trigger on text change
+            } else {
+                // Debounce: wait before firing search/filter to avoid lag on every keystroke
+                debounceTask?.cancel()
+                debounceTask = Task {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    guard !Task.isCancelled else { return }
+                    if selectedTab == .applePodcasts && !newValue.isEmpty {
+                        viewModel.performSearch()
+                    }
+                    if selectedTab == .library {
+                        updateLibraryFilters()
+                    }
                 }
             }
         }
@@ -92,6 +106,8 @@ struct PodcastSearchView: View {
                 viewModel.performSearch()
             } else if newTab == .library {
                 updateLibraryFilters()
+            } else if newTab == .transcripts {
+                // task(id:) handles re-trigger when switching to this tab
             }
         }
     }
@@ -222,6 +238,54 @@ struct PodcastSearchView: View {
                 .scrollDismissesKeyboard(.immediately)
             }
         }
+    }
+
+    // MARK: - Transcript Results
+
+    private var transcriptResultsView: some View {
+        Group {
+            if transcriptSearchVM.isSearching {
+                VStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+            } else if transcriptSearchVM.results.isEmpty && !searchText.isEmpty {
+                VStack {
+                    Spacer()
+                    Text("No transcript matches found")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+            } else {
+                VStack(spacing: 0) {
+                    HStack {
+                        Picker("Filter by Podcast", selection: $transcriptSearchVM.selectedPodcastFilter) {
+                            Text("All Podcasts").tag(String?(nil))
+                            ForEach(podcastTitles, id: \.self) { title in
+                                Text(title).tag(String?(title))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+
+                    List {
+                        ForEach(transcriptSearchVM.results) { result in
+                            TranscriptResultRow(result: result)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollDismissesKeyboard(.immediately)
+                }
+            }
+        }
+    }
+
+    private var podcastTitles: [String] {
+        subscribedPodcasts.map { $0.podcastInfo.title }.sorted()
     }
 
     // MARK: - Helper Methods
@@ -507,6 +571,71 @@ struct SearchTabButton: View {
             base
         }
     }
+}
+
+// MARK: - Transcript Result Row
+
+private struct TranscriptResultRow: View {
+    let result: TranscriptSearchResult
+
+    var body: some View {
+        NavigationLink(value: EpisodeDetailRoute(
+            episode: result.episode,
+            podcastTitle: result.podcastTitle,
+            fallbackImageURL: result.podcastImageURL,
+            podcastLanguage: result.podcastLanguage
+        )) {
+            HStack(spacing: 12) {
+                CachedArtworkImage(urlString: result.podcastImageURL, size: 56, cornerRadius: 8)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(result.episode.title)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .lineLimit(2)
+                    HStack {
+                        Text(result.podcastTitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("\(result.matchCount) match\(result.matchCount == 1 ? "" : "es")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(result.snippets) { match in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text(Self.formatTimestamp(match.timestamp))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                                .frame(minWidth: 36, alignment: .trailing)
+                            Text(match.text)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private static func formatTimestamp(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds)
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    }
+}
+
+// MARK: - Transcript Search Key
+
+private struct TranscriptSearchKey: Hashable {
+    let tab: SearchTab
+    let query: String
 }
 
 // MARK: - Preview
