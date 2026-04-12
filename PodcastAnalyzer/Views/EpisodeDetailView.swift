@@ -40,6 +40,9 @@ struct EpisodeDetailView: View {
     @State private var showTranslationError = false
     @State private var translationErrorMessage = ""
 
+    // Inline timestamp tap handling
+    @State private var tappedTimestampSeconds: TimeInterval?
+
     // Header collapse state
     @State private var isHeaderVisible: Bool = true
     @State private var lastScrollOffset: CGFloat = 0
@@ -322,7 +325,7 @@ struct EpisodeDetailView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .parsed(let attributedString):
-            HTMLTextView(attributedString: attributedString)
+            HTMLTextView(attributedString: TimestampUtils.addTimestampLinks(to: attributedString))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 4)
         }
@@ -358,13 +361,11 @@ struct EpisodeDetailView: View {
             // Show translated description if available
             if let translated = viewModel.translatedDescription {
                 VStack(alignment: .leading, spacing: 12) {
-                    // Translated text
-                    Text(translated)
+                    // Translated text with inline timestamp links
+                    Text(TimestampUtils.attributedStringWithTimestampLinks(translated))
                         .font(.body)
+                        .tint(.blue)
                         .textSelection(.enabled)
-
-                    // Timestamp chips from translated text
-                    timestampChips(from: translated)
 
                     Divider()
 
@@ -377,55 +378,37 @@ struct EpisodeDetailView: View {
                 }
                 .padding(.horizontal)
             } else {
-                // Original description only
+                // Original description only (timestamps linked via descriptionView)
                 VStack(alignment: .leading, spacing: 8) {
                     descriptionView
                         .textSelection(.enabled)
-
-                    // Timestamp chips from description
-                    timestampChips(from: viewModel.episode.podcastEpisodeDescription)
                 }
                 .padding(.horizontal)
             }
         }
         .padding(.vertical)
-    }
-
-    // MARK: - Timestamp Chips
-
-    @ViewBuilder
-    private func timestampChips(from text: String?) -> some View {
-        let timestamps = TimestampUtils.findTimestamps(in: text ?? "")
-        if !timestamps.isEmpty {
-            FlowLayout(spacing: 6) {
-                ForEach(timestamps.indices, id: \.self) { i in
-                    let ts = timestamps[i]
-                    Menu {
-                        Button {
-                            viewModel.seekToTime(ts.seconds)
-                        } label: {
-                            Label("Play from \(ts.text)", systemImage: "play.fill")
-                        }
-                        Button {
-                            viewModel.shareTimestampedLink(seconds: ts.seconds)
-                        } label: {
-                            Label("Share", systemImage: "square.and.arrow.up")
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "play.circle.fill")
-                                .font(.system(size: 10))
-                            Text(ts.text)
-                                .font(.caption2)
-                                .fontWeight(.medium)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.blue.opacity(0.15))
-                        .foregroundStyle(.blue)
-                        .clipShape(Capsule())
-                    }
+        .environment(\.openURL, OpenURLAction { url in
+            if let seconds = TimestampUtils.parseTimestampURL(url) {
+                tappedTimestampSeconds = seconds
+                return .handled
+            }
+            return .systemAction
+        })
+        .confirmationDialog(
+            "Timestamp",
+            isPresented: Binding(
+                get: { tappedTimestampSeconds != nil },
+                set: { if !$0 { tappedTimestampSeconds = nil } }
+            )
+        ) {
+            if let seconds = tappedTimestampSeconds {
+                Button("Play from \(TimestampUtils.formatSeconds(seconds))") {
+                    viewModel.seekToTime(seconds)
                 }
+                Button("Share") {
+                    viewModel.shareTimestampedLink(seconds: seconds)
+                }
+                Button("Cancel", role: .cancel) {}
             }
         }
     }

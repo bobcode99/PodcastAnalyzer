@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 nonisolated struct TimestampUtils {
 
@@ -66,5 +67,60 @@ nonisolated struct TimestampUtils {
     } else {
       return String(format: "%02d:%02d", m, s)
     }
+  }
+
+  /// Custom URL scheme used for inline tappable timestamps.
+  static let urlScheme = "pa-timestamp"
+
+  /// Adds link attributes to all timestamps in an NSAttributedString.
+  /// Timestamps become tappable links using the `pa-timestamp://` scheme.
+  static func addTimestampLinks(to source: NSAttributedString) -> NSAttributedString {
+    let text = source.string
+    guard let regex = try? NSRegularExpression(
+      pattern: #"(?<!\d)(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)"#
+    ) else { return source }
+
+    let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+    let matches = regex.matches(in: text, range: nsRange)
+    guard !matches.isEmpty else { return source }
+
+    let mutable = NSMutableAttributedString(attributedString: source)
+    for match in matches {
+      guard let range = Range(match.range(at: 1), in: text) else { continue }
+      let matched = String(text[range])
+      guard let seconds = parseToSeconds(matched), seconds > 0 else { continue }
+      let nsMatchRange = match.range(at: 1)
+      mutable.addAttribute(.link, value: URL(string: "\(urlScheme)://\(Int(seconds))")!, range: nsMatchRange)
+    }
+    return mutable
+  }
+
+  /// Adds link attributes to timestamps in a plain string, returning an AttributedString.
+  static func attributedStringWithTimestampLinks(_ text: String) -> AttributedString {
+    var attributed = AttributedString(text)
+    guard let regex = try? NSRegularExpression(
+      pattern: #"(?<!\d)(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)"#
+    ) else { return attributed }
+
+    let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+    let matches = regex.matches(in: text, range: nsRange)
+
+    for match in matches {
+      guard let swiftRange = Range(match.range(at: 1), in: text) else { continue }
+      let matched = String(text[swiftRange])
+      guard let seconds = parseToSeconds(matched), seconds > 0,
+            let attrRange = Range(swiftRange, in: attributed) else { continue }
+      attributed[attrRange].link = URL(string: "\(urlScheme)://\(Int(seconds))")
+      attributed[attrRange].underlineStyle = Text.LineStyle(pattern: .solid)
+    }
+    return attributed
+  }
+
+  /// Parses a `pa-timestamp://` URL, returning seconds if valid.
+  static func parseTimestampURL(_ url: URL) -> TimeInterval? {
+    guard url.scheme == urlScheme, let host = url.host(), let seconds = Int(host) else {
+      return nil
+    }
+    return TimeInterval(seconds)
   }
 }

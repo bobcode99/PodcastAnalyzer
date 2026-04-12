@@ -243,43 +243,37 @@ struct PodcastSearchView: View {
     // MARK: - Transcript Results
 
     private var transcriptResultsView: some View {
-        Group {
-            if transcriptSearchVM.isSearching {
-                VStack {
-                    Spacer()
-                    ProgressView()
-                    Spacer()
-                }
-            } else if transcriptSearchVM.results.isEmpty && !searchText.isEmpty {
-                VStack {
-                    Spacer()
-                    Text("No transcript matches found")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-            } else {
-                VStack(spacing: 0) {
-                    HStack {
-                        Picker("Filter by Podcast", selection: $transcriptSearchVM.selectedPodcastFilter) {
-                            Text("All Podcasts").tag(String?(nil))
-                            ForEach(podcastTitles, id: \.self) { title in
-                                Text(title).tag(String?(title))
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        Spacer()
+        VStack(spacing: 0) {
+            HStack {
+                Picker("Filter by Podcast", selection: $transcriptSearchVM.selectedPodcastFilter) {
+                    Text("All Podcasts").tag(String?(nil))
+                    ForEach(podcastTitles, id: \.self) { title in
+                        Text(title).tag(String?(title))
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                }
+                .pickerStyle(.menu)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
 
-                    List {
-                        ForEach(transcriptSearchVM.results) { result in
-                            TranscriptResultRow(result: result)
-                        }
+            if transcriptSearchVM.isSearching {
+                Spacer()
+                ProgressView()
+                Spacer()
+            } else if transcriptSearchVM.results.isEmpty && !searchText.isEmpty {
+                Spacer()
+                Text("No transcript matches found")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else {
+                List {
+                    ForEach(transcriptSearchVM.results) { result in
+                        TranscriptResultRow(result: result)
                     }
-                    .listStyle(.plain)
-                    .scrollDismissesKeyboard(.immediately)
                 }
+                .listStyle(.plain)
+                .scrollDismissesKeyboard(.immediately)
             }
         }
     }
@@ -571,71 +565,6 @@ struct SearchTabButton: View {
             base
         }
     }
-}
-
-// MARK: - Transcript Result Row
-
-private struct TranscriptResultRow: View {
-    let result: TranscriptSearchResult
-
-    var body: some View {
-        NavigationLink(value: EpisodeDetailRoute(
-            episode: result.episode,
-            podcastTitle: result.podcastTitle,
-            fallbackImageURL: result.podcastImageURL,
-            podcastLanguage: result.podcastLanguage
-        )) {
-            HStack(spacing: 12) {
-                CachedArtworkImage(urlString: result.podcastImageURL, size: 56, cornerRadius: 8)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(result.episode.title)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .lineLimit(2)
-                    HStack {
-                        Text(result.podcastTitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Spacer()
-                        Text("\(result.matchCount) match\(result.matchCount == 1 ? "" : "es")")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(result.snippets) { match in
-                        HStack(alignment: .top, spacing: 6) {
-                            Text(Self.formatTimestamp(match.timestamp))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                                .frame(minWidth: 36, alignment: .trailing)
-                            Text(match.text)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                    }
-                }
-            }
-            .padding(.vertical, 4)
-        }
-        .contentShape(Rectangle())
-    }
-
-    private static func formatTimestamp(_ seconds: TimeInterval) -> String {
-        let total = Int(seconds)
-        let h = total / 3600
-        let m = (total % 3600) / 60
-        let s = total % 60
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
-    }
-}
-
-// MARK: - Transcript Search Key
-
-private struct TranscriptSearchKey: Hashable {
-    let tab: SearchTab
-    let query: String
 }
 
 // MARK: - Preview

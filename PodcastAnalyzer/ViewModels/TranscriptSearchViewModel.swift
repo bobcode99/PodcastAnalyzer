@@ -37,7 +37,13 @@ final class TranscriptSearchViewModel {
 
     // MARK: Observable state
 
-    var results: [TranscriptSearchResult] = []
+    /// All results from the last search, unfiltered.
+    private var allResults: [TranscriptSearchResult] = []
+    /// Results filtered by `selectedPodcastFilter` for display.
+    var results: [TranscriptSearchResult] {
+        guard let filter = selectedPodcastFilter else { return allResults }
+        return allResults.filter { $0.podcastTitle == filter }
+    }
     var isSearching = false
     /// When non-nil, filters results to the named podcast.
     var selectedPodcastFilter: String? = nil
@@ -49,7 +55,7 @@ final class TranscriptSearchViewModel {
     /// so that the nonisolated worker never touches non-Sendable SwiftData models.
     func performSearch(query: String, podcasts: [PodcastInfoModel]) async {
         guard !query.isEmpty else {
-            results = []
+            allResults = []
             return
         }
 
@@ -58,16 +64,14 @@ final class TranscriptSearchViewModel {
 
         // Extract Sendable value types here, on MainActor, before hopping off.
         let podcastInfos: [PodcastInfo] = podcasts.map(\.podcastInfo)
-        let filter = selectedPodcastFilter
 
         let found = await Self.searchTranscripts(
             query: query,
-            podcasts: podcastInfos,
-            filter: filter
+            podcasts: podcastInfos
         )
 
         guard !Task.isCancelled else { return }
-        results = found
+        allResults = found
     }
 
     // MARK: - Off-actor search
@@ -77,12 +81,10 @@ final class TranscriptSearchViewModel {
     /// thread pool rather than inheriting the caller's MainActor executor.
     @concurrent private nonisolated static func searchTranscripts(
         query: String,
-        podcasts: [PodcastInfo],
-        filter: String?
+        podcasts: [PodcastInfo]
     ) async -> [TranscriptSearchResult] {
         await withTaskGroup(of: [TranscriptSearchResult].self) { group in
             for podcast in podcasts {
-                if let filter, filter != podcast.title { continue }
                 group.addTask {
                     do {
                         return try await searchPodcast(query: query, podcast: podcast)

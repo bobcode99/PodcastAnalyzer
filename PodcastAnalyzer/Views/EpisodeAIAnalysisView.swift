@@ -1015,31 +1015,12 @@ struct EpisodeAIAnalysisView: View {
 
   /// Tappable timestamp pill with Play and Share actions
   private func timestampBadge(_ timestamp: String, seconds: TimeInterval) -> some View {
-    Menu {
-      Button {
-        viewModel.seekToTime(seconds)
-      } label: {
-        Label("Play from \(timestamp)", systemImage: "play.fill")
-      }
-      Button {
-        viewModel.shareTimestampedLink(seconds: seconds)
-      } label: {
-        Label("Share", systemImage: "square.and.arrow.up")
-      }
-    } label: {
-      HStack(spacing: 4) {
-        Image(systemName: "play.circle.fill")
-          .font(.system(size: 10))
-        Text(timestamp)
-          .font(.caption2)
-          .fontWeight(.medium)
-      }
-      .padding(.horizontal, 8)
-      .padding(.vertical, 4)
-      .background(Color.blue.opacity(0.15))
-      .foregroundStyle(.blue)
-      .clipShape(Capsule())
-    }
+    TimestampLink(
+      text: timestamp,
+      seconds: seconds,
+      onPlay: { viewModel.seekToTime(seconds) },
+      onShare: { viewModel.shareTimestampedLink(seconds: seconds) }
+    )
   }
 
   // MARK: - Timestamp-Aware Text
