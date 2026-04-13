@@ -9,27 +9,26 @@ import SwiftUI
 
 struct HTMLTextView: View {
     let attributedString: NSAttributedString
+    var linkTimestamps: Bool = false
 
     var body: some View {
-        // We use a conditional check to determine which attribute scope to use.
-        // iOS = UIKit, macOS = AppKit.
         if let swiftAttributedString = convertToSwiftAttributedString() {
             Text(swiftAttributedString)
                 .tint(.blue)
         } else {
-            // Fallback if conversion fails
             Text(attributedString.string)
         }
     }
 
-    /// Helper function to handle platform-specific conversion
     private func convertToSwiftAttributedString() -> AttributedString? {
         #if os(macOS)
-            // On macOS, use the AppKit scope
-            return try? AttributedString(attributedString, including: \.appKit)
+        guard var result = try? AttributedString(attributedString, including: \.appKit) else { return nil }
         #else
-            // On iOS, use the UIKit scope
-            return try? AttributedString(attributedString, including: \.uiKit)
+        guard var result = try? AttributedString(attributedString, including: \.uiKit) else { return nil }
         #endif
+        if linkTimestamps {
+            result = TimestampUtils.addTimestampLinks(to: result)
+        }
+        return result
     }
 }

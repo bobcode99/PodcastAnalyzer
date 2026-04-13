@@ -45,21 +45,21 @@ struct PodcastSearchView: View {
                 .padding(.top, 8)
 
             // Search results
-            if searchText.isEmpty {
-                emptySearchView
-            } else {
-                switch selectedTab {
-                case .applePodcasts:
+            switch selectedTab {
+            case .transcripts:
+                transcriptResultsView
+            default:
+                if searchText.isEmpty {
+                    emptySearchView
+                } else if selectedTab == .applePodcasts {
                     applePodcastsResultsView
-                case .library:
+                } else {
                     libraryResultsView
-                case .transcripts:
-                    transcriptResultsView
                 }
             }
         }
         .navigationTitle("Search")
-        .searchable(text: $searchText, prompt: "Podcasts & Episodes")
+        .searchable(text: $searchText, prompt: searchPrompt)
         .onSubmit(of: .search) {
             if selectedTab == .applePodcasts {
                 viewModel.searchText = searchText
@@ -257,11 +257,21 @@ struct PodcastSearchView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
 
-            if transcriptSearchVM.isSearching {
+            if searchText.isEmpty {
+                Spacer()
+                Image(systemName: "text.magnifyingglass")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.secondary)
+                Text("Search episode transcripts")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+                Spacer()
+            } else if transcriptSearchVM.isSearching {
                 Spacer()
                 ProgressView()
                 Spacer()
-            } else if transcriptSearchVM.results.isEmpty && !searchText.isEmpty {
+            } else if transcriptSearchVM.results.isEmpty {
                 Spacer()
                 Text("No transcript matches found")
                     .foregroundStyle(.secondary)
@@ -280,6 +290,14 @@ struct PodcastSearchView: View {
 
     private var podcastTitles: [String] {
         subscribedPodcasts.map { $0.podcastInfo.title }.sorted()
+    }
+
+    private var searchPrompt: LocalizedStringKey {
+        switch selectedTab {
+        case .applePodcasts: "Search Apple Podcasts"
+        case .library: "Search your library"
+        case .transcripts: "Search transcripts"
+        }
     }
 
     // MARK: - Helper Methods

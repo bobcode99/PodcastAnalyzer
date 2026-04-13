@@ -325,7 +325,7 @@ struct EpisodeDetailView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .parsed(let attributedString):
-            HTMLTextView(attributedString: TimestampUtils.addTimestampLinks(to: attributedString))
+            HTMLTextView(attributedString: attributedString, linkTimestamps: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 4)
         }
