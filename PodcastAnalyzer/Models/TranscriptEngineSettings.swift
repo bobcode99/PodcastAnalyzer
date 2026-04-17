@@ -194,11 +194,9 @@ final class WhisperModelManager {
 
     /// Checks which models are already downloaded on disk and updates statuses.
     func checkAllModelStatuses() {
-        Task {
-            for variant in WhisperModelVariant.allCases {
-                let exists = WhisperModelManager.modelExistsOnDisk(variant)
-                modelStatuses[variant] = exists ? .ready : .notDownloaded
-            }
+        for variant in WhisperModelVariant.allCases {
+            let exists = WhisperModelManager.modelExistsOnDisk(variant)
+            modelStatuses[variant] = exists ? .ready : .notDownloaded
         }
     }
 

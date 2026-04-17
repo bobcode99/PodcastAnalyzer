@@ -28,177 +28,132 @@ struct iOSContentView: View {
   private var notificationManager: NotificationNavigationManager { .shared }
   @Environment(\.modelContext) private var modelContext
 
-  // Navigation state for notification-triggered navigation
-  @State private var notificationEpisode: PodcastEpisodeInfo?
-  @State private var notificationPodcastTitle: String = ""
-  @State private var notificationImageURL: String?
-  @State private var notificationLanguage: String = "en"
-  @State private var showNotificationEpisode: Bool = false
+  @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
-  // Navigation state for expanded player navigation
-  @State private var expandedPlayerNavigation: ExpandedPlayerNavigation = .none
-  @State private var expandedPlayerEpisode: PodcastEpisodeInfo?
-  @State private var expandedPlayerPodcastTitle: String = ""
-  @State private var expandedPlayerImageURL: String?
-  @State private var showExpandedPlayerEpisode: Bool = false
-  @State private var expandedPlayerPodcastModel: PodcastInfoModel?
-  @State private var showExpandedPlayerPodcast: Bool = false
+  @State private var coordinator = TabNavigationCoordinator()
 
   var body: some View {
     TabView {
       Tab(Constants.homeString, systemImage: Constants.homeIconName) {
-        NavigationStack {
+        NavigationStack(path: $coordinator.homeRouter.path) {
           HomeView()
-            .playerNavigationDestinations(
-              showNotificationEpisode: $showNotificationEpisode,
-              notificationEpisode: notificationEpisode,
-              notificationPodcastTitle: notificationPodcastTitle,
-              notificationImageURL: notificationImageURL,
-              notificationLanguage: notificationLanguage,
-              showEpisodeDetail: $showExpandedPlayerEpisode,
-              episodeDetail: expandedPlayerEpisode,
-              episodePodcastTitle: expandedPlayerPodcastTitle,
-              episodeImageURL: expandedPlayerImageURL,
-              showPodcastList: $showExpandedPlayerPodcast,
-              podcastModel: expandedPlayerPodcastModel
-            )
+            .navigationDestinations()
+            .onAppear { coordinator.visibleTab = .home }
         }
       }
 
       Tab(Constants.libraryString, systemImage: Constants.libraryIconName) {
-        NavigationStack {
+        NavigationStack(path: $coordinator.libraryRouter.path) {
           LibraryView()
-            .playerNavigationDestinations(
-              showNotificationEpisode: $showNotificationEpisode,
-              notificationEpisode: notificationEpisode,
-              notificationPodcastTitle: notificationPodcastTitle,
-              notificationImageURL: notificationImageURL,
-              notificationLanguage: notificationLanguage,
-              showEpisodeDetail: $showExpandedPlayerEpisode,
-              episodeDetail: expandedPlayerEpisode,
-              episodePodcastTitle: expandedPlayerPodcastTitle,
-              episodeImageURL: expandedPlayerImageURL,
-              showPodcastList: $showExpandedPlayerPodcast,
-              podcastModel: expandedPlayerPodcastModel
-            )
+            .navigationDestinations()
+            .onAppear { coordinator.visibleTab = .library }
         }
       }
 
       Tab(Constants.settingsString, systemImage: Constants.settingsIconName) {
-        NavigationStack {
+        NavigationStack(path: $coordinator.settingsRouter.path) {
           SettingsView()
-            .playerNavigationDestinations(
-              showNotificationEpisode: $showNotificationEpisode,
-              notificationEpisode: notificationEpisode,
-              notificationPodcastTitle: notificationPodcastTitle,
-              notificationImageURL: notificationImageURL,
-              notificationLanguage: notificationLanguage,
-              showEpisodeDetail: $showExpandedPlayerEpisode,
-              episodeDetail: expandedPlayerEpisode,
-              episodePodcastTitle: expandedPlayerPodcastTitle,
-              episodeImageURL: expandedPlayerImageURL,
-              showPodcastList: $showExpandedPlayerPodcast,
-              podcastModel: expandedPlayerPodcastModel
-            )
+            .navigationDestinations()
+            .onAppear { coordinator.visibleTab = .settings }
         }
       }
 
       Tab(role: .search) {
-        NavigationStack {
+        NavigationStack(path: $coordinator.searchRouter.path) {
           PodcastSearchView()
-            .playerNavigationDestinations(
-              showNotificationEpisode: $showNotificationEpisode,
-              notificationEpisode: notificationEpisode,
-              notificationPodcastTitle: notificationPodcastTitle,
-              notificationImageURL: notificationImageURL,
-              notificationLanguage: notificationLanguage,
-              showEpisodeDetail: $showExpandedPlayerEpisode,
-              episodeDetail: expandedPlayerEpisode,
-              episodePodcastTitle: expandedPlayerPodcastTitle,
-              episodeImageURL: expandedPlayerImageURL,
-              showPodcastList: $showExpandedPlayerPodcast,
-              podcastModel: expandedPlayerPodcastModel
-            )
+            .navigationDestinations()
+            .onAppear { coordinator.visibleTab = .search }
         }
       }
     }
+    .environment(\.tabNavigationCoordinator, coordinator)
     .tabViewBottomAccessory {
-      MiniPlayerBar(pendingNavigation: $expandedPlayerNavigation)
-    }
-    .onChange(of: expandedPlayerNavigation) { _, newValue in
-      handleExpandedPlayerNavigation(newValue)
+      MiniPlayerBar()
     }
     .tabBarMinimizeBehavior(.onScrollDown)
     .onAppear {
       // Restore last played episode on app launch
       audioManager.restoreLastEpisode()
+      // Ensure model context is available early (before the async task in PodcastAnalyzerApp)
+      notificationManager.setModelContext(modelContext)
     }
-        .sheet(isPresented: $importManager.showImportSheet) {
-            PodcastImportSheet()
-        }
-        .onChange(of: notificationManager.shouldNavigate) { _, shouldNavigate in
-            if shouldNavigate, let target = notificationManager.navigationTarget {
-                handleNotificationNavigation(target: target)
-            }
-        }
+    .sheet(isPresented: $importManager.showImportSheet) {
+      PodcastImportSheet()
+    }
+    .fullScreenCover(isPresented: Binding(
+      get: { !hasCompletedOnboarding },
+      set: { if !$0 { hasCompletedOnboarding = true } }
+    )) {
+      OnboardingView()
+    }
+    .onChange(of: notificationManager.shouldNavigate) { _, shouldNavigate in
+      if shouldNavigate, let target = notificationManager.navigationTarget {
+        handleNotificationNavigation(target: target)
+      }
+    }
+    .onChange(of: coordinator.homeRouter.path.count) { oldCount, newCount in
+      // Clear deep link tracker when user navigates back so future widget taps work
+      if newCount < oldCount {
+        coordinator.lastDeepLinkedEpisodeRouteID = nil
+      }
+    }
   }
 
   private func handleNotificationNavigation(target: NotificationNavigationTarget) {
-    // Try to find the episode from the database
-    if let result = notificationManager.findEpisode(
+    let route: EpisodeDetailRoute
+    // Prefer lookup by audioURL (unique key) so we always get the full episode
+    // including description, transcript, and AI analysis — even for non-ASCII titles.
+    if !target.audioURL.isEmpty,
+       let result = notificationManager.findEpisodeByAudioURL(target.audioURL) {
+      route = EpisodeDetailRoute(
+        episode: result.episode,
+        podcastTitle: result.podcastTitle,
+        fallbackImageURL: result.imageURL,
+        podcastLanguage: result.language
+      )
+    } else if let result = notificationManager.findEpisode(
       podcastTitle: target.podcastTitle,
       episodeTitle: target.episodeTitle
     ) {
-      notificationEpisode = result.episode
-      notificationPodcastTitle = target.podcastTitle
-      notificationImageURL = result.imageURL
-      notificationLanguage = result.language
-      showNotificationEpisode = true
+      route = EpisodeDetailRoute(
+        episode: result.episode,
+        podcastTitle: target.podcastTitle,
+        fallbackImageURL: result.imageURL,
+        podcastLanguage: result.language
+      )
     } else {
-      // Fallback: create a minimal episode info from notification data
-      notificationEpisode = PodcastEpisodeInfo(
+      // Episode not found in SwiftData — use data from the current playback episode
+      // (restored from UserDefaults) so we still have the description and metadata.
+      let currentEp = EnhancedAudioManager.shared.currentEpisode
+      let episode = PodcastEpisodeInfo(
         title: target.episodeTitle,
-        podcastEpisodeDescription: nil,
-        pubDate: nil,
+        podcastEpisodeDescription: currentEp?.episodeDescription,
+        pubDate: currentEp?.pubDate,
         audioURL: target.audioURL.isEmpty ? nil : target.audioURL,
         imageURL: target.imageURL.isEmpty ? nil : target.imageURL,
-        duration: nil,
-        guid: nil
+        duration: currentEp?.duration,
+        guid: currentEp?.guid
       )
-      notificationPodcastTitle = target.podcastTitle
-      notificationImageURL = target.imageURL.isEmpty ? nil : target.imageURL
-      notificationLanguage = target.language
-      showNotificationEpisode = true
+      route = EpisodeDetailRoute(
+        episode: episode,
+        podcastTitle: target.podcastTitle,
+        fallbackImageURL: target.imageURL.isEmpty ? nil : target.imageURL,
+        podcastLanguage: target.language
+      )
     }
 
-    // Clear the navigation state
+    // Skip if the same episode detail is already the most recent deep-linked route
+    // This prevents stacking duplicate screens when the user taps the widget repeatedly
+    if coordinator.lastDeepLinkedEpisodeRouteID == route.id {
+      notificationManager.clearNavigation()
+      return
+    }
+
+    coordinator.lastDeepLinkedEpisodeRouteID = route.id
+    coordinator.activeRouter.push(route)
     notificationManager.clearNavigation()
   }
 
-  private func handleExpandedPlayerNavigation(_ navigation: ExpandedPlayerNavigation) {
-    switch navigation {
-    case .none:
-      break
-    case let .episodeDetail(episode, podcastTitle, imageURL):
-      // Small delay to allow sheet dismissal animation to complete
-      Task {
-        try? await Task.sleep(for: .seconds(0.3))
-        expandedPlayerEpisode = episode
-        expandedPlayerPodcastTitle = podcastTitle
-        expandedPlayerImageURL = imageURL
-        showExpandedPlayerEpisode = true
-        expandedPlayerNavigation = .none
-      }
-    case let .podcastEpisodeList(podcastModel):
-      // Small delay to allow sheet dismissal animation to complete
-      Task {
-        try? await Task.sleep(for: .seconds(0.3))
-        expandedPlayerPodcastModel = podcastModel
-        showExpandedPlayerPodcast = true
-        expandedPlayerNavigation = .none
-      }
-    }
-  }
 }
 #endif
 
@@ -326,47 +281,36 @@ struct PodcastImportSheet: View {
   }
 }
 
-// MARK: - Player Navigation Destinations
+// MARK: - Navigation Destinations
 
 extension View {
-  /// Attaches navigationDestination modifiers for expanded player / notification navigation.
-  /// Must be called on a view that is inside a NavigationStack.
-  func playerNavigationDestinations(
-    showNotificationEpisode: Binding<Bool>,
-    notificationEpisode: PodcastEpisodeInfo?,
-    notificationPodcastTitle: String,
-    notificationImageURL: String?,
-    notificationLanguage: String,
-    showEpisodeDetail: Binding<Bool>,
-    episodeDetail: PodcastEpisodeInfo?,
-    episodePodcastTitle: String,
-    episodeImageURL: String?,
-    showPodcastList: Binding<Bool>,
-    podcastModel: PodcastInfoModel?
-  ) -> some View {
+  /// Registers type-based navigationDestination handlers for the shared route types.
+  /// Called on each tab's root view inside its NavigationStack.
+  ///
+  /// Both NavigationLink(value:) pushes and programmatic NavigationPath.append()
+  /// pushes resolve through these same `for:` handlers — no `isPresented:` needed.
+  func navigationDestinations() -> some View {
     self
-      .navigationDestination(isPresented: showNotificationEpisode) {
-        if let episode = notificationEpisode {
-          EpisodeDetailView(
-            episode: episode,
-            podcastTitle: notificationPodcastTitle,
-            fallbackImageURL: notificationImageURL,
-            podcastLanguage: notificationLanguage
-          )
-        }
+      .navigationDestination(for: EpisodeDetailRoute.self) { route in
+        EpisodeDetailView(
+          episode: route.episode,
+          podcastTitle: route.podcastTitle,
+          fallbackImageURL: route.fallbackImageURL,
+          podcastLanguage: route.podcastLanguage ?? "en"
+        )
       }
-      .navigationDestination(isPresented: showEpisodeDetail) {
-        if let episode = episodeDetail {
-          EpisodeDetailView(
-            episode: episode,
-            podcastTitle: episodePodcastTitle,
-            fallbackImageURL: episodeImageURL
+      .navigationDestination(for: PodcastBrowseRoute.self) { route in
+        if let model = route.podcastModel {
+          EpisodeListView(podcastModel: model, initialFilter: route.initialFilter)
+        } else {
+          EpisodeListView(
+            podcastName: route.podcastName,
+            podcastArtwork: route.artworkURL,
+            artistName: route.artistName,
+            collectionId: route.collectionId ?? "",
+            applePodcastUrl: route.applePodcastURL,
+            initialFilter: route.initialFilter
           )
-        }
-      }
-      .navigationDestination(isPresented: showPodcastList) {
-        if let podcastModel = podcastModel {
-          EpisodeListView(podcastModel: podcastModel)
         }
       }
   }

@@ -6,19 +6,25 @@ struct EpisodeDetailHeaderView: View {
     @Bindable var viewModel: EpisodeDetailViewModel
     @Environment(\.modelContext) private var modelContext
     @State private var cachedPodcastModel: PodcastInfoModel?
+    @State private var browseCollectionId: String?
 
-    /// Destination view for navigating to the podcast's episode list
-    @ViewBuilder
-    private var podcastDestination: some View {
-        if let podcastModel = cachedPodcastModel {
-            EpisodeListView(podcastModel: podcastModel)
-        } else {
-            ContentUnavailableView(
-                "Podcast Not Found",
-                systemImage: "exclamationmark.triangle",
-                description: Text("This podcast is not in your library")
+    /// Value-based navigation route built lazily.
+    /// Uses the SwiftData model if available, otherwise falls back to an unsubscribed
+    /// browse route so trending/unsubscribed episodes can still navigate to the show.
+    private var podcastBrowseRoute: PodcastBrowseRoute? {
+        if let model = cachedPodcastModel {
+            return PodcastBrowseRoute(podcastModel: model)
+        }
+        if let collectionId = browseCollectionId {
+            return PodcastBrowseRoute(
+                podcastName: viewModel.podcastTitle,
+                artworkURL: viewModel.imageURLString,
+                artistName: "",
+                collectionId: collectionId,
+                applePodcastURL: nil
             )
         }
+        return nil
     }
 
     var body: some View {
@@ -69,8 +75,9 @@ struct EpisodeDetailHeaderView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    // Tappable podcast title - navigates to show
-                    NavigationLink(destination: podcastDestination) {
+                    // Tappable podcast title - navigates to show using value-based navigation
+                    // to avoid eagerly constructing EpisodeListView (and its ViewModel) on render.
+                    NavigationLink(value: podcastBrowseRoute) {
                         HStack(spacing: 4) {
                             if let translatedTitle = viewModel.translatedPodcastTitle {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -92,6 +99,7 @@ struct EpisodeDetailHeaderView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .disabled(podcastBrowseRoute == nil)
 
                     // Date and status icons row
                     HStack(spacing: 8) {
@@ -189,7 +197,18 @@ struct EpisodeDetailHeaderView: View {
             let descriptor = FetchDescriptor<PodcastInfoModel>(
                 predicate: #Predicate { $0.title == title }
             )
-            cachedPodcastModel = try? modelContext.fetch(descriptor).first
+            if let model = try? modelContext.fetch(descriptor).first {
+                cachedPodcastModel = model
+            } else {
+                // No local model — look up Apple collection ID so we can browse the show
+                let service = ApplePodcastService()
+                if let results = try? await service.searchPodcasts(term: title, limit: 5),
+                   let match = results.first(where: {
+                       $0.collectionName.lowercased() == title.lowercased()
+                   }) ?? results.first {
+                    browseCollectionId = String(match.collectionId)
+                }
+            }
         }
     }
 }

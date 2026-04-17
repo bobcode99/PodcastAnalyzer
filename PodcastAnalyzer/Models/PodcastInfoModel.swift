@@ -3,27 +3,26 @@ import SwiftData
 
 @Model
 class PodcastInfoModel {
-  @Attribute(.unique)
-  var id: UUID
+  var id: UUID = UUID()
 
-  var podcastInfo: PodcastInfo
+  var podcastInfo: PodcastInfo = PodcastInfo()
 
-  var dateAdded: Date
-  var lastUpdated: Date
+  var dateAdded: Date = Date()
+  var lastUpdated: Date = Date()
 
   /// Whether the user has subscribed to this podcast.
   /// false = browsed/cached podcast, true = subscribed podcast
-  var isSubscribed: Bool
+  var isSubscribed: Bool = false
 
   // MARK: - Queryable Properties (Swift 6 Predicate Compatibility)
   // These top-level properties enable #Predicate to work without nested keypaths
   // which don't conform to Sendable in Swift 6 strict concurrency mode
 
   /// Podcast title for predicate queries (mirrors podcastInfo.title)
-  var title: String
+  var title: String = ""
 
   /// RSS URL for predicate queries (mirrors podcastInfo.rssUrl)
-  var rssUrl: String
+  var rssUrl: String = ""
 
   init(podcastInfo: PodcastInfo, lastUpdated: Date, isSubscribed: Bool = true) {
     self.id = UUID()

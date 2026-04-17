@@ -2,16 +2,13 @@
 //  PodcastAnalyzerWidgetBundle.swift
 //  PodcastAnalyzerWidget
 //
-//  Created by Bob on 2026/1/25.
-//
 
-import WidgetKit
 import SwiftUI
+import WidgetKit
 
 @main
 struct PodcastAnalyzerWidgetBundle: WidgetBundle {
-    var body: some Widget {
-        PodcastAnalyzerWidget()
-        NowPlayingWidget()
-    }
+  var body: some Widget {
+    NowPlayingWidget()
+  }
 }

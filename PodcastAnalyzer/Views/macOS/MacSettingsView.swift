@@ -13,7 +13,7 @@ struct MacSettingsView: View {
   private enum SettingsTab: Hashable, CaseIterable {
     case general, appearance, sync, playback, transcript, ai, storage
 
-    var title: String {
+    var title: LocalizedStringKey {
       switch self {
       case .general: "General"
       case .appearance: "Appearance"
@@ -48,7 +48,8 @@ struct MacSettingsView: View {
         }
       }
     }
-    .frame(width: 560, height: 500)
+    .frame(maxWidth: 560, minHeight: 300)
+    .scenePadding()
   }
 
   @ViewBuilder
@@ -68,19 +69,99 @@ struct MacSettingsView: View {
 // MARK: - General Settings Tab
 
 struct GeneralSettingsTab: View {
+  @State private var viewModel = SettingsViewModel()
+  @State private var showAddFeedSheet = false
+  @State private var showListeningStats = false
+  @Environment(\.modelContext) private var modelContext
+  @Environment(\.openURL) private var openURL
+
   var body: some View {
     Form {
       Section {
-        HStack {
-          Text("Version")
-          Spacer()
-          Text("1.0.0")
+        Button("Add RSS Feed") {
+          showAddFeedSheet = true
+        }
+        Button("Import Podcasts…") {
+          if let url = URL(string: "shortcuts://run-shortcut?name=ApplePodcast%20To%20PodcastAnalyzer") {
+            openURL(url)
+          }
+        }
+      } header: {
+        Text("Subscriptions")
+      } footer: {
+        Text("Add by RSS URL or import an OPML file exported from Apple Podcasts.")
+      }
+
+      Section {
+        Picker("Default Region", selection: $viewModel.selectedRegion) {
+          ForEach(Constants.podcastRegions, id: \.code) { region in
+            Text(region.name).tag(region.code)
+          }
+        }
+        .onChange(of: viewModel.selectedRegion) { _, newValue in
+          viewModel.setSelectedRegion(newValue)
+        }
+      } header: {
+        Text("Discovery")
+      } footer: {
+        Text("Region for browsing top podcasts on Home.")
+      }
+
+      Section {
+        Button("Listening Stats") {
+          showListeningStats = true
+        }
+      } header: {
+        Text("Insights")
+      } footer: {
+        Text("View your listening history, top shows, and trends.")
+      }
+
+      Section {
+        Picker("App Language", selection: Binding(
+          get: { LanguageManager.shared.appLanguage },
+          set: { LanguageManager.shared.appLanguage = $0 }
+        )) {
+          ForEach(LanguageManager.availableLanguages) { language in
+            Text(language.displayName).tag(language.id)
+          }
+        }
+      } header: {
+        Text("Language")
+      } footer: {
+        Text("Choose the language for the app interface. 'System Default' follows your device language.")
+      }
+
+      Section {
+        LabeledContent("Version") {
+          Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0")
             .foregroundStyle(.secondary)
         }
+      } header: {
+        Text("About")
       }
     }
     .formStyle(.grouped)
     .padding()
+    .sheet(isPresented: $showAddFeedSheet) {
+      AddFeedView(viewModel: viewModel, modelContext: modelContext) {
+        showAddFeedSheet = false
+      }
+    }
+    .sheet(isPresented: $showListeningStats) {
+      NavigationStack {
+        ListeningStatsView()
+          .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+              Button("Close") { showListeningStats = false }
+            }
+          }
+      }
+      .frame(minWidth: 500, minHeight: 400)
+    }
+    .onAppear {
+      viewModel.loadFeeds(modelContext: modelContext)
+    }
   }
 }
 
@@ -90,16 +171,28 @@ struct AppearanceSettingsTab: View {
   @State private var viewModel = SettingsViewModel()
 
   var body: some View {
+    @Bindable var viewModel = viewModel
+
     Form {
       Section {
-        Toggle("Show Episode Artwork", isOn: Binding(
-          get: { viewModel.showEpisodeArtwork },
-          set: { viewModel.setShowEpisodeArtwork($0) }
-        ))
+        Toggle("Show Episode Artwork", isOn: $viewModel.showEpisodeArtwork)
+          .onChange(of: viewModel.showEpisodeArtwork) { _, newValue in
+            viewModel.setShowEpisodeArtwork(newValue)
+          }
+
+        Toggle("For You Recommendations", isOn: $viewModel.showForYouRecommendations)
+          .onChange(of: viewModel.showForYouRecommendations) { _, newValue in
+            viewModel.setShowForYouRecommendations(newValue)
+          }
+
+        Toggle("Trending Episodes", isOn: $viewModel.showTrendingEpisodes)
+          .onChange(of: viewModel.showTrendingEpisodes) { _, newValue in
+            viewModel.setShowTrendingEpisodes(newValue)
+          }
       } header: {
         Text("Episode Lists")
       } footer: {
-        Text("Hide artwork in episode lists to reduce memory usage.")
+        Text("Show AI-powered episode suggestions and trending episodes on Home. Hide artwork to reduce memory usage.")
       }
     }
     .formStyle(.grouped)
@@ -110,20 +203,26 @@ struct AppearanceSettingsTab: View {
 // MARK: - Sync Settings Tab
 
 struct SyncSettingsTab: View {
-  private var syncManager: BackgroundSyncManager { .shared }
+  @State private var viewModel = SettingsViewModel()
 
   var body: some View {
+    @Bindable var syncManager = BackgroundSyncManager.shared
+    @Bindable var viewModel = viewModel
+
     Form {
       Section {
-          Toggle("Enable Background Sync", isOn: Binding(get: { syncManager.isBackgroundSyncEnabled }, set: { syncManager.isBackgroundSyncEnabled = $0 }))
+        Toggle("Enable Background Sync", isOn: $syncManager.isBackgroundSyncEnabled)
 
         if syncManager.isBackgroundSyncEnabled {
-          Toggle("New Episode Notifications", isOn: Binding(get: { syncManager.isNotificationsEnabled }, set: { syncManager.isNotificationsEnabled = $0 }))
+          Toggle("New Episode Notifications", isOn: $syncManager.isNotificationsEnabled)
+
+          Toggle("Auto-Download New Episodes", isOn: $viewModel.autoDownloadNewEpisodes)
+            .onChange(of: viewModel.autoDownloadNewEpisodes) { _, newValue in
+              viewModel.setAutoDownloadNewEpisodes(newValue)
+            }
 
           if let lastSync = syncManager.lastSyncDate {
-            HStack {
-              Text("Last Sync")
-              Spacer()
+            LabeledContent("Last Sync") {
               Text(lastSync.formatted(date: .abbreviated, time: .shortened))
                 .foregroundStyle(.secondary)
             }
@@ -154,21 +253,23 @@ struct PlaybackSettingsTab: View {
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
   var body: some View {
+    @Bindable var viewModel = viewModel
+
     Form {
       Section {
         Picker("Default Playback Speed", selection: $viewModel.defaultPlaybackSpeed) {
           ForEach(playbackSpeeds, id: \.self) { speed in
-            Text(formatSpeed(speed)).tag(speed)
+            Text(Formatters.formatSpeed(speed)).tag(speed)
           }
         }
         .onChange(of: viewModel.defaultPlaybackSpeed) { _, newValue in
           viewModel.setDefaultPlaybackSpeed(newValue)
         }
 
-        Toggle("Auto-Play Random Episode", isOn: Binding(
-          get: { viewModel.autoPlayNextEpisode },
-          set: { viewModel.setAutoPlayNextEpisode($0) }
-        ))
+        Toggle("Auto-Play Next Episode", isOn: $viewModel.autoPlayNextEpisode)
+          .onChange(of: viewModel.autoPlayNextEpisode) { _, newValue in
+            viewModel.setAutoPlayNextEpisode(newValue)
+          }
       } header: {
         Text("Playback")
       } footer: {
@@ -179,34 +280,27 @@ struct PlaybackSettingsTab: View {
     .padding()
   }
 
-  private func formatSpeed(_ speed: Float) -> String {
-    if speed == 1.0 {
-      return "1x"
-    } else if speed.truncatingRemainder(dividingBy: 1) == 0 {
-      return "\(Int(speed))x"
-    } else {
-      return String(format: "%.2gx", speed)
-    }
-  }
 }
 
 // MARK: - Transcript Settings Tab
 
 struct TranscriptSettingsTab: View {
   @State private var viewModel = SettingsViewModel()
-  private var whisperManager: WhisperModelManager { .shared }
 
   var body: some View {
+    @Bindable var viewModel = viewModel
+    @Bindable var subtitleSettings = SubtitleSettingsManager.shared
+
     Form {
       // MARK: Engine selection
       Section {
-        Picker("Engine", selection: Binding(
-          get: { viewModel.selectedTranscriptEngine },
-          set: { viewModel.setTranscriptEngine($0) }
-        )) {
+        Picker("Engine", selection: $viewModel.selectedTranscriptEngine)  {
           ForEach(TranscriptEngine.allCases) { engine in
             Text(engine.displayName).tag(engine)
           }
+        }
+        .onChange(of: viewModel.selectedTranscriptEngine) { _, newValue in
+          viewModel.setTranscriptEngine(newValue)
         }
 
         Picker("Language", selection: $viewModel.selectedTranscriptLocale) {
@@ -220,10 +314,8 @@ struct TranscriptSettingsTab: View {
 
         // Apple Speech model status row
         if viewModel.selectedTranscriptEngine == .appleSpeech {
-          HStack {
-            Text("Speech Model Status")
-            Spacer()
-            appleSpeechStatusView
+          LabeledContent("Speech Model Status") {
+            AppleSpeechStatusView(viewModel: viewModel)
           }
         }
       } header: {
@@ -233,6 +325,30 @@ struct TranscriptSettingsTab: View {
           ? "\(viewModel.selectedTranscriptEngine.description)"
           : "Download the Apple Speech model for your preferred language. Each podcast uses its own language from the RSS feed."
         )
+      }
+
+      // MARK: Translation
+      Section {
+        Picker("Default Translation Language", selection: $subtitleSettings.targetLanguage) {
+          ForEach(TranslationTargetLanguage.allCases, id: \.self) { language in
+            Text(language.displayName).tag(language)
+          }
+        }
+
+        Toggle("Auto-Translate on Load", isOn: $subtitleSettings.autoTranslateOnLoad)
+      } header: {
+        Text("Translation")
+      } footer: {
+        Text("Default target language for translating transcripts and episode descriptions.")
+      }
+
+      // MARK: Auto-generate
+      Section {
+        Toggle("Auto-Generate Transcripts", isOn: $subtitleSettings.autoGenerateTranscripts)
+      } header: {
+        Text("Automation")
+      } footer: {
+        Text("Automatically generate transcripts when episodes are downloaded.")
       }
 
       // MARK: Whisper models list
@@ -257,8 +373,14 @@ struct TranscriptSettingsTab: View {
     }
   }
 
-  @ViewBuilder
-  private var appleSpeechStatusView: some View {
+}
+
+// MARK: - Apple Speech Status View
+
+struct AppleSpeechStatusView: View {
+  let viewModel: SettingsViewModel
+
+  var body: some View {
     switch viewModel.transcriptModelStatus {
     case .checking:
       HStack(spacing: 8) {
@@ -275,9 +397,10 @@ struct TranscriptSettingsTab: View {
       HStack(spacing: 8) {
         ProgressView(value: progress).frame(width: 80)
         Text("\(Int(progress * 100))%").foregroundStyle(.secondary)
-        Button { viewModel.cancelTranscriptDownload() } label: {
-          Image(systemName: "xmark.circle.fill")
+        Button("Cancel download", systemImage: "xmark.circle.fill") {
+          viewModel.cancelTranscriptDownload()
         }
+        .labelStyle(.iconOnly)
         .buttonStyle(.plain)
       }
     case .ready:
@@ -307,40 +430,39 @@ struct MacWhisperModelRow: View {
     let status = manager.status(for: variant)
     let isSelected = manager.selectedModel == variant
 
-    HStack(spacing: 10) {
-      Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-        .foregroundStyle(isSelected ? .blue : .secondary)
-        .onTapGesture {
-          if status.isReady { manager.setSelectedModel(variant) }
-        }
-
-      VStack(alignment: .leading, spacing: 2) {
-        HStack(spacing: 6) {
-          Text(variant.displayName)
-            .fontWeight(isSelected ? .semibold : .regular)
-          Text(variant.approximateSize)
-            .font(.caption).foregroundStyle(.secondary)
-          if variant == .platformDefault {
-            Text("Recommended")
-              .font(.caption2)
-              .padding(.horizontal, 5).padding(.vertical, 2)
-              .background(Color.blue.opacity(0.15))
-              .foregroundStyle(.blue)
-              .clipShape(Capsule())
-          }
-        }
-        Text(variant.accuracyNote)
-          .font(.caption2).foregroundStyle(.secondary)
-      }
-
-      Spacer()
-
-      macWhisperAction(for: variant, status: status)
-    }
-    .contentShape(Rectangle())
-    .onTapGesture {
+    Button(action: {
       if status.isReady { manager.setSelectedModel(variant) }
+    }) {
+      HStack(spacing: 10) {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+          .foregroundStyle(isSelected ? .blue : .secondary)
+
+        VStack(alignment: .leading, spacing: 2) {
+          HStack(spacing: 6) {
+            Text(variant.displayName)
+              .fontWeight(isSelected ? .semibold : .regular)
+            Text(variant.approximateSize)
+              .font(.caption).foregroundStyle(.secondary)
+            if variant == .platformDefault {
+              Text("Recommended")
+                .font(.caption2)
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(Color.blue.opacity(0.15))
+                .foregroundStyle(.blue)
+                .clipShape(Capsule())
+            }
+          }
+          Text(variant.accuracyNote)
+            .font(.caption2).foregroundStyle(.secondary)
+        }
+
+        Spacer()
+
+        macWhisperAction(for: variant, status: status)
+      }
+      .contentShape(Rectangle())
     }
+    .buttonStyle(.plain)
   }
 
   @ViewBuilder
@@ -356,9 +478,10 @@ struct MacWhisperModelRow: View {
       HStack(spacing: 8) {
         ProgressView(value: progress).frame(width: 80)
         Text("\(Int(progress * 100))%").font(.caption).foregroundStyle(.secondary)
-        Button { manager.cancelDownload(variant) } label: {
-          Image(systemName: "xmark.circle.fill")
+        Button("Cancel download", systemImage: "xmark.circle.fill") {
+          manager.cancelDownload(variant)
         }
+        .labelStyle(.iconOnly)
         .buttonStyle(.plain)
       }
     case .ready:
@@ -384,15 +507,13 @@ struct MacWhisperModelRow: View {
 // MARK: - AI Settings Tab
 
 struct AISettingsTab: View {
+  @State private var showAISettings = false
+
   var body: some View {
     Form {
       Section {
-        NavigationLink {
-          AISettingsView()
-        } label: {
-          HStack {
-            Text("Configure AI Providers")
-            Spacer()
+        Button(action: { showAISettings = true }) {
+          LabeledContent("Configure AI Providers") {
             if AISettingsManager.shared.hasConfiguredProvider {
               Text(AISettingsManager.shared.selectedProvider.displayName)
                 .foregroundStyle(.secondary)
@@ -402,6 +523,7 @@ struct AISettingsTab: View {
             }
           }
         }
+        .buttonStyle(.plain)
       } header: {
         Text("AI Analysis")
       } footer: {
@@ -410,6 +532,17 @@ struct AISettingsTab: View {
     }
     .formStyle(.grouped)
     .padding()
+    .sheet(isPresented: $showAISettings) {
+      NavigationStack {
+        AISettingsView()
+          .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+              Button("Close") { showAISettings = false }
+            }
+          }
+      }
+      .frame(minWidth: 500, minHeight: 400)
+    }
   }
 }
 
@@ -555,16 +688,16 @@ struct StorageSettingsTab: View {
   private func calculateStorageInfo() {
     Task {
       let cacheSize = await calculateImageCacheSize()
-      await MainActor.run { imageCacheSize = formatBytes(cacheSize) }
+      imageCacheSize = formatBytes(cacheSize)
 
       let audioSize = await calculateDownloadedAudioSize()
-      await MainActor.run { downloadedAudioSize = formatBytes(audioSize) }
+      downloadedAudioSize = formatBytes(audioSize)
 
       let captionsSize = await calculateTranscriptsSize()
-      await MainActor.run { transcriptsSize = formatBytes(captionsSize) }
+      transcriptsSize = formatBytes(captionsSize)
 
       let analysisCount = countAIAnalyses()
-      await MainActor.run { aiAnalysisCount = analysisCount }
+      aiAnalysisCount = analysisCount
     }
   }
 
@@ -646,11 +779,9 @@ struct StorageSettingsTab: View {
 
       await FileStorageManager.shared.clearAllAudioFiles()
 
-      await MainActor.run {
-        isClearingData = false
-        clearingMessage = ""
-        downloadedAudioSize = "0 bytes"
-      }
+      isClearingData = false
+      clearingMessage = ""
+      downloadedAudioSize = "0 bytes"
     }
   }
 
@@ -672,11 +803,9 @@ struct StorageSettingsTab: View {
 
       await FileStorageManager.shared.clearAllCaptionFiles()
 
-      await MainActor.run {
-        isClearingData = false
-        clearingMessage = ""
-        transcriptsSize = "0 bytes"
-      }
+      isClearingData = false
+      clearingMessage = ""
+      transcriptsSize = "0 bytes"
     }
   }
 
@@ -701,11 +830,9 @@ struct StorageSettingsTab: View {
         try? modelContext.save()
       }
 
-      await MainActor.run {
-        isClearingData = false
-        clearingMessage = ""
-        aiAnalysisCount = 0
-      }
+      isClearingData = false
+      clearingMessage = ""
+      aiAnalysisCount = 0
     }
   }
 }

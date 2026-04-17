@@ -27,10 +27,21 @@ class ShortcutsAIService {
     var isProcessing = false
     var lastResult: String?
     var lastError: String?
+
+    /// The currently selected (active) shortcut name.
     var shortcutName: String {
         didSet {
             UserDefaults.standard.set(shortcutName, forKey: "shortcuts_ai_name")
+            // Keep it present in the saved list
+            if !shortcutNames.contains(shortcutName) {
+                shortcutNames.append(shortcutName)
+            }
         }
+    }
+
+    /// All saved shortcut names (the selectable list).
+    var shortcutNames: [String] {
+        didSet { saveShortcutNames() }
     }
 
     // Continuation for async/await support
@@ -41,9 +52,51 @@ class ShortcutsAIService {
     static let defaultShortcutName = "PA-WithAIViaGPT" // CHANGE THIS TO THE NAME OF YOUR SHORTCUT
 
     private init() {
-        self.shortcutName = UserDefaults.standard.string(forKey: "shortcuts_ai_name")
-            ?? Self.defaultShortcutName
+        // Load the saved list, falling back to the legacy single-name key.
+        // Use a local variable so the assignment to shortcutName below
+        // never reads self.shortcutNames through @Observable during init.
+        let loadedNames: [String]
+        if let data = UserDefaults.standard.data(forKey: "shortcuts_ai_names"),
+           let decoded = try? JSONDecoder().decode([String].self, from: data),
+           !decoded.isEmpty {
+            loadedNames = decoded
+        } else {
+            let legacy = UserDefaults.standard.string(forKey: "shortcuts_ai_name")
+                ?? Self.defaultShortcutName
+            loadedNames = [legacy]
+        }
+        self.shortcutNames = loadedNames
+
+        // Resolve the active name without touching self.shortcutNames
+        let saved = UserDefaults.standard.string(forKey: "shortcuts_ai_name") ?? loadedNames[0]
+        self.shortcutName = loadedNames.contains(saved) ? saved : loadedNames[0]
+
         setupNotificationObserver()
+    }
+
+    // MARK: - Shortcut List Management
+
+    func addShortcutName(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !shortcutNames.contains(trimmed) else { return }
+        shortcutNames.append(trimmed)
+        shortcutName = trimmed  // auto-select the newly added shortcut
+    }
+
+    func removeShortcutName(_ name: String) {
+        shortcutNames.removeAll { $0 == name }
+        if shortcutNames.isEmpty {
+            shortcutNames = [Self.defaultShortcutName]
+        }
+        if shortcutName == name {
+            shortcutName = shortcutNames[0]
+        }
+    }
+
+    private func saveShortcutNames() {
+        if let data = try? JSONEncoder().encode(shortcutNames) {
+            UserDefaults.standard.set(data, forKey: "shortcuts_ai_names")
+        }
     }
 
     // MARK: - Setup
@@ -395,10 +448,7 @@ class ShortcutsAIService {
         return CloudAnalysisResult(
             type: analysisType,
             content: result,
-            parsedSummary: nil,
-            parsedEntities: nil,
-            parsedHighlights: nil,
-            parsedFullAnalysis: nil,
+            parsedAnalysis: nil,
             provider: .applePCC,
             model: "Shortcuts",
             timestamp: Date()
@@ -417,67 +467,9 @@ class ShortcutsAIService {
         let languageInstruction = settings.analysisLanguage.getLanguageInstruction()
 
         switch analysisType {
-        case .summary:
+        case .analysis:
             return """
-            Please provide a comprehensive summary of this podcast episode.
-
-            Podcast: \(podcastTitle)
-            Episode: \(episodeTitle)
-
-            \(languageInstruction)
-
-            Transcript:
-            \(transcript)
-
-            Provide:
-            1. A 2-3 paragraph summary
-            2. Main topics discussed (bullet points)
-            3. Key takeaways (bullet points)
-            4. Who would benefit from this episode
-            """
-
-        case .entities:
-            return """
-            Please extract all named entities from this podcast episode.
-
-            Podcast: \(podcastTitle)
-            Episode: \(episodeTitle)
-
-            \(languageInstruction)
-
-            Transcript:
-            \(transcript)
-
-            List:
-            1. People mentioned (names, roles if known)
-            2. Organizations or companies
-            3. Products or services
-            4. Locations
-            5. Books, articles, or resources mentioned
-            """
-
-        case .highlights:
-            return """
-            Please identify the key highlights from this podcast episode.
-
-            Podcast: \(podcastTitle)
-            Episode: \(episodeTitle)
-
-            \(languageInstruction)
-
-            Transcript:
-            \(transcript)
-
-            Provide:
-            1. Top 5 highlights or key moments
-            2. The best quote from the episode
-            3. Any action items mentioned
-            4. Interesting or surprising facts
-            """
-
-        case .fullAnalysis:
-            return """
-            Please provide a complete analysis of this podcast episode.
+            Please provide one complete analysis of this podcast episode.
 
             Podcast: \(podcastTitle)
             Episode: \(episodeTitle)
@@ -490,11 +482,14 @@ class ShortcutsAIService {
             Provide:
             1. Executive Summary (2-3 paragraphs)
             2. Main Topics Discussed
-            3. Key Insights and Learnings
-            4. Notable Quotes
-            5. Actionable Advice
-            6. People and Organizations Mentioned
-            7. Conclusion
+            3. Key Takeaways
+            4. Key Insights and Learnings
+            5. Target Audience and engagement level
+            6. People, organizations, products, locations, and resources mentioned
+            7. Highlights and notable quotes
+            8. Action items or actionable advice
+            9. Controversial or entertaining moments if present
+            10. Conclusion
             """
         }
     }

@@ -225,6 +225,78 @@ class ApplePodcastService: Sendable {
         return response.results.first?.trackViewUrl
     }
 
+    // MARK: - Trending Episodes
+
+    /// A trending episode with podcast context
+    struct TrendingEpisode: Identifiable, Sendable {
+        let id: String  // collectionId + episodeTitle
+        let podcastName: String
+        let podcastArtworkUrl: String?
+        let podcastId: String
+        let episode: Episode
+
+        /// Convert to AppleRSSPodcast for navigation reuse
+        var asAppleRSSPodcast: AppleRSSPodcast {
+            AppleRSSPodcast(
+                id: podcastId,
+                artistName: podcastName,
+                name: podcastName,
+                artworkUrl100: podcastArtworkUrl,
+                url: episode.trackViewUrl ?? "",
+                genres: nil,
+                contentAdvisoryRating: nil,
+                releaseDate: nil,
+                kind: nil
+            )
+        }
+    }
+
+    /// Lightweight trending episodes fetch using iTunes Lookup API (no RSS parsing).
+    /// Much faster than the old RSS approach — single JSON call per podcast.
+    /// - Parameters:
+    ///   - topPodcasts: Already-fetched top podcasts to reuse
+    ///   - episodesPerPodcast: Number of latest episodes per podcast (default 2)
+    /// - Returns: Array of trending episodes sorted by release date
+    func fetchTrendingEpisodesFromLookup(
+        topPodcasts: [AppleRSSPodcast],
+        episodesPerPodcast: Int = 2
+    ) async throws -> [TrendingEpisode] {
+        var allTrending: [TrendingEpisode] = []
+
+        await withTaskGroup(of: [TrendingEpisode].self) { group in
+            for podcast in topPodcasts {
+                group.addTask {
+                    do {
+                        let episodes = try await self.fetchEpisodes(
+                            for: Int(podcast.id) ?? 0,
+                            limit: episodesPerPodcast
+                        )
+                        return episodes.map { episode in
+                            TrendingEpisode(
+                                id: "\(podcast.id)_\(episode.trackName)",
+                                podcastName: podcast.name,
+                                podcastArtworkUrl: podcast.artworkUrl100,
+                                podcastId: podcast.id,
+                                episode: episode
+                            )
+                        }
+                    } catch {
+                        return []
+                    }
+                }
+            }
+
+            for await episodes in group {
+                allTrending.append(contentsOf: episodes)
+            }
+        }
+
+        // Sort by release date (newest first)
+        return allTrending.sorted { e1, e2 in
+            (e1.episode.releaseDate ?? "") > (e2.episode.releaseDate ?? "")
+        }
+    }
+
     // Search podcasts
     func searchPodcasts(term: String, limit: Int = 20) async throws -> [Podcast] {
         let encoded = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""

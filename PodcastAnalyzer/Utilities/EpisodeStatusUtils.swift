@@ -120,19 +120,28 @@ struct EpisodeStatusChecker {
 
   // MARK: - Transcript Status
 
-  /// Check if a transcript (SRT file) exists for this episode
+  /// Check if a transcript (SRT file) exists for this episode.
+  /// Path: Captions/{sanitizedPodcast}/{sanitizedEpisode}.srt
   var hasTranscript: Bool {
     let fm = FileManager.default
     let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
     let captionsDir = docsDir.appendingPathComponent("Captions", isDirectory: true)
 
     let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
-    let baseFileName = "\(podcastTitle)_\(episodeTitle)"
+
+    let sanitizedPodcast = podcastTitle
       .components(separatedBy: invalidCharacters)
       .joined(separator: "_")
       .trimmingCharacters(in: .whitespaces)
 
-    let srtPath = captionsDir.appendingPathComponent("\(baseFileName).srt")
+    let sanitizedEpisode = episodeTitle
+      .components(separatedBy: invalidCharacters)
+      .joined(separator: "_")
+      .trimmingCharacters(in: .whitespaces)
+
+    let srtPath = captionsDir
+      .appendingPathComponent(sanitizedPodcast, isDirectory: true)
+      .appendingPathComponent("\(sanitizedEpisode).srt")
     return fm.fileExists(atPath: srtPath.path)
   }
 
@@ -150,10 +159,7 @@ struct EpisodeStatusChecker {
       return false
     }
 
-    return model.hasFullAnalysis
-      || model.hasSummary
-      || model.hasEntities
-      || model.hasHighlights
+    return model.hasAnalysis
       || (model.qaHistoryJSON != nil && !model.qaHistoryJSON!.isEmpty)
   }
 
@@ -179,6 +185,7 @@ final class EpisodeStatusObserver {
   var downloadProgress: Double = 0
   var hasTranscript: Bool = false
   var isTranscribing: Bool = false
+  var isDownloadingModel: Bool = false
   var transcriptProgress: Double = 0
   var hasAIAnalysis: Bool = false
 
@@ -193,7 +200,7 @@ final class EpisodeStatusObserver {
   private let audioURL: String?
 
   @ObservationIgnored
-  private let episodeKey: String
+  let episodeKey: String
 
   // Managers
   @ObservationIgnored
@@ -258,9 +265,39 @@ final class EpisodeStatusObserver {
     } onChange: {
       Task { @MainActor [weak self] in
         guard let self, !self.isCleaned else { return }
-        self.updateDownloadStatus()
+        // Fast-path: only run the expensive updateDownloadStatus (which does
+        // synchronous disk I/O) when THIS episode's state actually changed.
+        // Without this guard every progress tick for ANY download triggers
+        // disk checks for ALL visible episodes.
+        if self.stateChangedForThisEpisode() {
+          self.updateDownloadStatus()
+        }
         self.observeDownloadManager()
       }
+    }
+  }
+
+  /// Cheap check — returns true when the download state for this specific
+  /// episode differs from the last value we stored.
+  /// Reads inFlightProgress (non-observable) for progress comparison to
+  /// avoid creating additional @Observable subscriptions on progress ticks.
+  private func stateChangedForThisEpisode() -> Bool {
+    // Check non-observable progress first for actively downloading episodes
+    if case .downloading = downloadState,
+       let newP = downloadManager.inFlightProgress[episodeKey] {
+      return abs(newP - downloadProgress) >= 0.01
+    }
+    let dictState = downloadManager.downloadStates[episodeKey]
+    switch (dictState, downloadState) {
+    case (nil, .notDownloaded):
+      return false
+    case (.downloading, .downloading):
+      // Progress comparison already handled above via inFlightProgress
+      return false
+    case let (new?, old) where new == old:
+      return false
+    default:
+      return true
     }
   }
 
@@ -292,6 +329,7 @@ final class EpisodeStatusObserver {
       episodeTitle: episodeTitle,
       podcastTitle: podcastTitle
     )
+    let previousState = downloadState
     downloadState = state
 
     switch state {
@@ -317,8 +355,16 @@ final class EpisodeStatusObserver {
       downloadProgress = 0
     }
 
-    // Also check transcript after download state changes (download completion enables transcript)
-    updateTranscriptStatus()
+    // Only check transcript status when transitioning into .downloaded — the transcript file
+    // cannot appear or disappear during a progress tick, and hasTranscript does synchronous
+    // disk I/O that blocks @MainActor unnecessarily on every throttled progress update.
+    if case .downloaded = state {
+      if case .downloaded = previousState {
+        // Already was downloaded — no transition, skip disk I/O
+      } else {
+        updateTranscriptStatus()
+      }
+    }
   }
 
   private func updateTranscriptStatus() {
@@ -335,20 +381,28 @@ final class EpisodeStatusObserver {
       isTranscribing = true
       // Extract progress from job status
       switch job.status {
-      case .transcribing(let progress), .downloadingModel(let progress):
+      case .transcribing(let progress):
+        isDownloadingModel = false
+        transcriptProgress = progress
+      case .downloadingModel(let progress):
+        isDownloadingModel = true
         transcriptProgress = progress
       case .queued:
+        isDownloadingModel = false
         transcriptProgress = 0
       case .completed:
+        isDownloadingModel = false
         transcriptProgress = 1.0
         isTranscribing = false
         hasTranscript = true
       case .failed:
+        isDownloadingModel = false
         transcriptProgress = 0
         isTranscribing = false
       }
     } else {
       isTranscribing = false
+      isDownloadingModel = false
       transcriptProgress = hasTranscript ? 1.0 : 0
     }
   }
@@ -368,10 +422,7 @@ final class EpisodeStatusObserver {
       return
     }
 
-    hasAIAnalysis = model.hasFullAnalysis
-      || model.hasSummary
-      || model.hasEntities
-      || model.hasHighlights
+    hasAIAnalysis = model.hasAnalysis
       || (model.qaHistoryJSON != nil && !model.qaHistoryJSON!.isEmpty)
   }
 

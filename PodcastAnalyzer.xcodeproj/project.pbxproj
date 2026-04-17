@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		154AA7D72F50161700848582 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = BB0000022F4F0001000NUKE0 /* Nuke */; };
+		154AA7D82F50161700848582 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = BB0000032F4F0001000NUKE0 /* NukeUI */; };
 		155164762ED374440015567A /* ZMarkupParser in Frameworks */ = {isa = PBXBuildFile; productRef = 155164752ED374440015567A /* ZMarkupParser */; };
 		158240912ED303EC000ABA90 /* FeedKit in Frameworks */ = {isa = PBXBuildFile; productRef = 158240902ED303EC000ABA90 /* FeedKit */; };
 		158240932ED303EC000ABA90 /* XMLKit in Frameworks */ = {isa = PBXBuildFile; productRef = 158240922ED303EC000ABA90 /* XMLKit */; };
@@ -61,6 +63,7 @@
 		15ED5EED2EC44BC6001B6CD7 /* PodcastAnalyzer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PodcastAnalyzer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		15ED5EFC2EC44BC9001B6CD7 /* PodcastAnalyzerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PodcastAnalyzerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		15ED5F062EC44BC9001B6CD7 /* PodcastAnalyzerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PodcastAnalyzerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AC576B882F776FE9007B884A /* PodcastAnalyzer.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = PodcastAnalyzer.xctestplan; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -102,11 +105,6 @@
 			path = PodcastAnalyzerTests;
 			sourceTree = "<group>";
 		};
-		15ED5F092EC44BC9001B6CD7 /* PodcastAnalyzerUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = PodcastAnalyzerUITests;
-			sourceTree = "<group>";
-		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -123,6 +121,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				154AA7D82F50161700848582 /* NukeUI in Frameworks */,
+				154AA7D72F50161700848582 /* Nuke in Frameworks */,
 				155164762ED374440015567A /* ZMarkupParser in Frameworks */,
 				158240912ED303EC000ABA90 /* FeedKit in Frameworks */,
 				158240932ED303EC000ABA90 /* XMLKit in Frameworks */,
@@ -159,9 +159,9 @@
 		15ED5EE42EC44BC6001B6CD7 = {
 			isa = PBXGroup;
 			children = (
+				AC576B882F776FE9007B884A /* PodcastAnalyzer.xctestplan */,
 				15ED5EEF2EC44BC6001B6CD7 /* PodcastAnalyzer */,
 				15ED5EFF2EC44BC9001B6CD7 /* PodcastAnalyzerTests */,
-				15ED5F092EC44BC9001B6CD7 /* PodcastAnalyzerUITests */,
 				15AEEAE22F26464200D90D05 /* PodcastAnalyzerWidget */,
 				155164742ED374440015567A /* Frameworks */,
 				15ED5EEE2EC44BC6001B6CD7 /* Products */,
@@ -269,9 +269,6 @@
 			);
 			dependencies = (
 				15ED5F082EC44BC9001B6CD7 /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				15ED5F092EC44BC9001B6CD7 /* PodcastAnalyzerUITests */,
 			);
 			name = PodcastAnalyzerUITests;
 			packageProductDependencies = (

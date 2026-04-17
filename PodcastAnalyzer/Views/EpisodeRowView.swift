@@ -26,6 +26,12 @@ struct EpisodeRowView: View {
   let onDeleteRequested: () -> Void
   let onTogglePlayed: () -> Void
 
+  /// When non-nil, this pre-computed download state is used instead of reading
+  /// directly from DownloadManager. Pass this from a parent that already has the
+  /// state (e.g. EpisodeListView reads it once per refresh, not on every tick).
+  /// This prevents every row from re-rendering on every download progress update.
+  let precomputedDownloadState: DownloadState?
+
   /// Primary initializer for PodcastEpisodeInfo (used in EpisodeListView)
   init(
     episode: PodcastEpisodeInfo,
@@ -34,6 +40,7 @@ struct EpisodeRowView: View {
     podcastLanguage: String,
     downloadManager: DownloadManager = DownloadManager.shared,
     episodeModel: EpisodeDownloadModel? = nil,
+    precomputedDownloadState: DownloadState? = nil,
     showArtwork: Bool = true,
     onToggleStar: @escaping () -> Void,
     onDownload: @escaping () -> Void,
@@ -46,12 +53,12 @@ struct EpisodeRowView: View {
     self.podcastLanguage = podcastLanguage
     self.downloadManager = downloadManager
     self.episodeModel = episodeModel
+    self.precomputedDownloadState = precomputedDownloadState
     self.showArtwork = showArtwork
     self.onToggleStar = onToggleStar
     self.onDownload = onDownload
     self.onDeleteRequested = onDeleteRequested
     self.onTogglePlayed = onTogglePlayed
-    self.statusChecker = EpisodeStatusChecker(episode: episode, podcastTitle: podcastTitle)
   }
 
   /// Convenience initializer for LibraryEpisode (used in Library views)
@@ -71,64 +78,104 @@ struct EpisodeRowView: View {
     self.podcastLanguage = libraryEpisode.language
     self.downloadManager = downloadManager
     self.episodeModel = episodeModel
+    self.precomputedDownloadState = nil
     self.showArtwork = showArtwork
     self.onToggleStar = onToggleStar
     self.onDownload = onDownload
     self.onDeleteRequested = onDeleteRequested
     self.onTogglePlayed = onTogglePlayed
-    self.statusChecker = EpisodeStatusChecker(episode: libraryEpisode.episodeInfo, podcastTitle: libraryEpisode.podcastTitle)
   }
 
   @Environment(\.modelContext) private var modelContext
   private var audioManager: EnhancedAudioManager {
     EnhancedAudioManager.shared
   }
+  private var transcriptManager: TranscriptManager { .shared }
   private let applePodcastService = ApplePodcastService()
   @State private var shareTask: Task<Void, Never>?
-  @State private var hasAIAnalysis: Bool = false
   @State private var cachedPlainDescription: String?
+  @State private var hasAIAnalysis = false
 
-  // Transcript state - computed from TranscriptManager (reactive) + filesystem check
-  @State private var hasCaptionsOnDisk: Bool = false
+  // MARK: - Download state
+  //
+  // PERFORMANCE: Do NOT read downloadManager.downloadStates here as a computed property.
+  // That makes this view a dependency of the @Observable downloadStates dictionary,
+  // causing every row to re-render on every download progress tick.
+  //
+  // Instead, `precomputedDownloadState` is passed from the parent (e.g. EpisodeListView
+  // snapshots the state once per row). When nil (Library views with already-downloaded
+  // episodes), we fall back to a lazy one-time read via statusChecker.
+  //
+  // The statusChecker is only used for non-hot-path properties (episodeKey, hasCaptions,
+  // playbackURL). It is NOT accessed during body evaluation for download state.
 
-  private var activeTranscriptJob: TranscriptJob? {
-    TranscriptManager.shared.activeJobs[jobId]
+  private var downloadState: DownloadState {
+    if let precomputed = precomputedDownloadState { return precomputed }
+    return downloadManager.getDownloadState(
+      episodeTitle: episode.title,
+      podcastTitle: podcastTitle
+    )
+  }
+
+  private var isDownloaded: Bool {
+    if case .downloaded = downloadState { return true }
+    return false
+  }
+
+  private var episodeKey: String {
+    EpisodeKeyUtils.makeKey(podcastTitle: podcastTitle, episodeTitle: episode.title)
+  }
+
+  private var playbackURL: String {
+    if case .downloaded(let path) = downloadState {
+      return URL(fileURLWithPath: path).absoluteString
+    }
+    return episode.audioURL ?? ""
   }
 
   private var hasCaptions: Bool {
-    if case .completed = activeTranscriptJob?.status { return true }
-    return hasCaptionsOnDisk
+    EpisodeStatusChecker(
+      episodeTitle: episode.title,
+      podcastTitle: podcastTitle,
+      audioURL: episode.audioURL
+    ).hasTranscript
+  }
+
+  private var transcriptJob: TranscriptJob? {
+    transcriptManager.activeJobs[episodeKey]
   }
 
   private var isTranscribing: Bool {
-    guard let job = activeTranscriptJob else { return false }
-    switch job.status {
-    case .queued, .downloadingModel, .transcribing: return true
-    case .completed, .failed: return false
+    guard let transcriptJob else { return false }
+    switch transcriptJob.status {
+    case .queued, .downloadingModel, .transcribing:
+      return true
+    case .completed, .failed:
+      return false
     }
   }
 
   private var transcriptProgress: Double? {
-    guard let job = activeTranscriptJob else { return nil }
-    switch job.status {
-    case .queued: return 0.0
-    case .downloadingModel(let p), .transcribing(let p): return p
-    default: return nil
+    guard let transcriptJob else { return nil }
+    switch transcriptJob.status {
+    case .downloadingModel(let progress), .transcribing(let progress):
+      return progress
+    case .queued:
+      return 0
+    case .completed:
+      return 1.0
+    case .failed:
+      return nil
     }
   }
 
   private var isDownloadingModel: Bool {
-    if case .downloadingModel = activeTranscriptJob?.status { return true }
+    guard let transcriptJob else { return false }
+    if case .downloadingModel = transcriptJob.status {
+      return true
+    }
     return false
   }
-
-  // Status checker using centralized utility — created once, reused for all derived properties
-  private let statusChecker: EpisodeStatusChecker
-
-  private var downloadState: DownloadState { statusChecker.downloadState }
-  private var isDownloaded: Bool { statusChecker.isDownloaded }
-  private var playbackURL: String { statusChecker.playbackURL }
-  private var jobId: String { statusChecker.episodeKey }
 
   private var isStarred: Bool { episodeModel?.isStarred ?? false }
   private var isCompleted: Bool { episodeModel?.isCompleted ?? false }
@@ -164,27 +211,27 @@ struct EpisodeRowView: View {
     return stripped.isEmpty ? nil : stripped
   }
 
-  private func checkAIAnalysis() {
-    hasAIAnalysis = statusChecker.hasAIAnalysis(in: modelContext)
-  }
-
   var body: some View {
-    NavigationLink(
-      destination: EpisodeDetailView(
+    VStack(alignment: .leading, spacing: 8) {
+      NavigationLink(value: EpisodeDetailRoute(
         episode: episode,
         podcastTitle: podcastTitle,
         fallbackImageURL: fallbackImageURL,
         podcastLanguage: podcastLanguage
-      )
-    ) {
-      HStack(alignment: .center, spacing: 12) {
-        if showArtwork {
-          episodeThumbnail
+      )) {
+        HStack(alignment: .center, spacing: 12) {
+          if showArtwork {
+            episodeThumbnail
+          }
+          episodeInfo
         }
-        episodeInfo
+        .contentShape(Rectangle())
       }
-      .padding(.vertical, 8)
+      .buttonStyle(.plain)
+
+      bottomStatusBar
     }
+    .padding(.vertical, 8)
     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
       trailingSwipeActions
     }
@@ -195,14 +242,16 @@ struct EpisodeRowView: View {
       contextMenuContent
     }
     .onAppear {
-      checkAIAnalysis()
-      hasCaptionsOnDisk = statusChecker.hasTranscript
-      cachedPlainDescription = plainDescription
-    }
-    .onChange(of: activeTranscriptJob?.status) { _, newStatus in
-      // Refresh filesystem check when job completes (file was just written)
-      if case .completed = newStatus {
-        hasCaptionsOnDisk = true
+      if cachedPlainDescription == nil {
+        cachedPlainDescription = plainDescription
+      }
+      if !hasAIAnalysis {
+        let checker = EpisodeStatusChecker(
+          episodeTitle: episode.title,
+          podcastTitle: podcastTitle,
+          audioURL: episode.audioURL
+        )
+        hasAIAnalysis = checker.hasAIAnalysis(in: modelContext)
       }
     }
   }
@@ -267,11 +316,6 @@ struct EpisodeRowView: View {
           .foregroundStyle(.secondary)
           .lineLimit(3)
       }
-
-      Spacer(minLength: 4)
-
-      // Bottom status bar
-      bottomStatusBar
     }
   }
 
@@ -402,7 +446,7 @@ struct EpisodeRowView: View {
       onPlayNext: {
         guard let audioURL = episode.audioURL else { return }
         let playbackEpisode = PlaybackEpisode(
-          id: statusChecker.episodeKey,
+          id: episodeKey,
           title: episode.title,
           podcastTitle: podcastTitle,
           audioURL: audioURL,
@@ -473,7 +517,7 @@ struct EpisodeRowView: View {
     let imageURL = episode.imageURL ?? fallbackImageURL ?? ""
 
     let playbackEpisode = PlaybackEpisode(
-      id: statusChecker.episodeKey,
+      id: episodeKey,
       title: episode.title,
       podcastTitle: podcastTitle,
       audioURL: playbackURL,

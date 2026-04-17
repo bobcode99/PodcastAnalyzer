@@ -13,6 +13,7 @@
 //
 
 import AVFoundation
+import CoreFoundation
 import Foundation
 import MediaPlayer
 import OSLog
@@ -94,6 +95,7 @@ class EnhancedAudioManager: NSObject {
   var currentTime: TimeInterval = 0
   var duration: TimeInterval = 0
   var playbackRate: Float = 1.0
+  var volume: Float = 1.0
 
   var currentCaption: String = ""
   var captionSegments: [CaptionSegment] = []
@@ -114,6 +116,10 @@ class EnhancedAudioManager: NSObject {
   // Audio interruption handling - track if we should resume after interruption ends
   private var wasPlayingBeforeInterruption: Bool = false
 
+  // Track last values pushed to widget to avoid burning WidgetKit reload budget
+  private var lastWidgetAudioURL: String?
+  private var lastWidgetIsPlaying: Bool?
+
   private var timeObserver: Any?
   // Task-based observers for Swift 6 concurrency
   private var interruptionTask: Task<Void, Never>?
@@ -121,6 +127,7 @@ class EnhancedAudioManager: NSObject {
   private var playerEndedTask: Task<Void, Never>?
   private var playerStalledTask: Task<Void, Never>?
   private var artworkFetchTask: Task<Void, Never>?
+  private var captionLoadTask: Task<Void, Never>?
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "AudioManager")
 
   // Use Unit Separator (U+001F) as delimiter - same as EpisodeDownloadModel
@@ -158,6 +165,26 @@ class EnhancedAudioManager: NSObject {
     UIApplication.shared.beginReceivingRemoteControlEvents()
     #endif
     loadPlaybackRate()
+    registerWidgetNotifications()
+  }
+
+  /// Register a Darwin notification observer so the widget can signal a play/pause
+  /// toggle without bringing the app to the foreground.
+  private func registerWidgetNotifications() {
+    #if os(iOS)
+    CFNotificationCenterAddObserver(
+      CFNotificationCenterGetDarwinNotifyCenter(),
+      nil,
+      { _, _, _, _, _ in
+        Task { @MainActor in
+          EnhancedAudioManager.shared.checkWidgetTogglePlayback()
+        }
+      },
+      "com.jn.PodcastAnalyzer.togglePlayback" as CFString,
+      nil,
+      .deliverImmediately
+    )
+    #endif
   }
 
   private func setupAudioSession() {
@@ -369,6 +396,7 @@ private func handleAudioInterruption(_ notification: Notification) {
 
     let playerItem = AVPlayerItem(url: url)
     player = AVPlayer(playerItem: playerItem)
+    player?.volume = volume
     currentEpisode = episode
 
     // Update Now Playing info with cached duration (will be refined when AVPlayer reports actual duration)
@@ -470,6 +498,11 @@ private func handleAudioInterruption(_ notification: Notification) {
     UserDefaults.standard.set(rate, forKey: Keys.playbackRate)
     updateNowPlayingPlaybackRate()
     logger.info("Playback rate set to \(rate)x")
+  }
+
+  func setVolume(_ vol: Float) {
+    volume = max(0, min(1, vol))
+    player?.volume = volume
   }
 
   // MARK: - Queue Management
@@ -750,7 +783,8 @@ private func handleAudioInterruption(_ notification: Notification) {
   // MARK: - Caption Management
 
   private func loadCaptions(episode: PlaybackEpisode) {
-    Task {
+    captionLoadTask?.cancel()
+    captionLoadTask = Task {
       let fileStorage = FileStorageManager.shared
 
       if await fileStorage.captionFileExists(for: episode.title, podcastTitle: episode.podcastTitle)
@@ -762,10 +796,9 @@ private func handleAudioInterruption(_ notification: Notification) {
           )
           let segments = parseSRT(srtContent)
 
-          await MainActor.run {
-            self.captionSegments = segments
-            logger.info("Loaded \(segments.count) caption segments")
-          }
+          guard !Task.isCancelled else { return }
+          self.captionSegments = segments
+          logger.info("Loaded \(segments.count) caption segments")
         } catch {
           logger.error("Failed to load captions: \(error.localizedDescription)")
         }
@@ -963,11 +996,19 @@ private func handleAudioInterruption(_ notification: Notification) {
 
   // MARK: - Widget Data Updates
 
-  /// Update widget with current playback state
+  /// Update widget with current playback state.
+  /// Always writes fresh data to shared UserDefaults (for progress bar).
+  /// Only reloads the WidgetKit timeline when episode or play/pause state changes
+  /// to avoid exhausting WidgetKit's daily reload budget.
   private func updateWidgetPlaybackData() {
     guard let episode = currentEpisode else {
+      logger.debug("Widget: no current episode — clearing widget data")
       WidgetDataManager.clearPlaybackData()
-      WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+      if lastWidgetAudioURL != nil {
+        WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+        lastWidgetAudioURL = nil
+        lastWidgetIsPlaying = nil
+      }
       return
     }
 
@@ -982,14 +1023,76 @@ private func handleAudioInterruption(_ notification: Notification) {
       lastUpdated: Date()
     )
 
+    // Always write data so progress bar stays current
+    WidgetDataManager.writePlaybackData(data)
+    logger.debug("Widget: wrote data — episode=\"\(episode.title)\" isPlaying=\(self.isPlaying) progress=\(String(format: "%.1f%%", data.progress * 100))")
+
+    // Only trigger a timeline reload (expensive, budget-limited) when the
+    // episode or play/pause state actually changed — not on every 5-second tick
+    let episodeChanged = episode.audioURL != lastWidgetAudioURL
+    let playStateChanged = isPlaying != lastWidgetIsPlaying
+    if episodeChanged || playStateChanged {
+      logger.info("Widget: reloading timeline — episodeChanged=\(episodeChanged) playStateChanged=\(playStateChanged) episode=\"\(episode.title)\"")
+      WidgetDataManager.cacheArtworkIfNeeded(from: episode.imageURL)
+      WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+      lastWidgetAudioURL = episode.audioURL
+      lastWidgetIsPlaying = isPlaying
+    }
+  }
+
+  /// Update widget to show paused state (preserves last episode info)
+  private func clearWidgetData() {
+    guard let episode = currentEpisode else {
+      WidgetDataManager.clearPlaybackData()
+      WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+      return
+    }
+
+    let data = WidgetPlaybackData(
+      episodeTitle: episode.title,
+      podcastTitle: episode.podcastTitle,
+      imageURL: episode.imageURL,
+      audioURL: episode.audioURL,
+      currentTime: currentTime,
+      duration: duration,
+      isPlaying: false,
+      lastUpdated: Date()
+    )
     WidgetDataManager.writePlaybackData(data)
     WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
   }
 
-  /// Clear widget data when playback stops
-  private func clearWidgetData() {
-    WidgetDataManager.clearPlaybackData()
-    WidgetCenter.shared.reloadTimelines(ofKind: "NowPlayingWidget")
+  /// Check if the widget requested a playback toggle
+  private func checkWidgetTogglePlayback() {
+    guard let defaults = WidgetDataManager.sharedDefaults else { return }
+    // Force refresh — the widget extension writes from a different process
+    defaults.synchronize()
+    guard defaults.bool(forKey: "widgetTogglePlayback") else { return }
+    defaults.set(false, forKey: "widgetTogglePlayback")
+    defaults.synchronize()
+    logger.info("Widget: Darwin notification received — isPlaying=\(self.isPlaying), toggling")
+    if isPlaying {
+      pause()
+    } else {
+      resume()
+    }
+  }
+
+  /// Called when the app becomes active — handles the TOGGLE (pause) flag
+  /// from TogglePlaybackIntent (Darwin notification fallback for cold launch).
+  func handleWidgetToggleOnActive() {
+    guard let defaults = WidgetDataManager.sharedDefaults else { return }
+    defaults.synchronize()
+    guard defaults.bool(forKey: "widgetTogglePlayback") else { return }
+    defaults.set(false, forKey: "widgetTogglePlayback")
+    defaults.synchronize()
+
+    logger.info("Widget: toggle on active — isPlaying=\(self.isPlaying)")
+    if isPlaying {
+      pause()
+    } else {
+      resume()
+    }
   }
 
   // MARK: - State Persistence
@@ -1104,20 +1207,21 @@ private func handleAudioInterruption(_ notification: Notification) {
           self.currentTime = newTime
         }
 
-        // Track if duration was previously unknown
-        let previousDuration = self.duration
-
         if let newDuration = self.player?.currentItem?.duration.seconds,
-          newDuration.isFinite
+          newDuration.isFinite, newDuration > 0
         {
           if self.duration != newDuration {
             self.duration = newDuration
-          }
 
-          // Update Now Playing duration when it first becomes available
-          // (transition from 0 or invalid to valid duration)
-          if previousDuration <= 0 && newDuration > 0 {
+            // Update Now Playing info whenever duration changes — covers both the
+            // initial load (0 → real) and the RSS-metadata-vs-actual-file mismatch
+            // case (e.g. 28 min metadata → 34 min actual due to ads).
             self.updateNowPlayingDuration()
+
+            // Persist the corrected duration immediately so the next session
+            // restores the accurate value rather than the stale RSS metadata.
+            self.savePlaybackState()
+            self.updateWidgetPlaybackData()
           }
         }
 
@@ -1137,6 +1241,9 @@ private func handleAudioInterruption(_ notification: Notification) {
           self.postPlaybackPositionUpdate()
           self.updateWidgetPlaybackData()
         }
+
+        // Check for widget toggle playback request
+        self.checkWidgetTogglePlayback()
       }
     }
   }
@@ -1192,14 +1299,13 @@ private func handleAudioInterruption(_ notification: Notification) {
       // Check auto-play setting and try to play random unplayed episode
       let autoPlayEnabled = UserDefaults.standard.bool(forKey: Keys.autoPlayNextEpisode)
       if autoPlayEnabled, !autoPlayCandidates.isEmpty {
-        // Pick a random episode from candidates
-        let randomIndex = Int.random(in: 0..<autoPlayCandidates.count)
-        let nextEpisode = autoPlayCandidates[randomIndex]
+        // Pick the top-scored episode (candidates are kept in Up Next order)
+        let nextEpisode = autoPlayCandidates[0]
         let savedPosition = PlaybackStateCoordinator.savedPlaybackPosition(
           podcastTitle: nextEpisode.podcastTitle,
           episodeTitle: nextEpisode.title
         )
-        logger.info("Auto-playing random episode: \(nextEpisode.title) at \(Int(savedPosition))s")
+        logger.info("Auto-playing next episode: \(nextEpisode.title) at \(Int(savedPosition))s")
         play(
           episode: nextEpisode,
           audioURL: nextEpisode.audioURL,
@@ -1230,6 +1336,8 @@ private func handleAudioInterruption(_ notification: Notification) {
     playerStalledTask = nil
     artworkFetchTask?.cancel()
     artworkFetchTask = nil
+    captionLoadTask?.cancel()
+    captionLoadTask = nil
 
     player?.pause()
     player = nil

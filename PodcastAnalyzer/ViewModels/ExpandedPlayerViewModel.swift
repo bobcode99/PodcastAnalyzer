@@ -374,17 +374,6 @@ final class ExpandedPlayerViewModel {
     )
   }
 
-  func reportConcern() {
-    // Open a report URL or show an alert
-    // For now, this can be a placeholder that opens Apple's podcast report page
-    guard let url = URL(string: "https://www.apple.com/feedback/podcasts.html") else { return }
-    #if os(iOS)
-    UIApplication.shared.open(url)
-    #else
-    NSWorkspace.shared.open(url)
-    #endif
-  }
-
   // MARK: - Queue Actions
 
   func skipToQueueItem(at index: Int) {
@@ -454,22 +443,16 @@ final class ExpandedPlayerViewModel {
           )
           let segments = parseTranscriptSegments(from: content)
 
-          await MainActor.run {
-            self.hasTranscript = true
-            self.transcriptSegments = segments
-            self.lastLoadedEpisodeId = episodeId
-          }
+          self.hasTranscript = true
+          self.transcriptSegments = segments
+          self.lastLoadedEpisodeId = episodeId
         } catch {
-          await MainActor.run {
-            self.hasTranscript = false
-            self.transcriptSegments = []
-          }
-        }
-      } else {
-        await MainActor.run {
           self.hasTranscript = false
           self.transcriptSegments = []
         }
+      } else {
+        self.hasTranscript = false
+        self.transcriptSegments = []
       }
     }
   }

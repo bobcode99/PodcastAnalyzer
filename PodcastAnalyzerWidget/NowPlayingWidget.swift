@@ -2,10 +2,14 @@
 //  NowPlayingWidget.swift
 //  PodcastAnalyzerWidget
 //
-//  Now Playing widget showing current episode with artwork and progress
+//  Now Playing widget showing current episode with artwork and playback control.
+//  Uses .widgetURL for background navigation and Button(intent:) for play/pause isolation.
+//  Uses contentMarginsDisabled() for full-bleed artwork; widgetContentMargins for overlay content.
 //
 
+import AppIntents
 import SwiftUI
+import UIKit
 import WidgetKit
 
 // MARK: - Widget Entry
@@ -13,6 +17,8 @@ import WidgetKit
 struct NowPlayingEntry: TimelineEntry {
   let date: Date
   let playbackData: WidgetPlaybackData?
+  /// Artwork image data loaded from shared container at timeline creation time
+  let artworkData: Data?
 
   static var placeholder: NowPlayingEntry {
     NowPlayingEntry(
@@ -26,60 +32,68 @@ struct NowPlayingEntry: TimelineEntry {
         duration: 1800,
         isPlaying: true,
         lastUpdated: Date()
-      )
+      ),
+      artworkData: nil
     )
   }
 
   static var empty: NowPlayingEntry {
-    NowPlayingEntry(date: Date(), playbackData: nil)
+    NowPlayingEntry(date: Date(), playbackData: nil, artworkData: nil)
   }
 }
 
-// MARK: - Timeline Provider
+// MARK: - Configuration Intent (required by AppIntentTimelineProvider)
 
-struct NowPlayingProvider: TimelineProvider {
+struct NowPlayingConfiguration: WidgetConfigurationIntent {
+  static let title: LocalizedStringResource = "Now Playing"
+  static let description: IntentDescription = "Shows the currently playing podcast episode."
+}
+
+// MARK: - Timeline Provider (iOS 17+ async)
+
+struct NowPlayingProvider: AppIntentTimelineProvider {
+  typealias Entry = NowPlayingEntry
+  typealias Intent = NowPlayingConfiguration
+
   func placeholder(in context: Context) -> NowPlayingEntry {
     .placeholder
   }
 
-  func getSnapshot(in context: Context, completion: @escaping (NowPlayingEntry) -> Void) {
+  func snapshot(for configuration: NowPlayingConfiguration, in context: Context) async -> NowPlayingEntry {
     if context.isPreview {
-      completion(.placeholder)
-    } else {
-      let entry = createEntry()
-      completion(entry)
+      return .placeholder
     }
+    return createEntry()
   }
 
-  func getTimeline(in context: Context, completion: @escaping (Timeline<NowPlayingEntry>) -> Void) {
+  func timeline(for configuration: NowPlayingConfiguration, in context: Context) async -> Timeline<NowPlayingEntry> {
     let entry = createEntry()
 
-    // Refresh every 60 seconds when playing, every 5 minutes when paused
-    let refreshInterval: TimeInterval
-    if let data = entry.playbackData, data.isPlaying {
-      refreshInterval = 60
+    // When playing: refresh every 30s so episode changes appear quickly.
+    // When paused: refresh every 5 minutes (low priority).
+    // The app also calls WidgetCenter.reloadTimelines() on every episode
+    // change/play/pause which triggers an immediate re-render.
+    let refreshInterval: TimeInterval = if let data = entry.playbackData, data.isPlaying {
+      30
     } else {
-      refreshInterval = 300
+      300
     }
 
     let nextUpdate = Date().addingTimeInterval(refreshInterval)
-    let timeline = Timeline(entries: [entry], policy: .after(nextUpdate))
-    completion(timeline)
+    return Timeline(entries: [entry], policy: .after(nextUpdate))
   }
 
   private func createEntry() -> NowPlayingEntry {
-    let playbackData = WidgetDataManager.readPlaybackData()
-
-    // Check if data is stale
-    if let data = playbackData, WidgetDataManager.isDataStale(data) {
+    guard let data = WidgetDataManager.readPlaybackData(),
+          !WidgetDataManager.isDataStale(data) else {
       return .empty
     }
-
-    return NowPlayingEntry(date: Date(), playbackData: playbackData)
+    let artworkData = WidgetDataManager.readArtworkData()
+    return NowPlayingEntry(date: Date(), playbackData: data, artworkData: artworkData)
   }
 }
 
-// MARK: - Widget Views
+// MARK: - Entry View Router
 
 struct NowPlayingWidgetEntryView: View {
   var entry: NowPlayingEntry
@@ -98,177 +112,214 @@ struct NowPlayingWidgetEntryView: View {
 }
 
 // MARK: - Small Widget View
+// Full-bleed artwork + gradient, overlay content uses widgetContentMargins for safe placement
 
 struct SmallWidgetView: View {
   let entry: NowPlayingEntry
+  @Environment(\.widgetContentMargins) private var margins
 
   var body: some View {
     if let data = entry.playbackData {
-      VStack(alignment: .leading, spacing: 6) {
-        HStack(spacing: 8) {
-          // Artwork
-          AsyncImage(url: URL(string: data.imageURL ?? "")) { phase in
-            switch phase {
-            case .success(let image):
-              image
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-            default:
-              Rectangle()
-                .fill(Color.blue.opacity(0.3))
-                .overlay(
-                  Image(systemName: "music.note")
-                    .font(.title2)
-                    .foregroundStyle(.blue)
-                )
+      ZStack {
+        // Layer 1: full-bleed artwork (no padding — contentMarginsDisabled on config)
+        artworkBackground
+
+        // Layer 2: gradient scrim over bottom half
+        LinearGradient(
+          colors: [.clear, .black.opacity(0.72)],
+          startPoint: .center,
+          endPoint: .bottom
+        )
+
+        // Layer 3: overlay content using widgetContentMargins
+        VStack(spacing: 0) {
+          // Play/pause button — top-right
+          HStack {
+            Spacer()
+            if data.isPlaying {
+              Button(intent: TogglePlaybackIntent()) {
+                ZStack {
+                  Circle()
+                    .fill(.black.opacity(0.38))
+                    .frame(width: 34, height: 34)
+                  Image(systemName: "pause.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                }
+                .frame(width: 44, height: 44)
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel("Pause")
+            } else {
+              Button(intent: ResumePlaybackIntent()) {
+                ZStack {
+                  Circle()
+                    .fill(.black.opacity(0.38))
+                    .frame(width: 34, height: 34)
+                  Image(systemName: "play.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .offset(x: 1)
+                }
+                .frame(width: 44, height: 44)
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel("Play")
             }
           }
-          .frame(width: 50, height: 50)
-          .cornerRadius(8)
 
-          // Play button with progress
-          WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying)
+          Spacer()
+
+          // Episode info — bottom-left
+          HStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(data.episodeTitle)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .lineLimit(2)
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.4), radius: 2, x: 0, y: 1)
+
+              Text(data.podcastTitle)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.8))
+                .lineLimit(1)
+                .shadow(color: .black.opacity(0.4), radius: 2, x: 0, y: 1)
+            }
+            Spacer()
+          }
         }
-
-        // Title
-        Text(data.episodeTitle)
-          .font(.caption)
-          .fontWeight(.semibold)
-          .lineLimit(2)
-          .foregroundStyle(.primary)
-
-        // Duration: current / total
-        Text("\(data.formattedCurrentTime) / \(data.formattedDuration)")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
+        .padding(margins)
       }
-      .padding(12)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-      .widgetURL(data.deepLinkURL)
+      .widgetURL(data.episodeDetailURL)
     } else {
       EmptyWidgetView()
+    }
+  }
+
+  @ViewBuilder
+  private var artworkBackground: some View {
+    if let artworkData = entry.artworkData, let uiImage = UIImage(data: artworkData) {
+      Image(uiImage: uiImage)
+        .resizable()
+        .aspectRatio(contentMode: .fill)
+    } else {
+      LinearGradient(
+        colors: [Color(white: 0.18), Color(white: 0.10)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+      .overlay {
+        Image(systemName: "headphones")
+          .font(.system(size: 32))
+          .foregroundStyle(.white.opacity(0.25))
+      }
     }
   }
 }
 
 // MARK: - Medium Widget View
+// Left: square artwork panel sized to widget height. Right: info with widgetContentMargins.
+// GeometryReader reads the full widget height so the artwork is never cropped.
 
 struct MediumWidgetView: View {
   let entry: NowPlayingEntry
+  @Environment(\.widgetContentMargins) private var margins
 
   var body: some View {
     if let data = entry.playbackData {
-      HStack(spacing: 12) {
-        // Artwork
-        AsyncImage(url: URL(string: data.imageURL ?? "")) { phase in
-          switch phase {
-          case .success(let image):
-            image
-              .resizable()
-              .aspectRatio(contentMode: .fill)
-          default:
-            Rectangle()
-              .fill(Color.blue.opacity(0.3))
-              .overlay(
-                Image(systemName: "music.note")
-                  .font(.largeTitle)
-                  .foregroundStyle(.blue)
-              )
-          }
-        }
-        .frame(width: 90, height: 90)
-        .cornerRadius(12)
+      GeometryReader { geo in
+        HStack(spacing: 0) {
+          // Left: square artwork — width equals widget height so the 1:1 artwork
+          // fills exactly without cropping (avoids the .fill + taller-frame clip).
+          artworkPanel
+            .frame(width: geo.size.height, height: geo.size.height)
+            .clipped()
 
-        VStack(alignment: .leading, spacing: 4) {
-          // Episode title
-          Text(data.episodeTitle)
-            .font(.subheadline)
-            .fontWeight(.semibold)
-            .lineLimit(2)
-            .foregroundStyle(.primary)
+          // Right: episode info, padded using widgetContentMargins
+          VStack(alignment: .leading, spacing: 0) {
+            Text(data.episodeTitle)
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .lineLimit(2)
+              .foregroundStyle(.primary)
 
-          // Podcast name
-          Text(data.podcastTitle)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-
-          Spacer()
-
-          // Progress bar with times
-          VStack(alignment: .leading, spacing: 4) {
-            GeometryReader { geo in
-              ZStack(alignment: .leading) {
-                Capsule()
-                  .fill(Color.blue.opacity(0.2))
-                  .frame(height: 4)
-                Capsule()
-                  .fill(Color.blue)
-                  .frame(width: geo.size.width * data.progress, height: 4)
-              }
-            }
-            .frame(height: 4)
-
-            // Time labels: current / total
-            HStack {
-              Text("\(data.formattedCurrentTime) / \(data.formattedDuration)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-              Spacer()
-            }
-          }
-
-          // Play button row
-          HStack(spacing: 8) {
-            WidgetPlayButton(progress: data.progress, isPlaying: data.isPlaying)
-
-            Text(data.isPlaying ? "Playing" : "Paused")
-              .font(.caption)
-              .foregroundStyle(.blue)
-
-            Spacer()
-
-            Text(data.formattedRemainingTime)
+            Text(data.podcastTitle)
               .font(.caption)
               .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .padding(.top, 4)
+
+            Spacer(minLength: 8)
+
+            // Progress bar
+            GeometryReader { barGeo in
+              ZStack(alignment: .leading) {
+                Capsule()
+                  .fill(Color.primary.opacity(0.12))
+                  .frame(height: 3)
+                Capsule()
+                  .fill(Color.blue)
+                  .frame(width: max(barGeo.size.width * data.progress, 0), height: 3)
+              }
+            }
+            .frame(height: 3)
+            .padding(.bottom, 6)
+
+            // Play/pause button — trailing
+            HStack {
+              Spacer()
+              if data.isPlaying {
+                Button(intent: TogglePlaybackIntent()) {
+                  Image(systemName: "pause.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.blue)
+                    .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Pause")
+              } else {
+                Button(intent: ResumePlaybackIntent()) {
+                  Image(systemName: "play.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.blue)
+                    .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Play")
+              }
+            }
           }
+          .padding(.leading, 14)
+          .padding(.trailing, margins.trailing)
+          .padding(.top, margins.top)
+          .padding(.bottom, margins.bottom)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .padding(.vertical, 4)
       }
-      .padding(12)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .widgetURL(data.deepLinkURL)
+      .widgetURL(data.episodeDetailURL)
     } else {
       EmptyWidgetView()
     }
   }
-}
 
-// MARK: - Widget Play Button with Progress
-
-struct WidgetPlayButton: View {
-  let progress: Double
-  let isPlaying: Bool
-
-  var body: some View {
-    ZStack {
-      // Background circle
-      Circle()
-        .stroke(Color.blue.opacity(0.2), lineWidth: 3)
-        .frame(width: 36, height: 36)
-
-      // Progress arc
-      Circle()
-        .trim(from: 0, to: CGFloat(progress))
-        .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-        .frame(width: 36, height: 36)
-        .rotationEffect(.degrees(-90))
-
-      // Play/Pause icon
-      Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-        .font(.system(size: 14, weight: .bold))
-        .foregroundStyle(.blue)
-        .offset(x: isPlaying ? 0 : 1) // Slight offset for play icon visual balance
+  @ViewBuilder
+  private var artworkPanel: some View {
+    if let artworkData = entry.artworkData, let uiImage = UIImage(data: artworkData) {
+      Image(uiImage: uiImage)
+        .resizable()
+        .aspectRatio(contentMode: .fill)
+    } else {
+      LinearGradient(
+        colors: [Color(white: 0.18), Color(white: 0.10)],
+        startPoint: .top,
+        endPoint: .bottom
+      )
+      .overlay {
+        Image(systemName: "headphones")
+          .font(.system(size: 24))
+          .foregroundStyle(.white.opacity(0.25))
+      }
     }
   }
 }
@@ -276,6 +327,8 @@ struct WidgetPlayButton: View {
 // MARK: - Empty Widget View
 
 struct EmptyWidgetView: View {
+  @Environment(\.widgetContentMargins) private var margins
+
   var body: some View {
     VStack(spacing: 8) {
       Image(systemName: "headphones")
@@ -299,13 +352,14 @@ struct NowPlayingWidget: Widget {
   let kind: String = "NowPlayingWidget"
 
   var body: some WidgetConfiguration {
-    StaticConfiguration(kind: kind, provider: NowPlayingProvider()) { entry in
+    AppIntentConfiguration(kind: kind, intent: NowPlayingConfiguration.self, provider: NowPlayingProvider()) { entry in
       NowPlayingWidgetEntryView(entry: entry)
         .containerBackground(.fill.tertiary, for: .widget)
     }
     .configurationDisplayName("Now Playing")
     .description("Shows the currently playing podcast episode with progress.")
     .supportedFamilies([.systemSmall, .systemMedium])
+    .contentMarginsDisabled()
   }
 }
 

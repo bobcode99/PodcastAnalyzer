@@ -23,6 +23,9 @@ extension Notification.Name {
 
   /// Posted when a podcast is updated (from any source)
   static let podcastDataChanged = Notification.Name("podcastDataChanged")
+
+  /// Posted when an episode's completion state changes (played/unplayed)
+  static let episodeCompletionChanged = Notification.Name("episodeCompletionChanged")
 }
 
 @MainActor
@@ -57,6 +60,14 @@ class BackgroundSyncManager {
   var notificationPermissionStatus: UNAuthorizationStatus = .notDetermined
   var lastSyncDate: Date?
   var isSyncing: Bool = false
+  // Progress during an active sync (both are 0 when not syncing)
+  var syncProgressCurrent: Int = 0
+  var syncProgressTotal: Int = 0
+  // Non-nil when the last sync finished with an error
+  var lastSyncError: String?
+
+  // Minimum elapsed time before firing an immediate sync on app-foreground (30 min)
+  private let minimumSyncInterval: TimeInterval = 30 * 60
 
   @ObservationIgnored
   private let rssService = PodcastRssService()
@@ -79,15 +90,14 @@ class BackgroundSyncManager {
     // Check if user has explicitly set the preference
     let isFirstLaunch = UserDefaults.standard.object(forKey: Keys.backgroundSyncEnabled) == nil
     if isFirstLaunch {
-      // First launch: enable background sync by default
       self.isBackgroundSyncEnabled = true
       UserDefaults.standard.set(true, forKey: Keys.backgroundSyncEnabled)
+      self.isNotificationsEnabled = true
+      UserDefaults.standard.set(true, forKey: Keys.notificationsEnabled)
     } else {
-      // User has made a choice, respect it
       self.isBackgroundSyncEnabled = UserDefaults.standard.bool(forKey: Keys.backgroundSyncEnabled)
+      self.isNotificationsEnabled = UserDefaults.standard.bool(forKey: Keys.notificationsEnabled)
     }
-
-    self.isNotificationsEnabled = UserDefaults.standard.bool(forKey: Keys.notificationsEnabled)
     if let date = UserDefaults.standard.object(forKey: Keys.lastSyncDate) as? Date {
       self.lastSyncDate = date
     }
@@ -97,9 +107,7 @@ class BackgroundSyncManager {
 
       // Schedule background refresh if enabled (especially important on first launch)
       if isBackgroundSyncEnabled {
-        await MainActor.run {
-          scheduleBackgroundRefresh()
-        }
+        scheduleBackgroundRefresh()
       }
     }
   }
@@ -144,18 +152,19 @@ class BackgroundSyncManager {
   }
 
   private func handleBackgroundRefresh(task: BGAppRefreshTask) async {
-    // Schedule next refresh
     scheduleBackgroundRefresh()
 
-    // Set expiration handler
+    // Wrap sync in a child Task so the expiration handler can cooperatively cancel it.
+    // setTaskCompleted is called exactly once after syncTask resolves.
+    let syncTask = Task { await self.performSync() }
+
     task.expirationHandler = { [weak self] in
-      self?.logger.warning("Background refresh expired")
-      task.setTaskCompleted(success: false)
+      self?.logger.warning("Background refresh expired — cancelling sync")
+      syncTask.cancel()
     }
 
-    // Perform sync
-    let success = await performSync()
-    task.setTaskCompleted(success: success)
+    let success = await syncTask.value
+    task.setTaskCompleted(success: success && !syncTask.isCancelled)
   }
 
   #else
@@ -193,12 +202,18 @@ class BackgroundSyncManager {
     }
 
     isSyncing = true
-    defer { isSyncing = false }
+    lastSyncError = nil
+    syncProgressCurrent = 0
+    syncProgressTotal = 0
+    defer {
+      isSyncing = false
+      syncProgressCurrent = 0
+      syncProgressTotal = 0
+    }
 
     logger.info("Starting podcast sync...")
 
     let context = ModelContext(container)
-    // Only sync subscribed podcasts (not browsed/cached ones)
     let descriptor = FetchDescriptor<PodcastInfoModel>(
       predicate: #Predicate { $0.isSubscribed == true }
     )
@@ -207,40 +222,59 @@ class BackgroundSyncManager {
       let podcasts = try context.fetch(descriptor)
       logger.info("Found \(podcasts.count) subscribed podcasts to sync")
 
+      syncProgressTotal = podcasts.count
+
       var totalNewEpisodes = 0
       var newEpisodeDetails: [(podcastTitle: String, episodeTitle: String, audioURL: String?, imageURL: String?, language: String)] = []
 
-      // Sync each podcast
-      for podcast in podcasts {
-        let existingEpisodeTitles = Set(podcast.podcastInfo.episodes.map { $0.title })
-
-        do {
-          let updatedPodcast = try await rssService.fetchPodcast(from: podcast.podcastInfo.rssUrl)
-
-          // Find new episodes
-          let newEpisodes = updatedPodcast.episodes.filter { !existingEpisodeTitles.contains($0.title) }
-
-          if !newEpisodes.isEmpty {
-            totalNewEpisodes += newEpisodes.count
-            for episode in newEpisodes.prefix(3) {  // Limit to first 3 for notification
-              newEpisodeDetails.append((
-                podcastTitle: updatedPodcast.title,
-                episodeTitle: episode.title,
-                audioURL: episode.audioURL,
-                imageURL: episode.imageURL ?? updatedPodcast.imageURL,
-                language: updatedPodcast.language
-              ))
-            }
-
-            // Update the podcast with new episodes
-            podcast.podcastInfo = updatedPodcast
-            podcast.lastUpdated = Date()
-
-            logger.info("Found \(newEpisodes.count) new episodes for \(updatedPodcast.title)")
+      // Sync all podcasts in parallel (up to 6 at a time) for faster refresh
+      let maxConcurrent = 6
+      await withTaskGroup(of: (Int, PodcastInfo?, Error?).self) { group in
+        for (index, podcast) in podcasts.enumerated() {
+          // Stop enqueuing new work if the task was cancelled (e.g. BGTask expiration)
+          guard !Task.isCancelled else {
+            group.cancelAll()
+            return
           }
-        } catch {
-          logger.error("Failed to sync \(podcast.podcastInfo.title): \(error.localizedDescription)")
+
+          // Once we've launched maxConcurrent tasks, wait for one to finish before adding more
+          if index >= maxConcurrent {
+            if let result = await group.next() {
+              processSyncResult(
+                result, podcasts: podcasts,
+                totalNewEpisodes: &totalNewEpisodes,
+                newEpisodeDetails: &newEpisodeDetails
+              )
+              syncProgressCurrent += 1
+            }
+          }
+
+          let rssUrl = podcast.podcastInfo.rssUrl
+          group.addTask {
+            do {
+              let updatedPodcast = try await self.rssService.fetchPodcast(from: rssUrl)
+              return (index, updatedPodcast, nil)
+            } catch {
+              return (index, nil, error)
+            }
+          }
         }
+
+        // Collect remaining results
+        for await result in group {
+          processSyncResult(
+            result, podcasts: podcasts,
+            totalNewEpisodes: &totalNewEpisodes,
+            newEpisodeDetails: &newEpisodeDetails
+          )
+          syncProgressCurrent += 1
+        }
+      }
+
+      // Bail out cleanly if the background task was expired mid-sync
+      guard !Task.isCancelled else {
+        logger.info("Sync cancelled mid-flight (background time expired)")
+        return false
       }
 
       // Save changes
@@ -250,8 +284,29 @@ class BackgroundSyncManager {
       lastSyncDate = Date()
       UserDefaults.standard.set(lastSyncDate, forKey: Keys.lastSyncDate)
 
+      // Auto-download new episodes if enabled (cap at 5 per sync)
+      if totalNewEpisodes > 0 && UserDefaults.standard.bool(forKey: "autoDownloadNewEpisodes") {
+        let maxAutoDownload = 5
+        var downloadCount = 0
+        for detail in newEpisodeDetails.prefix(maxAutoDownload) {
+          // Find the episode in the updated podcast data
+          if let podcast = podcasts.first(where: { $0.podcastInfo.title == detail.podcastTitle }),
+             let episode = podcast.podcastInfo.episodes.first(where: { $0.title == detail.episodeTitle }),
+             let audioURL = episode.audioURL, !audioURL.isEmpty {
+            DownloadManager.shared.downloadEpisode(
+              episode: episode,
+              podcastTitle: detail.podcastTitle,
+              language: detail.language
+            )
+            downloadCount += 1
+            logger.info("Auto-downloading: \(episode.title)")
+          }
+        }
+        logger.info("Auto-downloaded \(downloadCount) episodes")
+      }
+
       // Send push notification if there are new episodes and enabled
-      if totalNewEpisodes > 0 && isNotificationsEnabled {
+      if totalNewEpisodes > 0 && isNotificationsEnabled && notificationPermissionStatus == .authorized {
         await sendNewEpisodesNotification(
           totalCount: totalNewEpisodes,
           details: newEpisodeDetails
@@ -273,8 +328,48 @@ class BackgroundSyncManager {
       return true
 
     } catch {
+      lastSyncError = error.localizedDescription
       logger.error("Sync failed: \(error.localizedDescription)")
       return false
+    }
+  }
+
+  /// Process a single parallel sync result and merge into accumulated state
+  private func processSyncResult(
+    _ result: (index: Int, podcast: PodcastInfo?, error: Error?),
+    podcasts: [PodcastInfoModel],
+    totalNewEpisodes: inout Int,
+    newEpisodeDetails: inout [(podcastTitle: String, episodeTitle: String, audioURL: String?, imageURL: String?, language: String)]
+  ) {
+    let podcast = podcasts[result.index]
+
+    if let error = result.error {
+      logger.error("Failed to sync \(podcast.podcastInfo.title): \(error.localizedDescription)")
+      return
+    }
+
+    guard let updatedPodcast = result.podcast else { return }
+
+    let existingEpisodeTitles = Set(podcast.podcastInfo.episodes.map { $0.title })
+    let newEpisodes = updatedPodcast.episodes.filter { !existingEpisodeTitles.contains($0.title) }
+
+    if !newEpisodes.isEmpty {
+      totalNewEpisodes += newEpisodes.count
+      for episode in newEpisodes.prefix(3) {
+        newEpisodeDetails.append((
+          podcastTitle: updatedPodcast.title,
+          episodeTitle: episode.title,
+          audioURL: episode.audioURL,
+          imageURL: episode.imageURL ?? updatedPodcast.imageURL,
+          language: updatedPodcast.language
+        ))
+      }
+
+      // Update the podcast with new episodes
+      podcast.podcastInfo = updatedPodcast
+      podcast.lastUpdated = Date()
+
+      logger.info("Found \(newEpisodes.count) new episodes for \(updatedPodcast.title)")
     }
   }
 
@@ -286,15 +381,13 @@ class BackgroundSyncManager {
         let granted = try await UNUserNotificationCenter.current().requestAuthorization(
           options: [.alert, .sound, .badge]
         )
-        await MainActor.run {
-          if granted {
-            notificationPermissionStatus = .authorized
-            logger.info("Notification permission granted")
-          } else {
-            notificationPermissionStatus = .denied
-            isNotificationsEnabled = false
-            logger.info("Notification permission denied")
-          }
+        if granted {
+          notificationPermissionStatus = .authorized
+          logger.info("Notification permission granted")
+        } else {
+          notificationPermissionStatus = .denied
+          isNotificationsEnabled = false
+          logger.info("Notification permission denied")
         }
       } catch {
         logger.error("Failed to request notification permission: \(error.localizedDescription)")
@@ -363,13 +456,26 @@ class BackgroundSyncManager {
 
     stopForegroundSync()
     foregroundSyncTask = Task { [weak self] in
+      guard let self else { return }
+
+      // Only sync immediately if data is stale (avoids redundant fetch every app-foreground)
+      let isStale: Bool
+      if let last = lastSyncDate {
+        isStale = Date().timeIntervalSince(last) >= minimumSyncInterval
+      } else {
+        isStale = true
+      }
+      if isStale {
+        await self.syncNow()
+      }
+
       while !Task.isCancelled {
         try? await Task.sleep(for: .seconds(4 * 60 * 60))
-        guard let self, !Task.isCancelled else { return }
+        if Task.isCancelled { return }
         await self.syncNow()
       }
     }
-    logger.info("Foreground sync timer started (4 hour interval)")
+    logger.info("Foreground sync timer started (4-hour interval, immediate only if stale)")
   }
 
   func stopForegroundSync() {

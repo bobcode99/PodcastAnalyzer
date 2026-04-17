@@ -23,10 +23,16 @@ final class HomeViewModel {
 
   // Up Next episodes (unplayed from subscribed podcasts)
   var upNextEpisodes: [LibraryEpisode] = []
+  // Scored version — used by HomeView cards to show reason badges
+  var scoredUpNextEpisodes: [ScoredEpisode] = []
 
   // Top podcasts from Apple RSS - observable instance properties that sync with static cache
   var topPodcasts: [AppleRSSPodcast] = []
   var isLoadingTopPodcasts = false
+
+  // Trending episodes from top podcasts
+  var trendingEpisodes: [ApplePodcastService.TrendingEpisode] = []
+  var isLoadingTrendingEpisodes = false
 
   // Region selection - synced with Settings
   var selectedRegion: String = "us" {
@@ -34,7 +40,11 @@ final class HomeViewModel {
       if oldValue != selectedRegion {
         // Save to UserDefaults for consistency
         UserDefaults.standard.set(selectedRegion, forKey: "selectedPodcastRegion")
-        Task { await loadTopPodcasts(forceRefresh: true) }
+        regionChangeTask?.cancel()
+        regionChangeTask = Task {
+          await loadTopPodcasts(forceRefresh: true)
+          await loadTrendingEpisodes(forceRefresh: true)
+        }
       }
     }
   }
@@ -53,11 +63,9 @@ final class HomeViewModel {
   @ObservationIgnored
   private var subscribeTask: Task<Void, Never>?
 
-  // Podcast preview/subscription
-  var selectedPodcast: AppleRSSPodcast?
-  var isSubscribing = false
-  var subscriptionError: String?
-  var subscriptionSuccess = false
+  @ObservationIgnored
+  private var regionChangeTask: Task<Void, Never>?
+
 
   @ObservationIgnored
   private var podcastInfoModelList: [PodcastInfoModel] = []
@@ -82,8 +90,33 @@ final class HomeViewModel {
   @ObservationIgnored
   private var regionObserverTask: Task<Void, Never>?
 
+  // Task for episode completion observation
+  @ObservationIgnored
+  private var completionObserverTask: Task<Void, Never>?
+
+  // Track current playing episode to detect changes
+  @ObservationIgnored
+  private var lastCurrentEpisodeId: String?
+
   // Use Unit Separator (U+001F) as delimiter
   private static let episodeKeyDelimiter = "\u{1F}"
+
+  nonisolated private static func hasLocalAudioFile(_ path: String?) -> Bool {
+    guard let path, !path.isEmpty else { return false }
+    return FileManager.default.fileExists(atPath: path)
+  }
+
+  /// Whether the "For You" section should be shown (cached from UserDefaults)
+  var showForYouRecommendations: Bool {
+    UserDefaults.standard.object(forKey: "showForYouRecommendations") == nil ||
+    UserDefaults.standard.bool(forKey: "showForYouRecommendations")
+  }
+
+  /// Whether the "Top Episodes" section should be shown (cached from UserDefaults)
+  var showTrendingEpisodes: Bool {
+    UserDefaults.standard.object(forKey: "showTrendingEpisodes") == nil ||
+    UserDefaults.standard.bool(forKey: "showTrendingEpisodes")
+  }
 
   var selectedRegionName: String {
     if let region = Constants.podcastRegions.first(where: { $0.code == selectedRegion }) {
@@ -115,6 +148,35 @@ final class HomeViewModel {
         }
       }
     }
+
+    // Refresh Up Next when an episode is marked played/unplayed
+    completionObserverTask = Task {
+      for await _ in NotificationCenter.default.notifications(named: .episodeCompletionChanged) {
+        await loadUpNextEpisodes()
+      }
+    }
+
+    // Refresh Up Next when the currently playing episode changes
+    startCurrentEpisodeObserver()
+  }
+
+  /// Observe EnhancedAudioManager.currentEpisode for changes and reload Up Next
+  private func startCurrentEpisodeObserver() {
+    // Use withObservationTracking to detect when currentEpisode changes
+    withObservationTracking {
+      _ = EnhancedAudioManager.shared.currentEpisode
+    } onChange: { [weak self] in
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        let newId = EnhancedAudioManager.shared.currentEpisode?.id
+        if newId != self.lastCurrentEpisodeId {
+          self.lastCurrentEpisodeId = newId
+          await self.loadUpNextEpisodes()
+        }
+        // Re-register for next change
+        self.startCurrentEpisodeObserver()
+      }
+    }
   }
 
   func setModelContext(_ context: ModelContext) {
@@ -133,10 +195,12 @@ final class HomeViewModel {
   private func loadAll(forceRefresh: Bool = false) async {
     // Load feeds first, then episodes (episodes depend on feeds)
     await loadPodcastFeeds()
-    // Load up next and top podcasts can run in parallel via async let
+    // Load up next and top podcasts in parallel
     async let upNextTask: () = loadUpNextEpisodes()
     async let topPodcastsTask: () = loadTopPodcasts(forceRefresh: forceRefresh)
     _ = await (upNextTask, topPodcastsTask)
+    // Trending depends on topPodcasts being loaded
+    await loadTrendingEpisodes(forceRefresh: forceRefresh)
 
     // Load recommendations after feeds are loaded
     if #available(iOS 26.0, macOS 26.0, *) {
@@ -172,59 +236,116 @@ final class HomeViewModel {
   private func loadUpNextEpisodes() async {
     guard let context = modelContext else { return }
 
-    // Get up to 20 most recent unplayed episodes from subscribed podcasts
-    var allEpisodes: [LibraryEpisode] = []
-    var lastPlayedDates: [String: Date] = [:]
+    // Batch fetch all EpisodeDownloadModels once (instead of N+1 individual queries)
+    let allDescriptor = FetchDescriptor<EpisodeDownloadModel>()
+    let allModels = (try? context.fetch(allDescriptor)) ?? []
+    var modelsByKey: [String: EpisodeDownloadModel] = [:]
+    for model in allModels {
+      modelsByKey[model.id] = model
+    }
 
-    for podcastModel in podcastInfoModelList {
-      let podcastTitle = podcastModel.podcastInfo.title
-
-      // Get recent episodes (limit 10 per podcast for performance)
-      for episode in podcastModel.podcastInfo.episodes.prefix(10) {
-        let key = Self.makeEpisodeKey(podcastTitle: podcastTitle, episodeTitle: episode.title)
-
-        // Check if episode is completed
-        let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-          predicate: #Predicate { $0.id == key }
-        )
-
-        let model = try? context.fetch(descriptor).first
-
-        // Only include unplayed episodes
-        if model?.isCompleted != true {
-          allEpisodes.append(LibraryEpisode(
-            id: key,
-            podcastTitle: podcastTitle,
-            imageURL: episode.imageURL ?? podcastModel.podcastInfo.imageURL,
-            language: podcastModel.podcastInfo.language,
-            episodeInfo: episode,
-            isStarred: model?.isStarred ?? false,
-            isDownloaded: model?.localAudioPath != nil,
-            isCompleted: model?.isCompleted ?? false,
-            lastPlaybackPosition: model?.lastPlaybackPosition ?? 0,
-            savedDuration: model?.duration ?? 0
-          ))
-          if let playedDate = model?.lastPlayedDate {
-            lastPlayedDates[key] = playedDate
-          }
+    // Compute per-podcast aggregates for UpNextSuggestionEngine signals
+    var podcastPlayCounts: [String: Int] = [:]
+    var podcastRecentPlayDates: [String: Date] = [:]
+    for model in allModels {
+      podcastPlayCounts[model.podcastTitle, default: 0] += model.playCount
+      if let d = model.lastPlayedDate {
+        if let existing = podcastRecentPlayDates[model.podcastTitle] {
+          if d > existing { podcastRecentPlayDates[model.podcastTitle] = d }
+        } else {
+          podcastRecentPlayDates[model.podcastTitle] = d
         }
       }
     }
 
-    // Sort by last-played date (most recent first), then by pub date for unplayed
-    allEpisodes.sort { ep1, ep2 in
-      let date1 = lastPlayedDates[ep1.id]
-      let date2 = lastPlayedDates[ep2.id]
-      switch (date1, date2) {
-      case let (d1?, d2?): return d1 > d2
-      case (_?, nil): return true
-      case (nil, _?): return false
-      case (nil, nil):
-        return (ep1.episodeInfo.pubDate ?? .distantPast) > (ep2.episodeInfo.pubDate ?? .distantPast)
+    // Build EpisodeInput candidates (unplayed, up to 10 per podcast)
+    var inputs: [EpisodeInput] = []
+
+    for podcastModel in podcastInfoModelList {
+      let podcastTitle = podcastModel.podcastInfo.title
+
+      for episode in podcastModel.podcastInfo.episodes.prefix(10) {
+        let key = Self.makeEpisodeKey(podcastTitle: podcastTitle, episodeTitle: episode.title)
+        let model = modelsByKey[key]
+
+        // Skip completed episodes
+        guard model?.isCompleted != true else { continue }
+
+        let libraryEpisode = LibraryEpisode(
+          id: key,
+          podcastTitle: podcastTitle,
+          imageURL: episode.imageURL ?? podcastModel.podcastInfo.imageURL,
+          language: podcastModel.podcastInfo.language,
+          episodeInfo: episode,
+          isStarred: model?.isStarred ?? false,
+          isDownloaded: Self.hasLocalAudioFile(model?.localAudioPath),
+          isCompleted: model?.isCompleted ?? false,
+          lastPlaybackPosition: model?.lastPlaybackPosition ?? 0,
+          savedDuration: model?.duration ?? 0
+        )
+
+        inputs.append(EpisodeInput(
+          episode: libraryEpisode,
+          downloadModel: model,
+          podcastTotalPlayCount: podcastPlayCounts[podcastTitle] ?? 0,
+          podcastMostRecentPlayDate: podcastRecentPlayDates[podcastTitle]
+        ))
       }
     }
-    upNextEpisodes = Array(allEpisodes.prefix(20))
-    logger.info("Loaded \(self.upNextEpisodes.count) up next episodes")
+
+    // Score and rank via UpNextSuggestionEngine
+    let scored = UpNextSuggestionEngine().score(inputs: inputs, limit: 25)
+    var scoredByKey: [String: ScoredEpisode] = [:]
+    for s in scored { scoredByKey[s.id] = s }
+    var result = scored.map(\.episode).prefix(20).map { $0 }
+
+    // Ensure the currently playing episode is at the top of Up Next
+    if let currentEpisode = EnhancedAudioManager.shared.currentEpisode {
+      let currentKey = Self.makeEpisodeKey(podcastTitle: currentEpisode.podcastTitle, episodeTitle: currentEpisode.title)
+      let currentModel = modelsByKey[currentKey]
+
+      // Don't add if already completed
+      if currentModel?.isCompleted != true {
+        if let existingIndex = result.firstIndex(where: { $0.id == currentKey }) {
+          // Already in list — move to top
+          let episode = result.remove(at: existingIndex)
+          result.insert(episode, at: 0)
+        } else {
+          // Not in list (non-subscribed podcast or beyond prefix limit) — create and insert at top
+          let episodeInfo = PodcastEpisodeInfo(
+            title: currentEpisode.title,
+            podcastEpisodeDescription: currentEpisode.episodeDescription,
+            pubDate: currentEpisode.pubDate,
+            audioURL: currentEpisode.audioURL,
+            imageURL: currentEpisode.imageURL,
+            duration: currentEpisode.duration,
+            guid: currentEpisode.guid
+          )
+          let libraryEpisode = LibraryEpisode(
+            id: currentKey,
+            podcastTitle: currentEpisode.podcastTitle,
+            imageURL: currentEpisode.imageURL,
+            language: "",
+            episodeInfo: episodeInfo,
+            isStarred: currentModel?.isStarred ?? false,
+            isDownloaded: Self.hasLocalAudioFile(currentModel?.localAudioPath),
+            isCompleted: false,
+            lastPlaybackPosition: currentModel?.lastPlaybackPosition ?? 0,
+            savedDuration: currentModel?.duration ?? 0
+          )
+          result.insert(libraryEpisode, at: 0)
+        }
+      }
+    }
+
+    upNextEpisodes = result
+    // Rebuild scoredUpNextEpisodes in the same order as result (respects the pinned-to-top episode)
+    scoredUpNextEpisodes = result.compactMap { episode in
+      if let existing = scoredByKey[episode.id] { return existing }
+      // Currently playing episode injected from outside scored list — wrap with .none reason
+      return ScoredEpisode(episode: episode, downloadModel: modelsByKey[episode.id], score: .infinity, reason: .none, progressRatio: 0)
+    }
+    logger.info("Loaded \(self.upNextEpisodes.count) up next episodes (scored)")
 
     // Populate auto-play candidates from up next episodes
     let autoPlayEpisodes = upNextEpisodes.compactMap { episode -> PlaybackEpisode? in
@@ -241,7 +362,8 @@ final class HomeViewModel {
         guid: episode.episodeInfo.guid
       )
     }
-    EnhancedAudioManager.shared.addToAutoPlayCandidates(autoPlayEpisodes)
+    // Replace (not append) so the scored Up Next order is authoritative
+    EnhancedAudioManager.shared.updateAutoPlayCandidates(autoPlayEpisodes)
   }
 
   private static func makeEpisodeKey(podcastTitle: String, episodeTitle: String) -> String {
@@ -267,7 +389,9 @@ final class HomeViewModel {
     EnhancedAudioManager.shared.play(
       episode: playbackEpisode,
       audioURL: audioURL,
-      imageURL: episode.imageURL
+      startTime: episode.lastPlaybackPosition,
+      imageURL: episode.imageURL,
+      useDefaultSpeed: episode.lastPlaybackPosition == 0
     )
   }
 
@@ -295,10 +419,8 @@ final class HomeViewModel {
       context.insert(model)
       try? context.save()
     }
-    // Reload to reflect changes (episode will disappear from Up Next when marked as played)
-    Task {
-      await loadUpNextEpisodes()
-    }
+    // Post notification — the completion observer will reload Up Next
+    NotificationCenter.default.post(name: .episodeCompletionChanged, object: nil)
   }
 
   // MARK: - Load Top Podcasts
@@ -343,21 +465,21 @@ final class HomeViewModel {
       Self.cachedRegion = ""
     }
 
-    // Create shared task with retry logic for transient API failures
+    // Create shared task with retry logic and limit fallback for API failures
     let task = Task { () -> [AppleRSSPodcast] in
+      // Try with limit 200 first; some regions return 500 for high limits
+      let limits = [200, 100, 50]
       var lastError: Error?
-      for attempt in 1...3 {
+      for limit in limits {
         do {
-          return try await applePodcastService.fetchTopPodcasts(region: regionToLoad, limit: 25)
+          return try await applePodcastService.fetchTopPodcasts(region: regionToLoad, limit: limit)
         } catch {
           lastError = error
-          // Only retry on server errors (5xx) or network errors
-          let nsError = error as NSError
-          let isServerError = nsError.domain == NSURLErrorDomain ||
+          let isServerError = (error as NSError).domain == NSURLErrorDomain ||
                               (error as? URLError)?.code == .badServerResponse
-          if isServerError && attempt < 3 {
-            logger.warning("Retry \(attempt)/3 for region \(regionToLoad) after error: \(error.localizedDescription)")
-            try? await Task.sleep(for: .milliseconds(500 * attempt))  // Exponential backoff
+          if isServerError {
+            logger.warning("Region \(regionToLoad) failed with limit \(limit), trying smaller: \(error.localizedDescription)")
+            try? await Task.sleep(for: .milliseconds(300))
             continue
           }
           throw error
@@ -391,14 +513,6 @@ final class HomeViewModel {
     isLoadingTopPodcasts = false
   }
 
-  // MARK: - Podcast Preview
-
-  func showPodcastPreview(_ podcast: AppleRSSPodcast) {
-    selectedPodcast = podcast
-    subscriptionError = nil
-    subscriptionSuccess = false
-  }
-
   /// Check if a podcast is already subscribed by name
   func isAlreadySubscribed(_ podcast: AppleRSSPodcast) -> Bool {
     podcastInfoModelList.contains { $0.podcastInfo.title == podcast.name }
@@ -407,58 +521,57 @@ final class HomeViewModel {
   // MARK: - Subscribe to Podcast
 
   func subscribeToPodcast(_ podcast: AppleRSSPodcast) {
-    guard let context = modelContext else {
-      subscriptionError = "Unable to save"
-      return
-    }
-
-    isSubscribing = true
-    subscriptionError = nil
-    subscriptionSuccess = false
+    guard let context = modelContext else { return }
 
     subscribeTask?.cancel()
     subscribeTask = Task {
       do {
-        // Look up the podcast to get the RSS feed URL
         guard let result = try await applePodcastService.lookupPodcast(collectionId: podcast.id),
               let feedUrl = result.feedUrl else {
-          subscriptionError = "Could not find RSS feed"
-          isSubscribing = false
+          logger.error("Could not find RSS feed for \(podcast.name)")
           return
         }
 
-        // Fetch podcast info from RSS
         let podcastInfo = try await rssService.fetchPodcast(from: feedUrl)
 
-        // Check if already subscribed
-        let title = podcastInfo.title
-        let existingDescriptor = FetchDescriptor<PodcastInfoModel>(
-          predicate: #Predicate { $0.title == title }
-        )
-
-        if (try? context.fetch(existingDescriptor).first) != nil {
-          logger.info("Already subscribed to \(podcastInfo.title)")
-          subscriptionSuccess = true
-          isSubscribing = false
+        if let existingByRSS = try? context.fetch(FetchDescriptor<PodcastInfoModel>(
+          predicate: #Predicate { $0.rssUrl == feedUrl }
+        )).first {
+          existingByRSS.isSubscribed = true
+          existingByRSS.podcastInfo = podcastInfo
+          existingByRSS.title = podcastInfo.title
+          existingByRSS.rssUrl = podcastInfo.rssUrl
+          existingByRSS.lastUpdated = Date()
+          try context.save()
+          await loadUpNextEpisodes()
+          logger.info("Reused existing podcast row for \(podcastInfo.title)")
           return
         }
 
-        // Create new subscription (explicitly set isSubscribed to true)
+        let title = podcastInfo.title
+        if let existingByTitle = try? context.fetch(FetchDescriptor<PodcastInfoModel>(
+          predicate: #Predicate { $0.title == title }
+        )).first {
+          existingByTitle.isSubscribed = true
+          existingByTitle.podcastInfo = podcastInfo
+          existingByTitle.title = podcastInfo.title
+          existingByTitle.rssUrl = podcastInfo.rssUrl
+          existingByTitle.lastUpdated = Date()
+          try context.save()
+          await loadUpNextEpisodes()
+          logger.info("Reused title-matched podcast row for \(podcastInfo.title)")
+          return
+        }
+
         let model = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date(), isSubscribed: true)
         context.insert(model)
-
         try context.save()
         podcastInfoModelList.insert(model, at: 0)
         await loadUpNextEpisodes()
-        subscriptionSuccess = true
         logger.info("Successfully subscribed to \(podcastInfo.title)")
-
       } catch {
-        subscriptionError = error.localizedDescription
         logger.error("Failed to subscribe: \(error.localizedDescription)")
       }
-
-      isSubscribing = false
     }
   }
 
@@ -519,15 +632,17 @@ final class HomeViewModel {
       }
 
       // Build available episodes from subscribed podcasts (unplayed)
+      // Reuse allModels already fetched above as a dictionary for O(1) lookup
+      var modelsByKey: [String: EpisodeDownloadModel] = [:]
+      for model in allModels {
+        modelsByKey[model.id] = model
+      }
+
       var availableEpisodes: [(title: String, podcastTitle: String, description: String)] = []
       for podcastModel in podcastInfoModelList {
         for episode in podcastModel.podcastInfo.episodes.prefix(5) {
           let key = Self.makeEpisodeKey(podcastTitle: podcastModel.podcastInfo.title, episodeTitle: episode.title)
-          let epDescriptor = FetchDescriptor<EpisodeDownloadModel>(
-            predicate: #Predicate { $0.id == key }
-          )
-          let model = try? context.fetch(epDescriptor).first
-          if model?.isCompleted != true {
+          if modelsByKey[key]?.isCompleted != true {
             availableEpisodes.append((
               title: episode.title,
               podcastTitle: podcastModel.podcastInfo.title,
@@ -568,16 +683,21 @@ final class HomeViewModel {
       return
     }
 
+    // Batch fetch all models once
+    let allDescriptor = FetchDescriptor<EpisodeDownloadModel>()
+    let allModels = (try? context.fetch(allDescriptor)) ?? []
+    var modelsByKey: [String: EpisodeDownloadModel] = [:]
+    for model in allModels {
+      modelsByKey[model.id] = model
+    }
+
     var resolved: [LibraryEpisode] = []
     for title in recommendations.recommendedTitles {
       // Search through subscribed podcasts for the episode
       for podcastModel in podcastInfoModelList {
         if let episode = podcastModel.podcastInfo.episodes.first(where: { $0.title == title }) {
           let key = Self.makeEpisodeKey(podcastTitle: podcastModel.podcastInfo.title, episodeTitle: episode.title)
-          let descriptor = FetchDescriptor<EpisodeDownloadModel>(
-            predicate: #Predicate { $0.id == key }
-          )
-          let model = try? context.fetch(descriptor).first
+          let model = modelsByKey[key]
 
           resolved.append(LibraryEpisode(
             id: key,
@@ -586,7 +706,7 @@ final class HomeViewModel {
             language: podcastModel.podcastInfo.language,
             episodeInfo: episode,
             isStarred: model?.isStarred ?? false,
-            isDownloaded: model?.localAudioPath != nil,
+            isDownloaded: Self.hasLocalAudioFile(model?.localAudioPath),
             isCompleted: model?.isCompleted ?? false,
             lastPlaybackPosition: model?.lastPlaybackPosition ?? 0,
             savedDuration: model?.duration ?? 0
@@ -598,15 +718,61 @@ final class HomeViewModel {
     recommendedEpisodes = resolved
   }
 
+  // MARK: - Trending Episodes
+
+  private static var cachedTrendingEpisodes: [ApplePodcastService.TrendingEpisode] = []
+  private static var cachedTrendingRegion: String = ""
+
+  private func loadTrendingEpisodes(forceRefresh: Bool = false) async {
+    let regionToLoad = selectedRegion
+
+    // Use cache if available
+    if !forceRefresh && !Self.cachedTrendingEpisodes.isEmpty && Self.cachedTrendingRegion == regionToLoad {
+      if trendingEpisodes.isEmpty {
+        trendingEpisodes = Self.cachedTrendingEpisodes
+      }
+      return
+    }
+
+    isLoadingTrendingEpisodes = true
+    do {
+      // Use first 10 from already-loaded topPodcasts (lightweight iTunes Lookup API)
+      let podcastsToSample = Array(topPodcasts.prefix(10))
+      guard !podcastsToSample.isEmpty else {
+        logger.warning("No top podcasts available for trending episodes")
+        isLoadingTrendingEpisodes = false
+        return
+      }
+      let episodes = try await applePodcastService.fetchTrendingEpisodesFromLookup(
+        topPodcasts: podcastsToSample,
+        episodesPerPodcast: 2
+      )
+      Self.cachedTrendingEpisodes = episodes
+      Self.cachedTrendingRegion = regionToLoad
+      if selectedRegion == regionToLoad {
+        trendingEpisodes = episodes
+      }
+      logger.info("Loaded \(episodes.count) trending episodes for \(regionToLoad)")
+    } catch {
+      logger.error("Failed to load trending episodes: \(error.localizedDescription)")
+    }
+    isLoadingTrendingEpisodes = false
+  }
+
   func cleanup() {
     regionObserverTask?.cancel()
     regionObserverTask = nil
+    regionChangeTask?.cancel()
+    regionChangeTask = nil
     recommendationsTask?.cancel()
     recommendationsTask = nil
-    loadTask?.cancel()
-    loadTask = nil
+    // loadTask intentionally NOT cancelled — it's a one-shot initialization that must
+    // complete regardless of tab switches. Cancelling it with isAlreadyLoaded=true would
+    // leave trendingEpisodes empty forever (no retry path).
     subscribeTask?.cancel()
     subscribeTask = nil
+    completionObserverTask?.cancel()
+    completionObserverTask = nil
   }
 
   // MARK: - Find Podcast Model
@@ -670,9 +836,7 @@ final class HomeViewModel {
       try? context.save()
     }
 
-    // Reload to reflect changes
-    Task {
-      await loadUpNextEpisodes()
-    }
+    // Post notification — the completion observer will reload Up Next
+    NotificationCenter.default.post(name: .episodeCompletionChanged, object: nil)
   }
 }

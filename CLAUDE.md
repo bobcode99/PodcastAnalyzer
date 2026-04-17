@@ -113,9 +113,10 @@ User Interaction → View → ViewModel → Service → Model/Persistence
 
 ## Package Dependencies
 
-- **FeedKit** (10.1.3): RSS/Atom feed parsing
-- **ZMarkupParser** (1.12.0): HTML description rendering
-- **ZNSTextAttachment** (1.1.9): Text attachment support
+- **FeedKit** (10.2.0): RSS/Atom feed parsing
+- **ZMarkupParser** (1.12.0): HTML description rendering (ZNSTextAttachment is a transitive dep)
+- **Nuke** (12.9.0): Image caching and async loading (NukeUI for SwiftUI LazyImage)
+- **WhisperKit** (0.15.0): On-device speech-to-text transcription
 
 ## Constants
 

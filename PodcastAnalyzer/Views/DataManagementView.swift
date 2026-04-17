@@ -248,13 +248,11 @@ struct DataManagementView: View {
       cacheTask, audioTask, captionsTask, analysisTask
     )
 
-    await MainActor.run {
-      imageCacheSize = formatBytes(cacheSize)
-      downloadedAudioSize = formatBytes(audioSize)
-      transcriptsSize = formatBytes(captionsSize)
-      aiAnalysisCount = analysisCount
-      isCalculating = false
-    }
+    imageCacheSize = formatBytes(cacheSize)
+    downloadedAudioSize = formatBytes(audioSize)
+    transcriptsSize = formatBytes(captionsSize)
+    aiAnalysisCount = analysisCount
+    isCalculating = false
   }
 
   private func calculateTotalSize() -> String {
@@ -325,10 +323,8 @@ struct DataManagementView: View {
   }
 
   private func countAIAnalyses() async -> Int {
-    await MainActor.run {
-      let descriptor = FetchDescriptor<EpisodeAIAnalysis>()
-      return (try? modelContext.fetchCount(descriptor)) ?? 0
-    }
+    let descriptor = FetchDescriptor<EpisodeAIAnalysis>()
+    return (try? modelContext.fetchCount(descriptor)) ?? 0
   }
 
   private func formatBytes(_ bytes: Int64) -> String {
@@ -365,22 +361,20 @@ struct DataManagementView: View {
       }.value
 
       // Clear SwiftData records
-      await MainActor.run {
-        let descriptor = FetchDescriptor<EpisodeDownloadModel>()
-        if let episodes = try? modelContext.fetch(descriptor) {
-          for episode in episodes {
-            if episode.localAudioPath != nil {
-              episode.localAudioPath = nil
-              episode.downloadedDate = nil
-              episode.fileSize = 0
-            }
+      let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+      if let episodes = try? modelContext.fetch(descriptor) {
+        for episode in episodes {
+          if episode.localAudioPath != nil {
+            episode.localAudioPath = nil
+            episode.downloadedDate = nil
+            episode.fileSize = 0
           }
-          try? modelContext.save()
         }
-        downloadedAudioSize = "0 KB"
-        isClearingData = false
-        clearingMessage = ""
+        try? modelContext.save()
       }
+      downloadedAudioSize = "0 KB"
+      isClearingData = false
+      clearingMessage = ""
     }
   }
 
@@ -399,20 +393,18 @@ struct DataManagementView: View {
       }.value
 
       // Clear SwiftData records
-      await MainActor.run {
-        let descriptor = FetchDescriptor<EpisodeDownloadModel>()
-        if let episodes = try? modelContext.fetch(descriptor) {
-          for episode in episodes {
-            if episode.captionPath != nil {
-              episode.captionPath = nil
-            }
+      let descriptor = FetchDescriptor<EpisodeDownloadModel>()
+      if let episodes = try? modelContext.fetch(descriptor) {
+        for episode in episodes {
+          if episode.captionPath != nil {
+            episode.captionPath = nil
           }
-          try? modelContext.save()
         }
-        transcriptsSize = "0 KB"
-        isClearingData = false
-        clearingMessage = ""
+        try? modelContext.save()
       }
+      transcriptsSize = "0 KB"
+      isClearingData = false
+      clearingMessage = ""
     }
   }
 
@@ -421,18 +413,16 @@ struct DataManagementView: View {
     clearingMessage = "ai"
 
     Task {
-      await MainActor.run {
-        let descriptor = FetchDescriptor<EpisodeAIAnalysis>()
-        if let analyses = try? modelContext.fetch(descriptor) {
-          for analysis in analyses {
-            modelContext.delete(analysis)
-          }
-          try? modelContext.save()
+      let descriptor = FetchDescriptor<EpisodeAIAnalysis>()
+      if let analyses = try? modelContext.fetch(descriptor) {
+        for analysis in analyses {
+          modelContext.delete(analysis)
         }
-        aiAnalysisCount = 0
-        isClearingData = false
-        clearingMessage = ""
+        try? modelContext.save()
       }
+      aiAnalysisCount = 0
+      isClearingData = false
+      clearingMessage = ""
     }
   }
 }

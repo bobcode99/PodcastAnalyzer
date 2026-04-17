@@ -17,11 +17,11 @@ import SwiftData
 
 @Model
 class EpisodeDownloadModel {
-  @Attribute(.unique) var id: String
+  var id: String = ""
 
-  var episodeTitle: String
-  var podcastTitle: String
-  var audioURL: String
+  var episodeTitle: String = ""
+  var podcastTitle: String = ""
+  var audioURL: String = ""
   var localAudioPath: String?
   var captionPath: String?
 
@@ -39,6 +39,9 @@ class EpisodeDownloadModel {
   // Download metadata
   var downloadedDate: Date?
   var fileSize: Int64 = 0
+
+  // Transcript metadata
+  var transcriptSource: String = ""     // "" = unknown, "rss" = from RSS, "local" = generated locally
 
   // Episode metadata (cached)
   var imageURL: String?
@@ -88,6 +91,12 @@ class EpisodeDownloadModel {
   var progress: Double {
     guard duration > 0 else { return 0 }
     return min(lastPlaybackPosition / duration, 1.0)
+  }
+
+  /// True only when the local file path exists on this device.
+  var hasLocalAudioFile: Bool {
+    guard let path = localAudioPath, !path.isEmpty else { return false }
+    return FileManager.default.fileExists(atPath: path)
   }
 
   /// Formatted remaining time (always shows seconds)

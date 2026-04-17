@@ -47,6 +47,22 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
     var transcriptURLs: [String: String] = [:]
     var transcriptTypes: [String: String] = [:]
 
+    // Throttle state: suppress MainActor progress updates that are too frequent
+    private var lastProgressUpdate: [String: (time: Date, progress: Double)] = [:]
+
+    /// Returns true only when enough time has passed (≥250 ms) or progress jumped ≥5%.
+    /// Call this before dispatching to MainActor to avoid flooding the UI.
+    func shouldUpdateProgress(for key: String, newProgress: Double) -> Bool {
+      let now = Date()
+      if let last = lastProgressUpdate[key] {
+        let elapsed = now.timeIntervalSince(last.time)
+        let delta = abs(newProgress - last.progress)
+        guard elapsed >= 0.25 || delta >= 0.05 else { return false }
+      }
+      lastProgressUpdate[key] = (now, newProgress)
+      return true
+    }
+
     func setDownload(
       _ task: URLSessionDownloadTask,
       for key: String,
@@ -91,6 +107,7 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
       episodeLanguages.removeValue(forKey: key)
       transcriptURLs.removeValue(forKey: key)
       transcriptTypes.removeValue(forKey: key)
+      lastProgressUpdate.removeValue(forKey: key)
     }
 
     func cancelDownload(for key: String) -> URLSessionDownloadTask? {
@@ -100,6 +117,7 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
       episodeLanguages.removeValue(forKey: key)
       transcriptURLs.removeValue(forKey: key)
       transcriptTypes.removeValue(forKey: key)
+      lastProgressUpdate.removeValue(forKey: key)
       return task
     }
   }
@@ -196,6 +214,7 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
         if let episodeKey = await downloadTracker.getDownloadKey(for: downloadTask) {
           await downloadTracker.removeDownload(for: episodeKey)
           await MainActor.run {
+            DownloadManager.shared.inFlightProgress.removeValue(forKey: episodeKey)
             DownloadManager.shared.downloadStates[episodeKey] = .failed(error: "Failed to save download: \(error.localizedDescription)")
           }
         }
@@ -224,6 +243,7 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
 
         // Set finishing state on main thread
         await MainActor.run {
+          DownloadManager.shared.inFlightProgress.removeValue(forKey: episodeKey)
           DownloadManager.shared.downloadStates[episodeKey] = .finishing
         }
 
@@ -250,6 +270,7 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
         // Update state on MainActor
         await MainActor.run {
           let manager = DownloadManager.shared
+          manager.inFlightProgress.removeValue(forKey: episodeKey)
           manager.downloadStates[episodeKey] = .downloaded(localPath: destinationURL.path)
 
           // Post notification
@@ -300,6 +321,7 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
         await downloadTracker.removeDownload(for: episodeKey)
 
         await MainActor.run {
+          DownloadManager.shared.inFlightProgress.removeValue(forKey: episodeKey)
           DownloadManager.shared.downloadStates[episodeKey] = .failed(error: error.localizedDescription)
         }
         logger.error("Download save failed: \(error.localizedDescription)")
@@ -318,13 +340,19 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
     Task {
       guard let episodeKey = await downloadTracker.getDownloadKey(for: downloadTask) else { return }
 
+      // Throttle: skip the MainActor dispatch when updates are too frequent.
+      // URLSession fires this delegate for every received chunk (potentially
+      // hundreds of times/sec), which would flood @Observable and cause UI lag.
+      guard await downloadTracker.shouldUpdateProgress(for: episodeKey, newProgress: progress) else { return }
+
       await MainActor.run {
         let manager = DownloadManager.shared
-        // Don't overwrite .finishing or .downloaded states with progress updates
+        // Update non-observable progress storage only — avoids @Observable invalidation
+        // that would trigger cascading view re-renders on every tick.
         if case .downloading = manager.downloadStates[episodeKey] {
-          manager.downloadStates[episodeKey] = .downloading(progress: progress)
+          manager.inFlightProgress[episodeKey] = progress
         } else if manager.downloadStates[episodeKey] == nil {
-          manager.downloadStates[episodeKey] = .downloading(progress: progress)
+          manager.inFlightProgress[episodeKey] = progress
         }
       }
     }
@@ -345,6 +373,7 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
       await downloadTracker.removeDownload(for: episodeKey)
 
       await MainActor.run {
+        DownloadManager.shared.inFlightProgress.removeValue(forKey: episodeKey)
         DownloadManager.shared.downloadStates[episodeKey] = .failed(error: error.localizedDescription)
       }
       logger.error("Download failed: \(error.localizedDescription)")
@@ -378,6 +407,21 @@ final class DownloadManager {
 
   @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
+
+  /// Episode keys whose on-disk presence has already been checked.
+  /// Prevents `getDownloadState` from repeating 7-extension disk scans on every call.
+  @ObservationIgnored
+  private var diskCheckedKeys = Set<String>()
+
+  /// Non-observable storage for in-flight download progress (0.0–1.0).
+  /// Updated by URLSession delegate on every throttled tick without triggering
+  /// @Observable invalidation. ViewModels poll this on a timer for smooth UI updates.
+  @ObservationIgnored
+  var inFlightProgress: [String: Double] = [:]
+
+  /// True when at least one download is actively transferring data.
+  /// ViewModels use this to start/stop their progress-polling timers.
+  var hasActiveDownloads: Bool { !inFlightProgress.isEmpty }
 
   private init() {}
 
@@ -417,6 +461,17 @@ final class DownloadManager {
   func downloadEpisode(episode: PodcastEpisodeInfo, podcastTitle: String, language: String = "en") {
     let episodeKey = sessionDelegate.makeKey(episode: episode.title, podcast: podcastTitle)
 
+    // Fast-path: skip if already in-flight or done
+    switch downloadStates[episodeKey] {
+    case .downloading, .finishing:
+      logger.info("Download already in progress for: \(episode.title)")
+      return
+    case .downloaded:
+      return
+    default:
+      break
+    }
+
     guard let audioURLString = episode.audioURL,
           let url = URL(string: audioURLString)
     else {
@@ -453,6 +508,7 @@ final class DownloadManager {
 
       // Start download
       downloadStates[episodeKey] = .downloading(progress: 0)
+      inFlightProgress[episodeKey] = 0
       #if DEBUG
       os_signpost(.event, log: signpostLog, name: "DownloadManager.startDownload", "%{public}s", episode.title)
       #endif
@@ -475,6 +531,7 @@ final class DownloadManager {
 
     Task {
       await sessionDelegate.cancelDownload(episodeTitle: episodeTitle, podcastTitle: podcastTitle)
+      inFlightProgress.removeValue(forKey: episodeKey)
       downloadStates[episodeKey] = .notDownloaded
       logger.info("Cancelled download: \(episodeTitle)")
     }
@@ -492,7 +549,10 @@ final class DownloadManager {
           try await fileStorage.deleteCaptionFile(for: episodeTitle, podcastTitle: podcastTitle)
         }
 
+        inFlightProgress.removeValue(forKey: episodeKey)
         downloadStates[episodeKey] = .notDownloaded
+        // Reset disk-check cache so a future re-download can be discovered
+        diskCheckedKeys.remove(episodeKey)
         logger.info("Deleted download: \(episodeTitle)")
       } catch {
         logger.error("Failed to delete download: \(error.localizedDescription)")
@@ -503,12 +563,12 @@ final class DownloadManager {
   func getDownloadState(episodeTitle: String, podcastTitle: String) -> DownloadState {
     let episodeKey = sessionDelegate.makeKey(episode: episodeTitle, podcast: podcastTitle)
 
-    // If we don't have a state, check disk to restore it
-    if downloadStates[episodeKey] == nil {
+    // First-time disk check for this key (only once per key to avoid repeated I/O)
+    if !diskCheckedKeys.contains(episodeKey) {
+      diskCheckedKeys.insert(episodeKey)
       if let path = checkAudioFileExistsSynchronously(
         episodeTitle: episodeTitle, podcastTitle: podcastTitle)
       {
-        // Schedule the state update for next run loop to avoid "publishing during view update"
         Task { @MainActor [weak self] in
           self?.downloadStates[episodeKey] = .downloaded(localPath: path)
         }
@@ -516,8 +576,21 @@ final class DownloadManager {
       }
     }
 
+    // Check non-observable in-flight progress first (avoids @Observable subscription
+    // for the common hot path of active downloads updating progress).
+    if let progress = inFlightProgress[episodeKey] {
+      return .downloading(progress: progress)
+    }
+
+    // Fall through to @Observable dictionary for state transitions.
+    // This creates an observation dependency, but only fires on actual
+    // state transitions (start/finish/fail), not on every progress tick.
+    guard let state = downloadStates[episodeKey] else {
+      return .notDownloaded
+    }
+
     // If state says downloaded, verify the file still exists on disk
-    if case .downloaded(let path) = downloadStates[episodeKey] {
+    if case .downloaded(let path) = state {
       if !FileManager.default.fileExists(atPath: path) {
         logger.warning("Download record exists but file missing on disk: \(path)")
         Task { @MainActor [weak self] in
@@ -527,7 +600,7 @@ final class DownloadManager {
       }
     }
 
-    return downloadStates[episodeKey] ?? .notDownloaded
+    return state
   }
 
   func getLocalPath(episodeTitle: String, podcastTitle: String) -> String? {

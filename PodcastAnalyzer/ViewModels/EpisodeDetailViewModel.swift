@@ -27,7 +27,12 @@ private let logger = Logger(subsystem: "com.podcast.analyzer", category: "Episod
 /// Keyed by "\(html.hashValue)_\(fontSize)" to distinguish styles.
 /// NSCache auto-evicts under memory pressure — no manual purging needed.
 /// @MainActor because both ViewModels that use it are @MainActor-isolated.
-@MainActor let descriptionCache = NSCache<NSString, NSAttributedString>()
+@MainActor let descriptionCache: NSCache<NSString, NSAttributedString> = {
+  let cache = NSCache<NSString, NSAttributedString>()
+  cache.countLimit = 100
+  cache.totalCostLimit = 50_000_000  // 50 MB
+  return cache
+}()
 
 // MARK: - Transcript State
 
@@ -140,12 +145,16 @@ final class EpisodeDetailViewModel {
   var isModelReady: Bool = false
   /// Language override for transcript generation (nil = use podcast RSS language)
   var selectedTranscriptLanguage: String?
+  /// Engine override for transcript generation (nil = use global Settings default)
+  var selectedTranscriptEngine: TranscriptEngine?
 
   @ObservationIgnored
   private let fileStorage = FileStorageManager.shared
 
   // Parsed transcript segments for live captions
   var transcriptSegments: [TranscriptSegment] = []
+  // Raw (unmerged) segments for sentence highlight mode's per-segment granularity
+  var rawTranscriptSegments: [TranscriptSegment] = []
   var transcriptSearchQuery: String = ""
 
   // Sentence grouping (precomputed, not per-render)
@@ -157,6 +166,9 @@ final class EpisodeDetailViewModel {
 
   // RSS transcript state (from podcast:transcript tag)
   var rssTranscriptState: TranscriptDownloadState = .notAvailable
+
+  // DAI source tracking
+  var transcriptSource: String = ""
 
   // Translation state
   var translationStatus: TranslationStatus = .idle
@@ -213,6 +225,9 @@ final class EpisodeDetailViewModel {
   private var rssTranscriptCheckTask: Task<Void, Never>?
 
   @ObservationIgnored
+  private var rssTranscriptDownloadTask: Task<Void, Never>?
+
+  @ObservationIgnored
   private var loadExistingTranscriptTask: Task<Void, Never>?
 
   // Tasks for AI and playback operations
@@ -263,7 +278,28 @@ final class EpisodeDetailViewModel {
   /// Checks if there's an active transcript job and starts observing
   private func checkAndObserveTranscriptJob() {
     if TranscriptManager.shared.activeJobs[episodeKey] != nil {
+      syncTranscriptState()
       observeTranscriptManager()
+    }
+  }
+
+  /// Immediately syncs transcriptState from current job status to avoid flash of 0%
+  private func syncTranscriptState() {
+    guard let job = TranscriptManager.shared.activeJobs[episodeKey] else { return }
+    switch job.status {
+    case .queued:
+      transcriptState = .transcribing(progress: 0)
+    case .downloadingModel(let progress):
+      transcriptState = .downloadingModel(progress: progress)
+    case .transcribing(let progress):
+      transcriptState = .transcribing(progress: progress)
+    case .completed:
+      loadExistingTranscriptTask?.cancel()
+      loadExistingTranscriptTask = Task {
+        await loadExistingTranscript()
+      }
+    case .failed(let error):
+      transcriptState = .error(error)
     }
   }
 
@@ -430,6 +466,51 @@ final class EpisodeDetailViewModel {
     savePlaybackPosition(time)
   }
 
+  /// Seeks to a specific time, starting playback if needed. Used by AI timestamp badges.
+  func seekToTime(_ seconds: TimeInterval) {
+    if !isPlayingThisEpisode {
+      playAction()
+      seekTask?.cancel()
+      seekTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(0.3))
+        guard let self, !Task.isCancelled else { return }
+        self.audioManager.seek(to: seconds)
+      }
+    } else {
+      audioManager.seek(to: seconds)
+    }
+  }
+
+  /// Shares an Apple Podcast link with a timestamp parameter (&t=seconds).
+  func shareTimestampedLink(seconds: TimeInterval) {
+    let totalSeconds = Int(seconds)
+    shareTask?.cancel()
+    shareTask = Task { [weak self] in
+      guard let self else { return }
+      do {
+        let appleUrl = try await self.withTimeout(seconds: 5) {
+          try await self.applePodcastService.getAppleEpisodeLink(
+            episodeTitle: self.episode.title,
+            episodeGuid: self.episode.guid
+          )
+        }
+        guard !Task.isCancelled else { return }
+        var urlString = appleUrl ?? self.episode.audioURL
+        if totalSeconds > 0 {
+          urlString = (urlString ?? "") + "&t=\(totalSeconds)"
+        }
+        self.shareWithURL(urlString)
+      } catch {
+        guard !Task.isCancelled else { return }
+        var urlString = self.episode.audioURL ?? ""
+        if totalSeconds > 0 {
+          urlString += "&t=\(totalSeconds)"
+        }
+        self.shareWithURL(urlString)
+      }
+    }
+  }
+
   func skipForward() {
     audioManager.skipForward()
   }
@@ -494,6 +575,7 @@ final class EpisodeDetailViewModel {
     savedDuration = model.duration
     lastPlaybackPosition = model.lastPlaybackPosition
     playbackProgress = model.progress
+    transcriptSource = model.transcriptSource
   }
 
   // MARK: - SwiftData Persistence
@@ -615,7 +697,8 @@ final class EpisodeDetailViewModel {
       .set(rootStyle: rootStyle)
       .build()
 
-    parseDescriptionTask = Task {
+    parseDescriptionTask = Task { [weak self] in
+      guard let self else { return }
       let attributedString = parser.render(html)
       descriptionCache.setObject(attributedString, forKey: cacheKey)
       self.descriptionContent = .parsed(attributedString)
@@ -637,21 +720,22 @@ final class EpisodeDetailViewModel {
     shareTask?.cancel()
 
     // Try to find Apple Podcast URL first with timeout
-    shareTask = Task {
+    shareTask = Task { [weak self] in
+      guard let self else { return }
       do {
-        let appleUrl = try await withTimeout(seconds: 5) {
+        let appleUrl = try await self.withTimeout(seconds: 5) {
           try await self.applePodcastService.getAppleEpisodeLink(
             episodeTitle: self.episode.title,
             episodeGuid: self.episode.guid
           )
         }
         if !Task.isCancelled {
-          shareWithURL(appleUrl ?? episode.audioURL)
+          self.shareWithURL(appleUrl ?? self.episode.audioURL)
         }
       } catch {
         if !Task.isCancelled {
           // On error, fall back to audio URL
-          shareWithURL(episode.audioURL)
+          self.shareWithURL(self.episode.audioURL)
         }
       }
     }
@@ -712,47 +796,45 @@ final class EpisodeDetailViewModel {
     }
 
     translationTask?.cancel()
-    translationTask = Task {
+    translationTask = Task { [weak self] in
+      guard let self else { return }
       // Try to load existing transcript translation first
-      if let translated = await translationService.loadExistingTranslation(
-        segments: transcriptSegments,
-        episodeTitle: episode.title,
-        podcastTitle: podcastTitle,
+      if let translated = await self.translationService.loadExistingTranslation(
+        segments: self.transcriptSegments,
+        episodeTitle: self.episode.title,
+        podcastTitle: self.podcastTitle,
         targetLanguage: targetLang
       ) {
-        await MainActor.run {
-          self.transcriptSegments = translated
-          self.regroupSentences()
-          self.translationStatus = .completed
-          // Auto-switch display mode so translated text is visible
-          if self.subtitleSettings.displayMode == .originalOnly {
-            self.subtitleSettings.displayMode = .dualTranslatedFirst
-          }
-          logger.info("Loaded cached translation for \(self.episode.title) in \(language.displayName)")
+        guard !Task.isCancelled else { return }
+        self.transcriptSegments = translated
+        self.regroupSentences()
+        self.translationStatus = .completed
+        // Auto-switch display mode so translated text is visible
+        if self.subtitleSettings.displayMode == .originalOnly {
+          self.subtitleSettings.displayMode = .dualTranslatedFirst
         }
+        logger.info("Loaded cached translation for \(self.episode.title) in \(language.displayName)")
         return
       }
 
+      guard !Task.isCancelled else { return }
       // No cached translation, trigger the transcript translation task
-      await MainActor.run {
-        self.transcriptTranslationTrigger.toggle()
-      }
+      self.transcriptTranslationTrigger.toggle()
     }
   }
 
   /// Check which translation languages are available (cached)
   func checkAvailableTranslations() {
     availableTranslationsTask?.cancel()
-    availableTranslationsTask = Task {
-      let available = await fileStorage.listAvailableTranslations(
-        for: episode.title,
-        podcastTitle: podcastTitle
+    availableTranslationsTask = Task { [weak self] in
+      guard let self else { return }
+      let available = await self.fileStorage.listAvailableTranslations(
+        for: self.episode.title,
+        podcastTitle: self.podcastTitle
       )
-
-      await MainActor.run {
-        self.availableTranslationLanguages = available
-        logger.info("Found \(available.count) cached translations: \(available)")
-      }
+      guard !Task.isCancelled else { return }
+      self.availableTranslationLanguages = available
+      logger.info("Found \(available.count) cached translations: \(available)")
     }
   }
 
@@ -767,27 +849,26 @@ final class EpisodeDetailViewModel {
     let targetLang = (selectedTranslationLanguage ?? subtitleSettings.targetLanguage).languageIdentifier
 
     translationTask?.cancel()
-    translationTask = Task {
+    translationTask = Task { [weak self] in
+      guard let self else { return }
       // Try to load existing translation first
-      if let translated = await translationService.loadExistingTranslation(
-        segments: transcriptSegments,
-        episodeTitle: episode.title,
-        podcastTitle: podcastTitle,
+      if let translated = await self.translationService.loadExistingTranslation(
+        segments: self.transcriptSegments,
+        episodeTitle: self.episode.title,
+        podcastTitle: self.podcastTitle,
         targetLanguage: targetLang
       ) {
-        await MainActor.run {
-          self.transcriptSegments = translated
-          self.translationStatus = .completed
-          logger.info("Loaded cached translation for \(self.episode.title)")
-        }
+        guard !Task.isCancelled else { return }
+        self.transcriptSegments = translated
+        self.translationStatus = .completed
+        logger.info("Loaded cached translation for \(self.episode.title)")
         return
       }
 
+      guard !Task.isCancelled else { return }
       // No cached translation, trigger the translation task
-      await MainActor.run {
-        self.translationStatus = .preparingSession
-        self.transcriptTranslationTrigger.toggle()
-      }
+      self.translationStatus = .preparingSession
+      self.transcriptTranslationTrigger.toggle()
     }
   }
 
@@ -795,19 +876,15 @@ final class EpisodeDetailViewModel {
   @available(iOS 17.4, macOS 14.4, *)
   func performTranscriptTranslation(using session: TranslationSession) async {
     #if canImport(Translation)
-    let segments = await MainActor.run { self.transcriptSegments }
+    let segments = self.transcriptSegments
     let total = segments.count
 
     guard total > 0 else {
-      await MainActor.run {
-        self.translationStatus = .failed("No segments to translate")
-      }
+      self.translationStatus = .failed("No segments to translate")
       return
     }
 
-    await MainActor.run {
-      self.translationStatus = .translating(progress: 0, completed: 0, total: total)
-    }
+    self.translationStatus = .translating(progress: 0, completed: 0, total: total)
 
     var translatedSegments = segments
 
@@ -818,22 +895,16 @@ final class EpisodeDetailViewModel {
         translatedSegments[index].translatedText = response.targetText
 
         let progress = Double(index + 1) / Double(total)
-        await MainActor.run {
-          self.translationStatus = .translating(progress: progress, completed: index + 1, total: total)
-        }
+        self.translationStatus = .translating(progress: progress, completed: index + 1, total: total)
       } catch {
         logger.error("Translation failed for segment \(index): \(error.localizedDescription)")
-        await MainActor.run {
-          self.translationStatus = .failed(error.localizedDescription)
-        }
+        self.translationStatus = .failed(error.localizedDescription)
         return
       }
     }
 
     // Save translated segments using selected language or settings default
-    let targetLang = await MainActor.run {
-      (self.selectedTranslationLanguage ?? self.subtitleSettings.targetLanguage).languageIdentifier
-    }
+    let targetLang = (self.selectedTranslationLanguage ?? self.subtitleSettings.targetLanguage).languageIdentifier
 
     do {
       try await translationService.saveTranslatedSRT(
@@ -846,16 +917,14 @@ final class EpisodeDetailViewModel {
       logger.error("Failed to save translation: \(error.localizedDescription)")
     }
 
-    await MainActor.run {
-      self.transcriptSegments = translatedSegments
-      self.regroupSentences()
-      self.translationStatus = .completed
-      // Update available translations
-      self.availableTranslationLanguages.insert(targetLang)
-      // Auto-switch display mode so translated text is visible
-      if self.subtitleSettings.displayMode == .originalOnly {
-        self.subtitleSettings.displayMode = .dualTranslatedFirst
-      }
+    self.transcriptSegments = translatedSegments
+    self.regroupSentences()
+    self.translationStatus = .completed
+    // Update available translations
+    self.availableTranslationLanguages.insert(targetLang)
+    // Auto-switch display mode so translated text is visible
+    if self.subtitleSettings.displayMode == .originalOnly {
+      self.subtitleSettings.displayMode = .dualTranslatedFirst
     }
 
     logger.info("Completed translation for \(self.episode.title)")
@@ -875,9 +944,7 @@ final class EpisodeDetailViewModel {
 
     do {
       let response = try await session.translate(plainText)
-      await MainActor.run {
-        self.translatedDescription = response.targetText
-      }
+      self.translatedDescription = response.targetText
       logger.info("Translated description for \(self.episode.title)")
     } catch {
       logger.error("Description translation failed: \(error.localizedDescription)")
@@ -894,9 +961,7 @@ final class EpisodeDetailViewModel {
 
     do {
       let response = try await session.translate(title)
-      await MainActor.run {
-        self.translatedEpisodeTitle = response.targetText
-      }
+      self.translatedEpisodeTitle = response.targetText
       logger.info("Translated title for \(self.episode.title)")
     } catch {
       logger.error("Title translation failed: \(error.localizedDescription)")
@@ -913,9 +978,7 @@ final class EpisodeDetailViewModel {
 
     do {
       let response = try await session.translate(title)
-      await MainActor.run {
-        self.translatedPodcastTitle = response.targetText
-      }
+      self.translatedPodcastTitle = response.targetText
       logger.info("Translated podcast title: \(title)")
     } catch {
       logger.error("Podcast title translation failed: \(error.localizedDescription)")
@@ -941,22 +1004,22 @@ final class EpisodeDetailViewModel {
     let targetLang = settings.targetLanguage.languageIdentifier
 
     translationTask?.cancel()
-    translationTask = Task {
-      if let translated = await translationService.loadExistingTranslation(
-        segments: transcriptSegments,
-        episodeTitle: episode.title,
-        podcastTitle: podcastTitle,
+    translationTask = Task { [weak self] in
+      guard let self else { return }
+      if let translated = await self.translationService.loadExistingTranslation(
+        segments: self.transcriptSegments,
+        episodeTitle: self.episode.title,
+        podcastTitle: self.podcastTitle,
         targetLanguage: targetLang
       ) {
-        await MainActor.run {
-          self.transcriptSegments = translated
-          self.regroupSentences()
-          // Auto-switch display mode so translated text is visible
-          if self.subtitleSettings.displayMode == .originalOnly {
-            self.subtitleSettings.displayMode = .dualTranslatedFirst
-          }
-          logger.info("Loaded existing translations for \(self.episode.title)")
+        guard !Task.isCancelled else { return }
+        self.transcriptSegments = translated
+        self.regroupSentences()
+        // Auto-switch display mode so translated text is visible
+        if self.subtitleSettings.displayMode == .originalOnly {
+          self.subtitleSettings.displayMode = .dualTranslatedFirst
         }
+        logger.info("Loaded existing translations for \(self.episode.title)")
       }
     }
   }
@@ -1031,33 +1094,27 @@ final class EpisodeDetailViewModel {
     logger.info("Added to play next: \(self.episode.title)")
   }
 
-  func reportIssue() {
-    // TODO: Implement issue reporting
-    logger.debug("Report issue for: \(self.episode.title)")
-  }
-
   // MARK: - RSS Transcript Methods
 
   /// Check if RSS transcript is available from the feed
   func checkRSSTranscriptAvailability() {
     rssTranscriptCheckTask?.cancel()
-    rssTranscriptCheckTask = Task {
-      let state = await transcriptDownloadService.getDownloadState(
-        episodeTitle: episode.title,
-        podcastTitle: podcastTitle,
-        transcriptURL: episode.transcriptURL,
-        transcriptType: episode.transcriptType
+    rssTranscriptCheckTask = Task { [weak self] in
+      guard let self else { return }
+      let state = await self.transcriptDownloadService.getDownloadState(
+        episodeTitle: self.episode.title,
+        podcastTitle: self.podcastTitle,
+        transcriptURL: self.episode.transcriptURL,
+        transcriptType: self.episode.transcriptType
       )
+      guard !Task.isCancelled else { return }
+      self.rssTranscriptState = state
 
-      await MainActor.run {
-        rssTranscriptState = state
-
-        // If already downloaded, load the transcript
-        if case .downloaded = state {
-          self.loadExistingTranscriptTask?.cancel()
-          self.loadExistingTranscriptTask = Task {
-            await self.loadExistingTranscript()
-          }
+      // If already downloaded, load the transcript
+      if case .downloaded = state {
+        self.loadExistingTranscriptTask?.cancel()
+        self.loadExistingTranscriptTask = Task { [weak self] in
+          await self?.loadExistingTranscript()
         }
       }
     }
@@ -1071,32 +1128,37 @@ final class EpisodeDetailViewModel {
       return
     }
 
-    Task {
-      await MainActor.run {
-        rssTranscriptState = .downloading(progress: 0.5)
-      }
+    rssTranscriptDownloadTask?.cancel()
+    rssTranscriptDownloadTask = Task { [weak self] in
+      guard let self else { return }
+      self.rssTranscriptState = .downloading(progress: 0.5)
 
       do {
-        let savedURL = try await transcriptDownloadService.downloadTranscript(
+        let savedURL = try await self.transcriptDownloadService.downloadTranscript(
           from: url,
           type: type,
-          episodeTitle: episode.title,
-          podcastTitle: podcastTitle
+          episodeTitle: self.episode.title,
+          podcastTitle: self.podcastTitle
         )
 
-        await MainActor.run {
-          rssTranscriptState = .downloaded(localPath: savedURL.path)
-          logger.info("RSS transcript downloaded successfully")
+        guard !Task.isCancelled else { return }
+        self.rssTranscriptState = .downloaded(localPath: savedURL.path)
+        logger.info("RSS transcript downloaded successfully")
+
+        // Track that this transcript came from RSS
+        if let model = self.episodeModel {
+          model.transcriptSource = "rss"
+          self.transcriptSource = "rss"
+          try? self.modelContext?.save()
         }
 
         // Load the transcript
-        await loadExistingTranscript()
+        await self.loadExistingTranscript()
 
       } catch {
-        await MainActor.run {
-          rssTranscriptState = .failed(error: error.localizedDescription)
-          logger.error("RSS transcript download failed: \(error.localizedDescription)")
-        }
+        guard !Task.isCancelled else { return }
+        self.rssTranscriptState = .failed(error: error.localizedDescription)
+        logger.error("RSS transcript download failed: \(error.localizedDescription)")
       }
     }
   }
@@ -1143,25 +1205,29 @@ final class EpisodeDetailViewModel {
 
   func checkTranscriptStatus() {
     checkTranscriptTask?.cancel()
-    checkTranscriptTask = Task {
+    checkTranscriptTask = Task { [weak self] in
+      guard let self else { return }
       // Get podcast language and create transcript service
-      let language = getPodcastLanguage()
+      let language = self.getPodcastLanguage()
       let transcriptService = TranscriptService(language: language)
-      isModelReady = await transcriptService.isModelReady()
+      let modelReady = await transcriptService.isModelReady()
 
       // Check if transcript already exists (either from RSS or generated)
-      let exists = await fileStorage.captionFileExists(
-        for: episode.title,
-        podcastTitle: podcastTitle
+      let exists = await self.fileStorage.captionFileExists(
+        for: self.episode.title,
+        podcastTitle: self.podcastTitle
       )
+      guard !Task.isCancelled else { return }
+      self.isModelReady = modelReady
 
       if exists {
-        await loadExistingTranscript()
+        await self.loadExistingTranscript()
       } else {
+        guard !Task.isCancelled else { return }
         // Check for RSS transcript availability
-        checkRSSTranscriptAvailability()
+        self.checkRSSTranscriptAvailability()
         // Check for active background transcript jobs and resume observation
-        checkAndObserveTranscriptJob()
+        self.checkAndObserveTranscriptJob()
       }
     }
   }
@@ -1174,12 +1240,14 @@ final class EpisodeDetailViewModel {
     }
 
     // Use TranscriptManager for background processing
-    let language = selectedTranscriptLanguage ?? getPodcastLanguage()
+    // nil language → Whisper auto-detects; explicit selection overrides
+    let language: String? = selectedTranscriptLanguage.flatMap { $0 == "auto" ? nil : $0 }
     TranscriptManager.shared.queueTranscript(
       episodeTitle: episode.title,
       podcastTitle: podcastTitle,
       audioPath: audioPath,
-      language: language
+      language: language,
+      engine: selectedTranscriptEngine
     )
 
     // Start observing TranscriptManager state
@@ -1194,6 +1262,25 @@ final class EpisodeDetailViewModel {
     )
     isObservingTranscriptManager = false
     transcriptState = .idle
+  }
+
+  /// Regenerate transcript from downloaded audio, replacing any RSS transcript
+  func regenerateTranscript() {
+    // Clear current transcript
+    transcriptSegments = []
+    rawTranscriptSegments = []
+    groupedSentences = []
+    transcriptText = ""
+
+    // Mark as locally generated
+    if let model = episodeModel {
+      model.transcriptSource = "local"
+      transcriptSource = "local"
+      try? modelContext?.save()
+    }
+
+    // Trigger local transcription using existing infrastructure
+    generateTranscript()
   }
 
   /// Observes TranscriptManager for job status updates
@@ -1220,29 +1307,7 @@ final class EpisodeDetailViewModel {
   }
 
   private func handleTranscriptJobUpdate() {
-    // Use Unit Separator (U+001F) as delimiter - same as TranscriptManager
-    let delimiter = "\u{1F}"
-    let jobId = "\(podcastTitle)\(delimiter)\(episode.title)"
-
-    if let job = TranscriptManager.shared.activeJobs[jobId] {
-      // Update local state based on job status
-      switch job.status {
-      case .queued:
-        transcriptState = .transcribing(progress: 0)
-      case .downloadingModel(let progress):
-        transcriptState = .downloadingModel(progress: progress)
-      case .transcribing(let progress):
-        transcriptState = .transcribing(progress: progress)
-      case .completed:
-        // Load the transcript from disk
-        loadExistingTranscriptTask?.cancel()
-        loadExistingTranscriptTask = Task {
-          await loadExistingTranscript()
-        }
-      case .failed(let error):
-        transcriptState = .error(error)
-      }
-    }
+    syncTranscriptState()
   }
 
   func copyTranscriptToClipboard() {
@@ -1276,15 +1341,14 @@ final class EpisodeDetailViewModel {
         }
       }
 
-      await MainActor.run {
-        transcriptText = content
-        cachedTranscriptDate = fileDate
-        wordTimingsData = timingsData
-        transcriptState = .completed
-        parseTranscriptSegments()
-      }
+      transcriptText = content
+      cachedTranscriptDate = fileDate
+      wordTimingsData = timingsData
+      transcriptState = .completed
+      parseTranscriptSegments()
     } catch {
       logger.error("Failed to load transcript: \(error.localizedDescription)")
+      transcriptState = .error("Failed to load transcript: \(error.localizedDescription)")
     }
   }
 
@@ -1308,16 +1372,16 @@ final class EpisodeDetailViewModel {
   /// Load transcript generation date
   func loadTranscriptDate() {
     loadTranscriptDateTask?.cancel()
-    loadTranscriptDateTask = Task {
-      let date = await transcriptGeneratedAt
-      await MainActor.run {
-        cachedTranscriptDate = date
-      }
+    loadTranscriptDateTask = Task { [weak self] in
+      guard let self else { return }
+      let date = await self.transcriptGeneratedAt
+      guard !Task.isCancelled else { return }
+      self.cachedTranscriptDate = date
     }
   }
 
   var hasAIAnalysis: Bool {
-    cloudAnalysisCache.fullAnalysis != nil || !cloudAnalysisCache.questionAnswers.isEmpty
+    cloudAnalysisCache.analysis != nil || !cloudAnalysisCache.questionAnswers.isEmpty
   }
 
   /// Parses SRT content and returns clean text formatted in paragraphs
@@ -1335,7 +1399,7 @@ final class EpisodeDetailViewModel {
     for startIndex in stride(from: 0, to: sentences.count, by: sentencesPerParagraph) {
       let endIndex = min(startIndex + sentencesPerParagraph, sentences.count)
       let chunk = sentences[startIndex..<endIndex]
-      let paragraphText = chunk.map { $0.text }.joined(separator: " ")
+      let paragraphText = CJKTextUtils.joinTexts(chunk.map { $0.text })
       paragraphs.append(paragraphText)
     }
 
@@ -1377,6 +1441,7 @@ final class EpisodeDetailViewModel {
   func parseTranscriptSegments() {
     guard !transcriptText.isEmpty else {
       transcriptSegments = []
+      rawTranscriptSegments = []
       return
     }
 
@@ -1476,6 +1541,9 @@ final class EpisodeDetailViewModel {
         ))
     }
 
+    // Always store raw segments for sentence highlight mode
+    rawTranscriptSegments = segments
+
     // Apply sentence grouping if enabled
     if subtitleSettings.groupSegmentsIntoSentences {
       let grouped = groupSegmentsIntoSentences(segments)
@@ -1510,11 +1578,24 @@ final class EpisodeDetailViewModel {
     var grouped: [TranscriptSegment] = []
     var currentGroup: [TranscriptSegment] = []
 
+    let gapThreshold: TimeInterval = 2.0  // Force sentence break on gaps > 2s
+
     for segment in segments {
+      let trimmedText = segment.text.trimmingCharacters(in: .whitespaces)
+
+      // Force a sentence break when there's a large time gap between segments.
+      // This prevents merging across music interludes or long pauses.
+      if let lastInGroup = currentGroup.last,
+         segment.startTime - lastInGroup.endTime > gapThreshold {
+        if let merged = mergeSegments(currentGroup) {
+          grouped.append(merged)
+        }
+        currentGroup = []
+      }
+
       currentGroup.append(segment)
 
       // Check if this segment ends with sentence-ending punctuation
-      let trimmedText = segment.text.trimmingCharacters(in: .whitespaces)
       if let lastChar = trimmedText.unicodeScalars.last,
          sentenceEndings.contains(lastChar) {
         // End of sentence - merge the group
@@ -1537,13 +1618,15 @@ final class EpisodeDetailViewModel {
   private func mergeSegments(_ segments: [TranscriptSegment]) -> TranscriptSegment? {
     guard let first = segments.first, let last = segments.last else { return nil }
 
-    // Combine text with spaces
-    let combinedText = segments.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+    // Combine text with CJK-aware spacing
+    let texts = segments.map { $0.text.trimmingCharacters(in: .whitespaces) }
+    let combinedText = CJKTextUtils.joinTexts(texts)
 
     // Combine translated text if all segments have translations
     let translatedText: String?
     if segments.allSatisfy({ $0.translatedText != nil }) {
-      translatedText = segments.compactMap { $0.translatedText?.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+      let translations = segments.compactMap { $0.translatedText?.trimmingCharacters(in: .whitespaces) }
+      translatedText = CJKTextUtils.joinTexts(translations)
     } else {
       translatedText = nil
     }
@@ -1669,8 +1752,9 @@ final class EpisodeDetailViewModel {
     }
   }
 
-  /// Seeks to the start of a transcript segment and starts playback if needed
+  /// Seeks to the start of a transcript segment and starts playback if needed.
   func seekToSegment(_ segment: TranscriptSegment) {
+    let targetTime = segment.startTime
     // If not playing this episode, start playback first
     if !isPlayingThisEpisode {
       playAction()
@@ -1679,10 +1763,10 @@ final class EpisodeDetailViewModel {
       seekTask = Task { [weak self] in
         try? await Task.sleep(for: .seconds(0.3))
         guard let self, !Task.isCancelled else { return }
-        self.audioManager.seek(to: segment.startTime)
+        self.audioManager.seek(to: targetTime)
       }
     } else {
-      audioManager.seek(to: segment.startTime)
+      audioManager.seek(to: targetTime)
     }
   }
 
@@ -1695,6 +1779,29 @@ final class EpisodeDetailViewModel {
     if !transcriptSearchQuery.isEmpty {
       updateSearchMatches(query: transcriptSearchQuery)
     }
+  }
+
+  /// Sentences to display based on display mode and search state.
+  /// Centralizes the selection logic formerly in EpisodeDetailView.
+  var transcriptSentences: [TranscriptSentence] {
+    let settings = SubtitleSettingsManager.shared
+    if !transcriptSearchQuery.isEmpty {
+      return filteredGroupedSentences
+    } else if settings.sentenceHighlightEnabled && !hasExistingTranslation {
+      return paragraphGroupedSentences
+    } else {
+      return groupedSentences
+    }
+  }
+
+  /// Paragraph-grouped sentences for sentence highlight mode (larger grouping: up to 8 segments)
+  /// Uses raw (unmerged) segments for per-segment highlight granularity.
+  /// Falls back to merged segments when translations exist (translations are on merged segments).
+  var paragraphGroupedSentences: [TranscriptSentence] {
+    let hasTranslations = transcriptSegments.contains { $0.translatedText != nil }
+    let segments = (!rawTranscriptSegments.isEmpty && !hasTranslations)
+      ? rawTranscriptSegments : transcriptSegments
+    return TranscriptGrouping.groupIntoParagraphSentences(segments)
   }
 
   /// Regroup filtered segments into sentences (for search-filtered view)
@@ -1785,21 +1892,17 @@ final class EpisodeDetailViewModel {
           }
         )
 
-        await MainActor.run {
-          quickTagsCache.tags = tags
-          quickTagsCache.generatedAt = Date()
-          quickTagsState = .completed
+        quickTagsCache.tags = tags
+        quickTagsCache.generatedAt = Date()
+        quickTagsState = .completed
 
-          // Save to SwiftData
-          saveQuickTagsToSwiftData(tags: tags)
+        // Save to SwiftData
+        saveQuickTagsToSwiftData(tags: tags)
 
-          logger.info("Quick tags generated successfully")
-        }
+        logger.info("Quick tags generated successfully")
       } catch {
-        await MainActor.run {
-          quickTagsState = .error("Failed: \(error.localizedDescription)")
-          logger.error("Quick tags generation failed: \(error.localizedDescription)")
-        }
+        quickTagsState = .error("Failed: \(error.localizedDescription)")
+        logger.error("Quick tags generation failed: \(error.localizedDescription)")
       }
     }
   }
@@ -1819,9 +1922,7 @@ final class EpisodeDetailViewModel {
     briefSummaryTask?.cancel()
     briefSummaryTask = Task {
       do {
-        await MainActor.run {
-          quickTagsState = .analyzing(progress: 0, message: "Creating summary...")
-        }
+        quickTagsState = .analyzing(progress: 0, message: "Creating summary...")
 
         let service = AppleFoundationModelsService()
         let summary = try await service.generateBriefSummary(
@@ -1834,17 +1935,13 @@ final class EpisodeDetailViewModel {
           }
         )
 
-        await MainActor.run {
-          quickTagsCache.briefSummary = summary
-          quickTagsCache.generatedAt = Date()
-          quickTagsState = .completed
-          logger.info("Brief summary generated successfully")
-        }
+        quickTagsCache.briefSummary = summary
+        quickTagsCache.generatedAt = Date()
+        quickTagsState = .completed
+        logger.info("Brief summary generated successfully")
       } catch {
-        await MainActor.run {
-          quickTagsState = .error("Failed: \(error.localizedDescription)")
-          logger.error("Brief summary generation failed: \(error.localizedDescription)")
-        }
+        quickTagsState = .error("Failed: \(error.localizedDescription)")
+        logger.error("Brief summary generation failed: \(error.localizedDescription)")
       }
     }
   }
@@ -1862,7 +1959,7 @@ final class EpisodeDetailViewModel {
   var currentStreamingType: CloudAnalysisType?
 
   /// Generate cloud-based transcript analysis with streaming
-  func generateCloudAnalysis(type: CloudAnalysisType) {
+  func generateCloudAnalysis(type: CloudAnalysisType, formatHint: String? = nil) {
     let settings = AISettingsManager.shared
 
     guard settings.hasConfiguredProvider else {
@@ -1878,12 +1975,10 @@ final class EpisodeDetailViewModel {
     cloudAnalysisTask?.cancel()
     cloudAnalysisTask = Task {
       do {
-        await MainActor.run {
-          cloudAnalysisState = .analyzing(progress: 0, message: "Preparing...")
-          streamingText = ""
-          isStreaming = true
-          currentStreamingType = type
-        }
+        cloudAnalysisState = .analyzing(progress: 0, message: "Preparing...")
+        streamingText = ""
+        isStreaming = true
+        currentStreamingType = type
 
         let service = CloudAIService.shared
 
@@ -1893,8 +1988,11 @@ final class EpisodeDetailViewModel {
           podcastTitle: podcastTitle,
           analysisType: type,
           podcastLanguage: podcastLanguage,
+          formatHint: formatHint,
           onChunk: { [weak self] text in
-            self?.streamingText = text
+            Task { @MainActor in
+              self?.streamingText = text
+            }
           },
           progressCallback: { [weak self] message, progress in
             Task { @MainActor in
@@ -1903,37 +2001,24 @@ final class EpisodeDetailViewModel {
           }
         )
 
-        await MainActor.run {
-          isStreaming = false
-          currentStreamingType = nil
-          streamingText = ""
+        isStreaming = false
+        currentStreamingType = nil
+        streamingText = ""
 
-          // Store in cache
-          switch type {
-          case .summary:
-            cloudAnalysisCache.summary = result
-          case .entities:
-            cloudAnalysisCache.entities = result
-          case .highlights:
-            cloudAnalysisCache.highlights = result
-          case .fullAnalysis:
-            cloudAnalysisCache.fullAnalysis = result
-          }
-          cloudAnalysisState = .completed
+        // Store in cache
+        cloudAnalysisCache.analysis = result
+        cloudAnalysisState = .completed
 
-          // Save to SwiftData
-          saveCloudAnalysisToSwiftData(result: result, type: type)
+        // Save to SwiftData
+        saveCloudAnalysisToSwiftData(result: result, type: type)
 
-          logger.info("Cloud analysis (\(type.rawValue)) completed successfully")
-        }
+        logger.info("Cloud analysis (\(type.rawValue)) completed successfully")
       } catch {
-        await MainActor.run {
-          isStreaming = false
-          currentStreamingType = nil
-          streamingText = ""
-          cloudAnalysisState = .error(error.localizedDescription)
-          logger.error("Cloud analysis failed: \(error.localizedDescription)")
-        }
+        isStreaming = false
+        currentStreamingType = nil
+        streamingText = ""
+        cloudAnalysisState = .error(error.localizedDescription)
+        logger.error("Cloud analysis failed: \(error.localizedDescription)")
       }
     }
   }
@@ -1959,9 +2044,7 @@ final class EpisodeDetailViewModel {
     cloudQuestionTask?.cancel()
     cloudQuestionTask = Task {
       do {
-        await MainActor.run {
-          cloudQuestionState = .analyzing(progress: 0, message: "Processing question...")
-        }
+        cloudQuestionState = .analyzing(progress: 0, message: "Processing question...")
 
         let service = CloudAIService.shared
 
@@ -1977,20 +2060,16 @@ final class EpisodeDetailViewModel {
           }
         )
 
-        await MainActor.run {
-          cloudAnalysisCache.questionAnswers.append(result)
-          cloudQuestionState = .completed
+        cloudAnalysisCache.questionAnswers.append(result)
+        cloudQuestionState = .completed
 
-          // Save Q&A to SwiftData
-          saveQAToSwiftData(result)
+        // Save Q&A to SwiftData
+        saveQAToSwiftData(result)
 
-          logger.info("Cloud Q&A completed successfully - Provider: \(result.provider.displayName), Model: \(result.model)")
-        }
+        logger.info("Cloud Q&A completed successfully - Provider: \(result.provider.displayName), Model: \(result.model)")
       } catch {
-        await MainActor.run {
-          cloudQuestionState = .error(error.localizedDescription)
-          logger.error("Cloud Q&A failed: \(error.localizedDescription)")
-        }
+        cloudQuestionState = .error(error.localizedDescription)
+        logger.error("Cloud Q&A failed: \(error.localizedDescription)")
       }
     }
   }
@@ -1998,14 +2077,8 @@ final class EpisodeDetailViewModel {
   /// Clear a specific cloud analysis result
   func clearCloudAnalysis(type: CloudAnalysisType) {
     switch type {
-    case .summary:
-      cloudAnalysisCache.summary = nil
-    case .entities:
-      cloudAnalysisCache.entities = nil
-    case .highlights:
-      cloudAnalysisCache.highlights = nil
-    case .fullAnalysis:
-      cloudAnalysisCache.fullAnalysis = nil
+    case .analysis:
+      cloudAnalysisCache.analysis = nil
     }
     cloudAnalysisState = .idle
   }
@@ -2071,88 +2144,14 @@ final class EpisodeDetailViewModel {
 
   /// Restore cloud analysis cache from SwiftData model
   private func restoreCloudAnalysisFromModel(_ model: EpisodeAIAnalysis) {
-    // Restore summary
-    if let summaryText = model.summaryText {
-      let parsed = ParsedSummaryResponse(
-        summary: summaryText,
-        mainTopics: model.summaryMainTopics ?? [],
-        keyTakeaways: model.summaryKeyTakeaways ?? [],
-        targetAudience: model.summaryTargetAudience ?? "",
-        engagementLevel: model.summaryEngagementLevel ?? ""
-      )
-      cloudAnalysisCache.summary = CloudAnalysisResult(
-        type: .summary,
-        content: summaryText,
-        parsedSummary: parsed,
-        parsedEntities: nil,
-        parsedHighlights: nil,
-        parsedFullAnalysis: nil,
-        provider: CloudAIProvider(rawValue: model.summaryProvider ?? "") ?? .openai,
-        model: model.summaryModel ?? "",
-        timestamp: model.summaryGeneratedAt ?? model.createdAt
-      )
-    }
-
-    // Restore entities
-    if model.hasEntities {
-      let parsed = ParsedEntitiesResponse(
-        people: model.entitiesPeople ?? [],
-        organizations: model.entitiesOrganizations ?? [],
-        products: model.entitiesProducts ?? [],
-        locations: model.entitiesLocations ?? [],
-        resources: model.entitiesResources ?? []
-      )
-      let content = formatEntitiesAsText(parsed)
-      cloudAnalysisCache.entities = CloudAnalysisResult(
-        type: .entities,
-        content: content,
-        parsedSummary: nil,
-        parsedEntities: parsed,
-        parsedHighlights: nil,
-        parsedFullAnalysis: nil,
-        provider: CloudAIProvider(rawValue: model.entitiesProvider ?? "") ?? .openai,
-        model: model.entitiesModel ?? "",
-        timestamp: model.entitiesGeneratedAt ?? model.createdAt
-      )
-    }
-
-    // Restore highlights
-    if model.hasHighlights {
-      let parsed = ParsedHighlightsResponse(
-        highlights: model.highlightsList ?? [],
-        bestQuote: model.highlightsBestQuote ?? "",
-        actionItems: model.highlightsActionItems ?? [],
-        controversialPoints: model.highlightsControversialPoints,
-        entertainingMoments: model.highlightsEntertainingMoments
-      )
-      let content = formatHighlightsAsText(parsed)
-      cloudAnalysisCache.highlights = CloudAnalysisResult(
-        type: .highlights,
-        content: content,
-        parsedSummary: nil,
-        parsedEntities: nil,
-        parsedHighlights: parsed,
-        parsedFullAnalysis: nil,
-        provider: CloudAIProvider(rawValue: model.highlightsProvider ?? "") ?? .openai,
-        model: model.highlightsModel ?? "",
-        timestamp: model.highlightsGeneratedAt ?? model.createdAt
-      )
-    }
-
-    // Restore full analysis
-    if let fullText = model.fullAnalysisText {
-      // Try to parse as JSON for structured display
-      let parsedFull = parseFullAnalysisJSON(fullText)
-      cloudAnalysisCache.fullAnalysis = CloudAnalysisResult(
-        type: .fullAnalysis,
-        content: fullText,
-        parsedSummary: nil,
-        parsedEntities: nil,
-        parsedHighlights: nil,
-        parsedFullAnalysis: parsedFull,
-        provider: CloudAIProvider(rawValue: model.fullAnalysisProvider ?? "") ?? .openai,
-        model: model.fullAnalysisModel ?? "",
-        timestamp: model.fullAnalysisGeneratedAt ?? model.createdAt
+    if let parsed = model.parsedAnalysis {
+      cloudAnalysisCache.analysis = CloudAnalysisResult(
+        type: .analysis,
+        content: model.analysisJSON ?? formatAnalysisAsText(parsed),
+        parsedAnalysis: parsed,
+        provider: CloudAIProvider(rawValue: model.provider ?? "") ?? .openai,
+        model: model.model ?? "",
+        timestamp: model.generatedAt ?? model.updatedAt
       )
     }
 
@@ -2244,49 +2243,11 @@ final class EpisodeDetailViewModel {
 
       // Update based on analysis type
       switch type {
-      case .summary:
-        if let parsed = result.parsedSummary {
-          model.summaryText = parsed.summary
-          model.summaryMainTopics = parsed.mainTopics
-          model.summaryKeyTakeaways = parsed.keyTakeaways
-          model.summaryTargetAudience = parsed.targetAudience
-          model.summaryEngagementLevel = parsed.engagementLevel
-        } else {
-          model.summaryText = result.content
-        }
-        model.summaryProvider = result.provider.rawValue
-        model.summaryModel = result.model
-        model.summaryGeneratedAt = result.timestamp
-
-      case .entities:
-        if let parsed = result.parsedEntities {
-          model.entitiesPeople = parsed.people
-          model.entitiesOrganizations = parsed.organizations
-          model.entitiesProducts = parsed.products
-          model.entitiesLocations = parsed.locations
-          model.entitiesResources = parsed.resources
-        }
-        model.entitiesProvider = result.provider.rawValue
-        model.entitiesModel = result.model
-        model.entitiesGeneratedAt = result.timestamp
-
-      case .highlights:
-        if let parsed = result.parsedHighlights {
-          model.highlightsList = parsed.highlights
-          model.highlightsBestQuote = parsed.bestQuote
-          model.highlightsActionItems = parsed.actionItems
-          model.highlightsControversialPoints = parsed.controversialPoints
-          model.highlightsEntertainingMoments = parsed.entertainingMoments
-        }
-        model.highlightsProvider = result.provider.rawValue
-        model.highlightsModel = result.model
-        model.highlightsGeneratedAt = result.timestamp
-
-      case .fullAnalysis:
-        model.fullAnalysisText = result.content
-        model.fullAnalysisProvider = result.provider.rawValue
-        model.fullAnalysisModel = result.model
-        model.fullAnalysisGeneratedAt = result.timestamp
+      case .analysis:
+        model.parsedAnalysis = result.parsedAnalysis
+        model.provider = result.provider.rawValue
+        model.model = result.model
+        model.generatedAt = result.timestamp
       }
 
       model.updatedAt = Date()
@@ -2336,54 +2297,27 @@ final class EpisodeDetailViewModel {
 
   // MARK: - Format Helpers
 
-  private func formatEntitiesAsText(_ entities: ParsedEntitiesResponse) -> String {
+  private func formatAnalysisAsText(_ analysis: ParsedEpisodeAnalysisResponse) -> String {
     var parts: [String] = []
-    if !entities.people.isEmpty { parts.append("People: \(entities.people.joined(separator: ", "))") }
-    if !entities.organizations.isEmpty { parts.append("Organizations: \(entities.organizations.joined(separator: ", "))") }
-    if !entities.products.isEmpty { parts.append("Products: \(entities.products.joined(separator: ", "))") }
-    if !entities.locations.isEmpty { parts.append("Locations: \(entities.locations.joined(separator: ", "))") }
-    if !entities.resources.isEmpty { parts.append("Resources: \(entities.resources.joined(separator: ", "))") }
-    return parts.joined(separator: "\n\n")
-  }
-
-  private func formatHighlightsAsText(_ highlights: ParsedHighlightsResponse) -> String {
-    var parts: [String] = []
-    if !highlights.highlights.isEmpty { parts.append("Highlights:\n• " + highlights.highlights.joined(separator: "\n• ")) }
-    if !highlights.bestQuote.isEmpty { parts.append("Best Quote: \"\(highlights.bestQuote)\"") }
-    if !highlights.actionItems.isEmpty { parts.append("Action Items:\n• " + highlights.actionItems.joined(separator: "\n• ")) }
-    if let controversial = highlights.controversialPoints, !controversial.isEmpty {
+    if !analysis.overview.isEmpty { parts.append(analysis.overview) }
+    if !analysis.keyTakeaways.isEmpty { parts.append("Key Takeaways:\n• " + analysis.keyTakeaways.joined(separator: "\n• ")) }
+    if !analysis.people.isEmpty { parts.append("People: \(analysis.people.joined(separator: ", "))") }
+    if !analysis.organizations.isEmpty { parts.append("Organizations: \(analysis.organizations.joined(separator: ", "))") }
+    if !analysis.products.isEmpty { parts.append("Products: \(analysis.products.joined(separator: ", "))") }
+    if !analysis.locations.isEmpty { parts.append("Locations: \(analysis.locations.joined(separator: ", "))") }
+    if !analysis.resources.isEmpty { parts.append("Resources: \(analysis.resources.joined(separator: ", "))") }
+    if !analysis.highlights.isEmpty { parts.append("Highlights:\n• " + analysis.highlights.joined(separator: "\n• ")) }
+    if !analysis.actionItems.isEmpty { parts.append("Action Items:\n• " + analysis.actionItems.joined(separator: "\n• ")) }
+    if let controversial = analysis.controversialPoints, !controversial.isEmpty {
       parts.append("Controversial Points:\n• " + controversial.joined(separator: "\n• "))
     }
-    if let entertaining = highlights.entertainingMoments, !entertaining.isEmpty {
+    if let entertaining = analysis.entertainingMoments, !entertaining.isEmpty {
       parts.append("Entertaining Moments:\n• " + entertaining.joined(separator: "\n• "))
     }
+    if !analysis.conclusion.isEmpty { parts.append("Conclusion: \(analysis.conclusion)") }
     return parts.joined(separator: "\n\n")
   }
 
-  /// Parse full analysis JSON from stored content
-  private func parseFullAnalysisJSON(_ content: String) -> ParsedFullAnalysisResponse? {
-    var jsonString = content.trimmingCharacters(in: .whitespacesAndNewlines)
-
-    // Remove markdown code block if present
-    if jsonString.hasPrefix("```json") {
-      jsonString = String(jsonString.dropFirst(7))
-    } else if jsonString.hasPrefix("```") {
-      jsonString = String(jsonString.dropFirst(3))
-    }
-    if jsonString.hasSuffix("```") {
-      jsonString = String(jsonString.dropLast(3))
-    }
-    jsonString = jsonString.trimmingCharacters(in: .whitespacesAndNewlines)
-
-    guard let data = jsonString.data(using: .utf8) else { return nil }
-
-    do {
-      return try JSONDecoder().decode(ParsedFullAnalysisResponse.self, from: data)
-    } catch {
-      logger.debug("Failed to parse full analysis JSON: \(error.localizedDescription)")
-      return nil
-    }
-  }
 
   // MARK: - Cleanup
 
@@ -2420,6 +2354,9 @@ final class EpisodeDetailViewModel {
     rssTranscriptCheckTask?.cancel()
     rssTranscriptCheckTask = nil
 
+    rssTranscriptDownloadTask?.cancel()
+    rssTranscriptDownloadTask = nil
+
     loadExistingTranscriptTask?.cancel()
     loadExistingTranscriptTask = nil
 
@@ -2440,6 +2377,13 @@ final class EpisodeDetailViewModel {
 
     cloudQuestionTask?.cancel()
     cloudQuestionTask = nil
+
+    // Release large transcript data
+    transcriptText = ""
+    transcriptSegments = []
+    rawTranscriptSegments = []
+    groupedSentences = []
+    wordTimingsData = nil
   }
 
   // Tasks are cancelled via cleanup() from onDisappear; deinit removed

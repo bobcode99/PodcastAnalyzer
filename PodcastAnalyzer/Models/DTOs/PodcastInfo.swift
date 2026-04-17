@@ -16,6 +16,16 @@ public struct PodcastInfo: Sendable, Identifiable {
   public let imageURL: String
   public let language: String
 
+  nonisolated init() {
+    self.id = ""
+    self.title = ""
+    self.podcastInfoDescription = nil
+    self.episodes = []
+    self.rssUrl = ""
+    self.imageURL = ""
+    self.language = ""
+  }
+
   nonisolated init(
     title: String, description: String?, episodes: [PodcastEpisodeInfo], rssUrl: String,
     imageURL: String, language: String

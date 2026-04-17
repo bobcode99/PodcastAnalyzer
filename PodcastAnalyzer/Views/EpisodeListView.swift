@@ -78,7 +78,8 @@ struct EpisodeListView: View {
     podcastArtwork: String,
     artistName: String,
     collectionId: String,
-    applePodcastUrl: String?
+    applePodcastUrl: String?,
+    initialFilter: EpisodeFilter = .all
   ) {
     self.source = .browse(
       collectionId: collectionId,
@@ -87,7 +88,7 @@ struct EpisodeListView: View {
       artworkURL: podcastArtwork,
       applePodcastURL: applePodcastUrl
     )
-    self.initialFilter = .all
+    self.initialFilter = initialFilter
   }
 
   private var navigationTitle: String {
@@ -354,6 +355,9 @@ struct EpisodeListView: View {
             podcastLanguage: viewModel.podcastInfo.language,
             downloadManager: downloadManager,
             episodeModel: viewModel.episodeModels[
+              viewModel.makeEpisodeKey(episode)
+            ],
+            precomputedDownloadState: viewModel.downloadStatesSnapshot[
               viewModel.makeEpisodeKey(episode)
             ],
             showArtwork: showEpisodeArtwork,

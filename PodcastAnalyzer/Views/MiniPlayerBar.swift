@@ -31,16 +31,15 @@ enum ExpandedPlayerNavigation: Equatable {
 struct MiniPlayerBar: View {
   @Environment(\.tabViewBottomAccessoryPlacement) var placement
   @Environment(\.modelContext) private var modelContext
+  @Environment(\.tabNavigationCoordinator) private var coordinator
   // Access singleton directly without @State to avoid unnecessary observation overhead
   private var audioManager: EnhancedAudioManager { .shared }
   @State private var showExpandedPlayer = false
-
-  // Pending navigation after expanded player dismisses
-  @Binding var pendingNavigation: ExpandedPlayerNavigation
+  @State private var deferredNavigation: ExpandedPlayerNavigation = .none
 
   private var progress: Double {
     guard audioManager.duration > 0 else { return 0 }
-    return audioManager.currentTime / audioManager.duration
+    return min(max(audioManager.currentTime / audioManager.duration, 0), 1)
   }
 
   var body: some View {
@@ -113,15 +112,23 @@ struct MiniPlayerBar: View {
       .padding(.vertical, 10)
       .glassEffect(Glass.regular)
     }
-    .sheet(isPresented: $showExpandedPlayer) {
+    .sheet(isPresented: $showExpandedPlayer, onDismiss: handleExpandedPlayerDismissed) {
       ExpandedPlayerView(
         onNavigateToEpisodeDetail: { episode, podcastTitle, imageURL in
-          pendingNavigation = .episodeDetail(episode, podcastTitle: podcastTitle, imageURL: imageURL)
+          deferredNavigation = .episodeDetail(episode, podcastTitle: podcastTitle, imageURL: imageURL)
         },
         onNavigateToPodcast: { podcast in
-          pendingNavigation = .podcastEpisodeList(podcast)
+          deferredNavigation = .podcastEpisodeList(podcast)
         }
       )
+    }
+    .onChange(of: NotificationNavigationManager.shared.shouldExpandPlayer) { _, shouldExpand in
+      if shouldExpand {
+        NotificationNavigationManager.shared.shouldExpandPlayer = false
+        if audioManager.currentEpisode != nil {
+          showExpandedPlayer = true
+        }
+      }
     }
   }
 
@@ -162,6 +169,30 @@ struct MiniPlayerBar: View {
           useDefaultSpeed: true
         )
       }
+    }
+  }
+
+  private func handleExpandedPlayerDismissed() {
+    guard deferredNavigation != .none else { return }
+    let navigation = deferredNavigation
+    deferredNavigation = .none
+
+    switch navigation {
+    case .none:
+      break
+    case let .episodeDetail(episode, podcastTitle, imageURL):
+      coordinator?.activeRouter.push(
+        EpisodeDetailRoute(
+          episode: episode,
+          podcastTitle: podcastTitle,
+          fallbackImageURL: imageURL,
+          podcastLanguage: nil
+        )
+      )
+    case let .podcastEpisodeList(podcastModel):
+      coordinator?.activeRouter.push(
+        PodcastBrowseRoute(podcastModel: podcastModel)
+      )
     }
   }
 
@@ -227,5 +258,5 @@ struct MiniPlayerBar: View {
 // MARK: - Preview
 
 #Preview {
-  MiniPlayerBar(pendingNavigation: .constant(.none))
+  MiniPlayerBar()
 }

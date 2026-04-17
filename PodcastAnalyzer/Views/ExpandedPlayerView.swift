@@ -12,6 +12,7 @@ import SwiftUI
 private let logger = Logger(subsystem: "com.podcast.analyzer", category: "ExpandedPlayerView")
 
 #if os(iOS)
+import MediaPlayer
 import UIKit
 #endif
 
@@ -21,7 +22,6 @@ struct ExpandedPlayerView: View {
   @State private var viewModel = ExpandedPlayerViewModel()
   @State private var showSpeedPicker = false
   @State private var showQueue = false
-  @State private var showEllipsisMenu = false
   @State private var showSleepTimerPicker = false
 
   // Scrubbing state for smooth slider interaction
@@ -48,9 +48,7 @@ struct ExpandedPlayerView: View {
         .ignoresSafeArea()
 
         ScrollView {
-            // This container ensures content spans at least the full screen height
             VStack(spacing: 0) {
-
                 // 1. Artwork & Info Group
                 VStack(spacing: 0) {
                     artworkSection
@@ -60,17 +58,32 @@ struct ExpandedPlayerView: View {
                         .padding(.top, 24)
                 }
 
-                Spacer(minLength: 20) // Flexible space
+                Spacer(minLength: 20)
 
-                // 2. Playback Group (Progress + Controls)
-                VStack(spacing: 24) {
+                // 2. Playback Group (Progress + Controls + Volume)
+                VStack(spacing: 32) {
                     progressSection
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, 32)
 
                     controlsSection
+
+                    #if os(iOS)
+                    // Volume slider (system MPVolumeView)
+                    HStack(spacing: 12) {
+                        Image(systemName: "speaker.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                        SystemVolumeSlider()
+                            .frame(height: 32)
+                        Image(systemName: "speaker.wave.3.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 32)
+                    #endif
                 }
 
-                Spacer(minLength: 20) // Flexible space
+                Spacer(minLength: 32)
 
                 // 3. Bottom Actions
                 bottomActionsSection
@@ -142,7 +155,6 @@ struct ExpandedPlayerView: View {
 
     return Group {
       if let imageURL = viewModel.imageURL {
-        // Use CachedAsyncImage for better memory management
         CachedAsyncImage(url: imageURL) { image in
           image
             .resizable()
@@ -151,14 +163,14 @@ struct ExpandedPlayerView: View {
           artworkPlaceholder
         }
         .frame(width: baseSize, height: baseSize)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(.rect(cornerRadius: 16))
         .shadow(color: .black.opacity(isPlaying ? 0.4 : 0.25), radius: isPlaying ? 25 : 15, x: 0, y: isPlaying ? 12 : 8)
         .scaleEffect(isPlaying ? playingScale : 1.0)
         .animation(.spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0), value: isPlaying)
       } else {
         artworkPlaceholder
           .frame(width: baseSize, height: baseSize)
-          .clipShape(RoundedRectangle(cornerRadius: 16))
+          .clipShape(.rect(cornerRadius: 16))
           .scaleEffect(isPlaying ? playingScale : 1.0)
           .animation(.spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0), value: isPlaying)
       }
@@ -166,8 +178,7 @@ struct ExpandedPlayerView: View {
   }
 
   private var artworkPlaceholder: some View {
-    RoundedRectangle(cornerRadius: 16)
-      .fill(Color.gray.opacity(0.3))
+    Color.gray.opacity(0.3)
       .overlay(
         Image(systemName: "music.note")
           .font(.system(size: 60))
@@ -178,10 +189,7 @@ struct ExpandedPlayerView: View {
   // MARK: - Episode Info Section
   private var episodeInfoSection: some View {
     VStack(spacing: 12) {
-      // 1. Fixed height container for Title and Ellipsis
       HStack(alignment: .center, spacing: 16) {
-        // Spacer to keep title centered if you want,
-        // but usually, it's better to let title take space and fix the button.
         VStack(alignment: .center, spacing: 4) {
           Text(viewModel.episodeTitle)
             .font(.title3)
@@ -190,7 +198,6 @@ struct ExpandedPlayerView: View {
             .multilineTextAlignment(.center)
             .foregroundStyle(.primary)
 
-          // Podcast name button - navigates to show's episode list
           Button(action: { navigateToPodcast() }) {
             Text(viewModel.podcastTitle)
               .font(.subheadline)
@@ -199,10 +206,8 @@ struct ExpandedPlayerView: View {
           }
         }
         .frame(maxWidth: .infinity)
-        // This ensures the title doesn't overlap the button
         .padding(.leading, 44)
 
-        // 2. Enhanced Ellipsis Button - larger touch target
         Menu {
           ellipsisMenuContent
         } label: {
@@ -216,7 +221,6 @@ struct ExpandedPlayerView: View {
       }
       .padding(.horizontal, 20)
 
-      // Date Label
       if let date = viewModel.episodeDate {
         Text(date.formatted(date: .abbreviated, time: .omitted))
           .font(.caption2)
@@ -230,7 +234,6 @@ struct ExpandedPlayerView: View {
   // MARK: - Ellipsis Menu Content (Apple Podcasts Style)
   @ViewBuilder
   private var ellipsisMenuContent: some View {
-    // SECTION 1: Immediate Actions
     Section {
       Button(action: { viewModel.playNextCurrentEpisode() }) {
         Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
@@ -241,7 +244,6 @@ struct ExpandedPlayerView: View {
       }
     }
 
-    // SECTION 2: Library Management
     Section {
       Button(action: { viewModel.toggleStar() }) {
         Label(
@@ -261,7 +263,6 @@ struct ExpandedPlayerView: View {
       }
     }
 
-    // SECTION 3: Navigation & Info
     Section {
       Button(action: { navigateToEpisodeDetail() }) {
         Label("View Episode Description", systemImage: "doc.text")
@@ -272,30 +273,21 @@ struct ExpandedPlayerView: View {
       }
     }
 
-    // SECTION 4: Feedback
-    Section {
-      Button(role: .destructive, action: { viewModel.reportConcern() }) {
-        Label("Report a Concern", systemImage: "exclamationmark.bubble")
-      }
-    }
   }
+
   // MARK: - Progress Section
   private var progressSection: some View {
-    // Use scrubbing progress when user is dragging, otherwise use actual progress
     let displayProgress = isScrubbing ? scrubbingProgress : viewModel.progress
     let displayCurrentTime = isScrubbing ? scrubbingProgress * viewModel.duration : viewModel.currentTime
     let displayRemainingTime = viewModel.duration - displayCurrentTime
 
     return VStack(spacing: 8) {
-      // Seek slider
       GeometryReader { geometry in
         ZStack(alignment: .leading) {
-          // Track background
           Capsule()
             .fill(Color.gray.opacity(0.3))
             .frame(height: 6)
 
-          // Progress - smooth animation when not scrubbing
           Capsule()
             .fill(Color.primary)
             .frame(
@@ -304,7 +296,6 @@ struct ExpandedPlayerView: View {
             )
             .animation(isScrubbing ? nil : .linear(duration: 0.1), value: displayProgress)
 
-          // Thumb - slightly larger when scrubbing for better feedback
           Circle()
             .fill(Color.primary)
             .frame(width: isScrubbing ? 18 : 14, height: isScrubbing ? 18 : 14)
@@ -321,9 +312,7 @@ struct ExpandedPlayerView: View {
         .gesture(
           DragGesture(minimumDistance: 0)
             .onChanged { value in
-              // Only allow scrubbing if duration is available
               guard !viewModel.isDurationLoading else { return }
-              // Start scrubbing - only update visual progress, don't seek yet
               if !isScrubbing {
                 withAnimation(.easeOut(duration: 0.1)) {
                   isScrubbing = true
@@ -334,17 +323,10 @@ struct ExpandedPlayerView: View {
               scrubbingProgress = min(max(0, progress), 1)
             }
             .onEnded { value in
-              // Only seek if duration is available
               guard !viewModel.isDurationLoading else { return }
-              // End scrubbing - perform the actual seek
               let progress = value.location.x / geometry.size.width
               let finalProgress = min(max(0, progress), 1)
-
-              // First seek to the position
               viewModel.seekToProgress(finalProgress)
-
-              // Then smoothly transition out of scrubbing mode
-              // Keep scrubbing progress at final value briefly to prevent snap-back
               withAnimation(.easeOut(duration: 0.2)) {
                 isScrubbing = false
               }
@@ -352,11 +334,10 @@ struct ExpandedPlayerView: View {
         )
         .opacity(viewModel.isDurationLoading ? 0.5 : 1.0)
       }
-      .frame(height: 18) // Slightly taller for better touch target
+      .frame(height: 18)
 
-      // Time labels - show scrubbing time when dragging
       HStack {
-        Text(formatTime(displayCurrentTime))
+        Text(Formatters.formatPlaybackTime(displayCurrentTime))
           .font(.caption)
           .foregroundStyle(isScrubbing ? .primary : .secondary)
           .monospacedDigit()
@@ -364,7 +345,7 @@ struct ExpandedPlayerView: View {
 
         Spacer()
 
-        Text("-" + formatTime(displayRemainingTime))
+        Text("-" + Formatters.formatPlaybackTime(displayRemainingTime))
           .font(.caption)
           .foregroundStyle(isScrubbing ? .primary : .secondary)
           .monospacedDigit()
@@ -373,30 +354,11 @@ struct ExpandedPlayerView: View {
     }
   }
 
-  private func formatTime(_ time: TimeInterval) -> String {
-    guard time.isFinite && time >= 0 else { return "0:00" }
-
-    let hours = Int(time) / 3600
-    let minutes = Int(time) / 60 % 60
-    let seconds = Int(time) % 60
-
-    if hours > 0 {
-      return String(format: "%d:%02d:%02d", hours, minutes, seconds)
-    } else {
-      return String(format: "%d:%02d", minutes, seconds)
-    }
-  }
-
   // MARK: - Controls Section
   private var controlsSection: some View {
     HStack(spacing: 0) {
-      // Speed button - larger touch target
-      Button(action: {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-          showSpeedPicker = true
-        }
-      }) {
-        Text(formatSpeed(viewModel.playbackSpeed))
+      Button(action: openSpeedPicker) {
+        Text(Formatters.formatSpeed(viewModel.playbackSpeed))
           .font(.system(size: 16, weight: .medium))
           .foregroundStyle(.primary)
           .frame(width: 48, height: 48)
@@ -407,33 +369,35 @@ struct ExpandedPlayerView: View {
 
       Spacer()
 
-      // Skip backward 15s
-      Button(action: { viewModel.skipBackward() }) {
-        Image(systemName: "gobackward.15")
-          .font(.system(size: 32))
-          .foregroundStyle(.primary)
-      }
-      .frame(width: 60)
+      HStack(spacing: 28) {
+        Button(action: { viewModel.skipBackward() }) {
+          Image(systemName: "gobackward.15")
+            .font(.system(size: 32))
+            .foregroundStyle(.primary)
+        }
+        .frame(width: 60)
+        .accessibilityLabel("Skip back 15 seconds")
 
-      // Play/Pause
-      Button(action: { viewModel.togglePlayPause() }) {
-        Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-          .font(.system(size: 72))
-          .foregroundStyle(.primary)
-      }
-      .frame(width: 80)
+        Button(action: { viewModel.togglePlayPause() }) {
+          Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+            .font(.system(size: 72))
+            .foregroundStyle(.primary)
+        }
+        .frame(width: 80)
+        .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
 
-      // Skip forward 30s
-      Button(action: { viewModel.skipForward() }) {
-        Image(systemName: "goforward.30")
-          .font(.system(size: 32))
-          .foregroundStyle(.primary)
+        Button(action: { viewModel.skipForward() }) {
+          Image(systemName: "goforward.30")
+            .font(.system(size: 32))
+            .foregroundStyle(.primary)
+        }
+        .frame(width: 60)
+        .accessibilityLabel("Skip forward 30 seconds")
       }
-      .frame(width: 60)
 
       Spacer()
 
-      // Sleep timer button - larger touch target
+      // Sleep timer button
       Menu {
         ForEach(SleepTimerOption.allCases, id: \.self) { option in
           Button(action: { viewModel.setSleepTimer(option) }) {
@@ -447,11 +411,7 @@ struct ExpandedPlayerView: View {
           }
         }
       } label: {
-        ZStack {
-          Circle()
-            .fill(viewModel.isSleepTimerActive ? Color.blue : Color.gray.opacity(0.2))
-            .frame(width: 48, height: 48)
-
+        Group {
           if viewModel.isSleepTimerActive {
             if viewModel.sleepTimerOption == .endOfEpisode {
               Image(systemName: "stop.circle.fill")
@@ -469,7 +429,9 @@ struct ExpandedPlayerView: View {
               .foregroundStyle(.primary)
           }
         }
-        .frame(width: 56, height: 56) // Larger touch target
+        .frame(width: 48, height: 48)
+        .glassEffect(viewModel.isSleepTimerActive ? .regular.tint(.blue) : .regular, in: .circle)
+        .frame(width: 56, height: 56)
         .contentShape(Rectangle())
       }
     }
@@ -479,13 +441,11 @@ struct ExpandedPlayerView: View {
   // MARK: - Bottom Actions Section
   private var bottomActionsSection: some View {
     HStack {
-      // AirPlay button (placeholder)
       AirPlayButton()
         .frame(width: 44, height: 44)
 
       Spacer()
 
-      // Transcript button - go to episode detail
       Button(action: { navigateToEpisodeDetail() }) {
         HStack(spacing: 4) {
           Image(systemName: "text.bubble")
@@ -497,12 +457,7 @@ struct ExpandedPlayerView: View {
 
       Spacer()
 
-      // Queue button
-      Button(action: {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-          showQueue = true
-        }
-      }) {
+      Button(action: openQueue) {
         HStack(spacing: 4) {
           Image(systemName: "list.bullet")
           if !viewModel.queue.isEmpty {
@@ -518,22 +473,24 @@ struct ExpandedPlayerView: View {
     .padding(.horizontal, 40)
   }
 
-  private func formatSpeed(_ speed: Float) -> String {
-    if speed == 1.0 {
-      return "1x"
-    } else if speed.truncatingRemainder(dividingBy: 1) == 0 {
-      return "\(Int(speed))x"
-    } else {
-      return String(format: "%.2gx", speed)
+  // MARK: - Action Helpers
+
+  private func openSpeedPicker() {
+    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+      showSpeedPicker = true
+    }
+  }
+
+  private func openQueue() {
+    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+      showQueue = true
     }
   }
 
   // MARK: - Navigation Helpers
 
-  /// Navigate to episode detail - dismisses sheet first, then triggers callback
   private func navigateToEpisodeDetail() {
     guard let episode = viewModel.currentEpisode else { return }
-    // Fallback: if episodeDescription is nil, look up the full episode from the podcast model
     var description = episode.episodeDescription
     var pubDate = episode.pubDate
     var guid = episode.guid
@@ -559,9 +516,7 @@ struct ExpandedPlayerView: View {
     onNavigateToEpisodeDetail?(episodeInfo, episode.podcastTitle, episode.imageURL)
   }
 
-  /// Navigate to podcast episode list - dismisses sheet first, then triggers callback
   private func navigateToPodcast() {
-    // Retry loading if podcastModel is nil (may not have been loaded yet)
     if viewModel.podcastModel == nil {
       viewModel.loadPodcastModel()
     }
@@ -571,337 +526,6 @@ struct ExpandedPlayerView: View {
     }
     dismiss()
     onNavigateToPodcast?(podcastModel)
-  }
-}
-
-// MARK: - Queue Overlay
-
-struct QueueOverlay: View {
-  let queue: [PlaybackEpisode]
-  let onPlayItem: (Int) -> Void
-  let onRemoveItem: (Int) -> Void
-  let onMoveItems: (IndexSet, Int) -> Void
-  let onDismiss: () -> Void
-
-  var body: some View {
-    ZStack {
-      // Dimmed background
-      Color.black.opacity(0.4)
-        .ignoresSafeArea()
-        .onTapGesture { onDismiss() }
-
-      // Queue card
-      VStack(spacing: 0) {
-        // Header
-        HStack {
-          Text("Up Next")
-            .font(.headline)
-          Spacer()
-          Button(action: onDismiss) {
-            Image(systemName: "xmark.circle.fill")
-              .font(.title2)
-              .foregroundStyle(.secondary)
-          }
-        }
-        .padding()
-
-        Divider()
-
-        if queue.isEmpty {
-          VStack(spacing: 12) {
-            Image(systemName: "list.bullet")
-              .font(.system(size: 40))
-              .foregroundStyle(.secondary)
-            Text("Queue is empty")
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-            Text("Add episodes using 'Play Next'")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .padding()
-        } else {
-          List {
-            ForEach(Array(queue.enumerated()), id: \.element.id) { index, episode in
-              HStack(spacing: 12) {
-                // Episode info
-                VStack(alignment: .leading, spacing: 2) {
-                  Text(episode.title)
-                    .font(.subheadline)
-                    .lineLimit(1)
-                  Text(episode.podcastTitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                }
-
-                Spacer()
-
-                // Play button
-                Button(action: { onPlayItem(index) }) {
-                  Image(systemName: "play.circle")
-                    .font(.title2)
-                    .foregroundStyle(.blue)
-                }
-                .buttonStyle(.plain)
-              }
-              .padding(.vertical, 4)
-              .swipeActions(edge: .trailing) {
-                Button(role: .destructive, action: { onRemoveItem(index) }) {
-                  Label("Remove", systemImage: "trash")
-                }
-              }
-            }
-            .onMove(perform: onMoveItems)
-          }
-          .listStyle(.plain)
-          #if os(iOS)
-          .environment(\.editMode, .constant(.active))
-          #endif
-        }
-      }
-      .frame(maxHeight: 400)
-      .glassEffect(Glass.regular, in: .rect(cornerRadius: 16))
-      .padding(.horizontal, 16)
-    }
-  }
-}
-
-// MARK: - Speed Picker Overlay (Apple Podcasts Style with Slider)
-
-struct SpeedPickerOverlay: View {
-  let currentSpeed: Float
-  let quickSpeeds: [Float]
-  let allSpeeds: [Float]
-  let onSelectSpeed: (Float) -> Void
-  let onDismiss: () -> Void
-
-  @State private var showAllSpeeds = false
-  @State private var sliderValue: Float
-  @State private var lastHapticSpeed: Float = 0
-
-  // Speed stops for haptic feedback
-  private let speedStops: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
-
-  init(currentSpeed: Float, quickSpeeds: [Float], allSpeeds: [Float], onSelectSpeed: @escaping (Float) -> Void, onDismiss: @escaping () -> Void) {
-    self.currentSpeed = currentSpeed
-    self.quickSpeeds = quickSpeeds
-    self.allSpeeds = allSpeeds
-    self.onSelectSpeed = onSelectSpeed
-    self.onDismiss = onDismiss
-    self._sliderValue = State(initialValue: currentSpeed)
-    self._lastHapticSpeed = State(initialValue: currentSpeed)
-  }
-
-  var body: some View {
-    ZStack {
-      // Dimmed background
-      Color.black.opacity(0.4)
-        .ignoresSafeArea()
-        .onTapGesture { onDismiss() }
-
-      // Speed picker card
-      VStack(spacing: 0) {
-        // Header
-        HStack {
-          Image(systemName: "waveform")
-            .foregroundStyle(.secondary)
-          Text("Playback Speed")
-            .font(.subheadline)
-            .fontWeight(.medium)
-            .foregroundStyle(.primary)
-          Spacer()
-
-          // Current speed display
-          Text(formatSpeed(sliderValue))
-            .font(.title2)
-            .fontWeight(.bold)
-            .foregroundStyle(.blue)
-            .monospacedDigit()
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .padding(.bottom, 12)
-
-        Divider()
-          .padding(.horizontal, 12)
-
-        // Speed slider
-        VStack(spacing: 8) {
-          Slider(
-            value: $sliderValue,
-            in: 0.5...2.0,
-            step: 0.05
-          ) {
-            Text("Speed")
-          } minimumValueLabel: {
-            Text("0.5x")
-              .font(.caption2)
-              .foregroundStyle(.secondary)
-          } maximumValueLabel: {
-            Text("2x")
-              .font(.caption2)
-              .foregroundStyle(.secondary)
-          }
-          .tint(.blue)
-          .onChange(of: sliderValue) { oldValue, newValue in
-            // Check if we crossed a speed stop for haptic feedback
-            for stop in speedStops {
-              let crossedForward = oldValue < stop && newValue >= stop
-              let crossedBackward = oldValue > stop && newValue <= stop
-              if crossedForward || crossedBackward {
-                triggerHaptic()
-                break
-              }
-            }
-          }
-
-          // Speed stop markers
-          HStack {
-            ForEach(speedStops, id: \.self) { stop in
-              if stop == speedStops.first {
-                Circle()
-                  .fill(sliderValue >= stop ? Color.blue : Color.gray.opacity(0.3))
-                  .frame(width: 6, height: 6)
-              } else if stop == speedStops.last {
-                Spacer()
-                Circle()
-                  .fill(sliderValue >= stop ? Color.blue : Color.gray.opacity(0.3))
-                  .frame(width: 6, height: 6)
-              } else {
-                Spacer()
-                Circle()
-                  .fill(sliderValue >= stop ? Color.blue : Color.gray.opacity(0.3))
-                  .frame(width: 6, height: 6)
-              }
-            }
-          }
-          .padding(.horizontal, 4)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 16)
-
-        Divider()
-          .padding(.horizontal, 12)
-
-        // Quick speed buttons
-        ScrollView(.horizontal) {
-          HStack(spacing: 8) {
-            ForEach(showAllSpeeds ? allSpeeds : quickSpeeds, id: \.self) { speed in
-              SpeedButton(
-                speed: speed,
-                isSelected: abs(sliderValue - speed) < 0.03,
-                onTap: {
-                  withAnimation(.easeInOut(duration: 0.2)) {
-                    sliderValue = speed
-                  }
-                  triggerHaptic()
-                  onSelectSpeed(speed)
-                }
-              )
-            }
-          }
-          .padding(.horizontal, 16)
-          .padding(.vertical, 12)
-        }
-        .scrollIndicators(.hidden)
-
-        // "More Speeds" hint and Apply button
-        HStack {
-          Button(action: {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-              showAllSpeeds.toggle()
-            }
-          }) {
-            HStack(spacing: 4) {
-              Text(showAllSpeeds ? "Show Less" : "More Speeds")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              Image(systemName: showAllSpeeds ? "chevron.up" : "chevron.down")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            }
-          }
-
-          Spacer()
-
-          Button("Apply") {
-            onSelectSpeed(sliderValue)
-          }
-          .buttonStyle(.glassProminent)
-          .font(.subheadline)
-          .fontWeight(.semibold)
-          .padding(.horizontal, 20)
-          .padding(.vertical, 8)
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-      }
-      .glassEffect(Glass.regular, in: .rect(cornerRadius: 16))
-      .padding(.horizontal, 24)
-    }
-  }
-
-  private func formatSpeed(_ speed: Float) -> String {
-    if speed == 1.0 {
-      return "1x"
-    } else if speed.truncatingRemainder(dividingBy: 1) == 0 {
-      return "\(Int(speed))x"
-    } else {
-      return String(format: "%.2gx", speed)
-    }
-  }
-
-  private func triggerHaptic() {
-    #if os(iOS)
-    let generator = UIImpactFeedbackGenerator(style: .light)
-    generator.impactOccurred()
-    #endif
-    // macOS doesn't have haptic feedback on most devices
-  }
-}
-
-// MARK: - Speed Button
-
-struct SpeedButton: View {
-  let speed: Float
-  let isSelected: Bool
-  let onTap: () -> Void
-
-  var body: some View {
-    Button(action: onTap) {
-      speedLabel
-    }
-    .buttonStyle(.plain)
-  }
-
-  @ViewBuilder
-  private var speedLabel: some View {
-    let label = Text(formatSpeed(speed))
-      .font(.subheadline)
-      .fontWeight(isSelected ? .bold : .medium)
-      .foregroundStyle(isSelected ? .white : .primary)
-      .frame(minWidth: 44, minHeight: 36)
-      .padding(.horizontal, 12)
-
-    if isSelected {
-      label
-        .background(Capsule().fill(Color.blue))
-    } else {
-      label
-        .glassEffect(Glass.regular.interactive(), in: .capsule)
-    }
-  }
-
-  private func formatSpeed(_ speed: Float) -> String {
-    if speed == 1.0 {
-      return "1x"
-    } else if speed.truncatingRemainder(dividingBy: 1) == 0 {
-      return "\(Int(speed))x"
-    } else {
-      return String(format: "%.2gx", speed)
-    }
   }
 }
 
@@ -922,7 +546,6 @@ struct TranscriptFullScreenView: View {
   var body: some View {
     NavigationStack {
       VStack(spacing: 0) {
-        // Mini player bar
         miniPlayerBar
           .padding(.horizontal, 16)
           .padding(.top, 10)
@@ -930,7 +553,6 @@ struct TranscriptFullScreenView: View {
 
         Divider()
 
-        // Transcript content with search and flowing view
         FullTranscriptContent(
           segments: viewModel.transcriptSegments,
           currentSegmentId: viewModel.currentSegmentId,
@@ -956,10 +578,8 @@ struct TranscriptFullScreenView: View {
     }
   }
 
-  // Mini player bar inside transcript sheet
   private var miniPlayerBar: some View {
     HStack(spacing: 12) {
-      // Small artwork - use CachedAsyncImage for better memory management
       if let imageURL = viewModel.imageURL {
         CachedAsyncImage(url: imageURL) { image in
           image.resizable().aspectRatio(contentMode: .fill)
@@ -970,7 +590,6 @@ struct TranscriptFullScreenView: View {
         .clipShape(.rect(cornerRadius: 6))
       }
 
-      // Episode info
       VStack(alignment: .leading, spacing: 2) {
         Text(viewModel.episodeTitle)
           .font(.subheadline)
@@ -983,31 +602,52 @@ struct TranscriptFullScreenView: View {
 
       Spacer()
 
-      // Playback controls
       HStack(spacing: 16) {
         Button(action: { viewModel.skipBackward() }) {
           Image(systemName: "gobackward.15")
             .font(.system(size: 20))
             .foregroundStyle(.primary)
         }
+        .accessibilityLabel("Skip back 15 seconds")
 
         Button(action: { viewModel.togglePlayPause() }) {
           Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
             .font(.system(size: 24))
             .foregroundStyle(.primary)
         }
+        .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
 
         Button(action: { viewModel.skipForward() }) {
           Image(systemName: "goforward.30")
             .font(.system(size: 20))
             .foregroundStyle(.primary)
         }
+        .accessibilityLabel("Skip forward 30 seconds")
       }
     }
     .padding(12)
     .glassEffect(.regular, in: .rect(cornerRadius: 12))
   }
 }
+
+// MARK: - System Volume Slider
+
+#if os(iOS)
+/// Wraps MPVolumeView for system volume control in SwiftUI.
+/// Route button is hidden — AirPlayButton (AVRoutePickerView) is used separately.
+struct SystemVolumeSlider: UIViewRepresentable {
+  func makeUIView(context: Context) -> MPVolumeView {
+    MPVolumeView(frame: .zero)
+  }
+
+  func updateUIView(_ uiView: MPVolumeView, context: Context) {
+    // Hide the route button subview (avoids deprecated showsRouteButton API)
+    for subview in uiView.subviews where subview is UIButton {
+      subview.isHidden = true
+    }
+  }
+}
+#endif
 
 // MARK: - Preview
 

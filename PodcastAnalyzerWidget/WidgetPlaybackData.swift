@@ -11,7 +11,7 @@ import Foundation
 // MARK: - Widget Playback Data
 
 /// Data structure representing current playback state for the widget
-struct WidgetPlaybackData: Codable {
+nonisolated struct WidgetPlaybackData: Codable, Sendable {
   let episodeTitle: String
   let podcastTitle: String
   let imageURL: String?
@@ -27,13 +27,17 @@ struct WidgetPlaybackData: Codable {
     return min(currentTime / duration, 1.0)
   }
 
-  /// Deep link URL to open the episode in the app
+  /// Deep link URL to open the expanded player in the app
   var deepLinkURL: URL? {
-    guard let audioURL = audioURL,
-          let encoded = audioURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
-      return URL(string: "podcastanalyzer://nowplaying")
-    }
-    return URL(string: "podcastanalyzer://episode?audio=\(encoded)")
+    URL(string: "podcastanalyzer://expandplayer")
+  }
+
+  /// Deep link URL for widget background tap.
+  /// Always routes to "nowplaying" so the app navigates to whatever episode is
+  /// currently active — not the (possibly stale) episode baked into the widget entry.
+  var episodeDetailURL: URL? {
+    guard let audioURL, !audioURL.isEmpty else { return nil }
+    return URL(string: "podcastanalyzer://nowplaying")
   }
 
   /// Formatted current time string
@@ -69,7 +73,7 @@ struct WidgetPlaybackData: Codable {
 // MARK: - Widget Data Manager
 
 /// Manages reading/writing widget data via App Group UserDefaults
-enum WidgetDataManager {
+nonisolated enum WidgetDataManager {
   /// App Group identifier - must match the App Group configured in Xcode
   static let appGroupIdentifier = "group.com.jn.PodcastAnalyzer"
 
@@ -88,6 +92,7 @@ enum WidgetDataManager {
     do {
       let encoded = try JSONEncoder().encode(data)
       defaults.set(encoded, forKey: playbackDataKey)
+      defaults.synchronize()
     } catch {
       // Silently fail - widget will show placeholder
     }
@@ -112,8 +117,26 @@ enum WidgetDataManager {
     sharedDefaults?.removeObject(forKey: playbackDataKey)
   }
 
-  /// Check if playback data is stale (more than 2 minutes old)
+  /// Check if playback data is stale (more than 24 hours old)
   static func isDataStale(_ data: WidgetPlaybackData) -> Bool {
-    Date().timeIntervalSince(data.lastUpdated) > 120
+    Date().timeIntervalSince(data.lastUpdated) > 86400
+  }
+
+  // MARK: - Artwork Image File (shared container)
+
+  /// URL for the shared App Group container directory
+  private static var sharedContainerURL: URL? {
+    FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+  }
+
+  /// File URL for the cached widget artwork image
+  static var artworkFileURL: URL? {
+    sharedContainerURL?.appending(path: "widget_artwork.jpg")
+  }
+
+  /// Read artwork image data from the shared container (called from widget)
+  static func readArtworkData() -> Data? {
+    guard let fileURL = artworkFileURL else { return nil }
+    return try? Data(contentsOf: fileURL)
   }
 }

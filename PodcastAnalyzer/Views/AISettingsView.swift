@@ -26,6 +26,16 @@ struct AISettingsView: View {
     // On-device AI availability
     @State private var onDeviceAvailability: FoundationModelsAvailability = .unavailable(reason: "Checking...")
 
+    // Local server URL editing
+    @State private var lmstudioURLText: String = ""
+    @State private var ollamaURLText: String = ""
+
+    // Shortcut name list management
+    @State private var newShortcutName: String = ""
+    @State private var isAddingShortcut: Bool = false
+
+    private let shortcuts = ShortcutsAIService.shared
+
     var body: some View {
         #if os(macOS)
         macOSBody
@@ -82,10 +92,17 @@ struct AISettingsView: View {
                     }
                 }
                 .onChange(of: settings.selectedProvider) { _, newProvider in
-                    // Auto-fetch models when provider changes if API key exists
-                    let apiKey = settings.apiKey(for: newProvider)
-                    if !apiKey.isEmpty && fetchedModels[newProvider] == nil {
-                        fetchModels(for: newProvider)
+                    // Auto-fetch models when provider changes
+                    if newProvider.usesLocalServer {
+                        // Local providers: always try to fetch
+                        if fetchedModels[newProvider] == nil {
+                            fetchModels(for: newProvider)
+                        }
+                    } else {
+                        let apiKey = settings.apiKey(for: newProvider)
+                        if !apiKey.isEmpty && fetchedModels[newProvider] == nil {
+                            fetchModels(for: newProvider)
+                        }
                     }
                 }
 
@@ -130,46 +147,10 @@ struct AISettingsView: View {
                         .buttonStyle(.borderless)
                     }
 
-                    // Model fetch status
-                    if isFetchingModels {
-                        HStack {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                            Text("Fetching available models...")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else if let error = modelFetchError {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    } else if let models = fetchedModels[settings.selectedProvider], !models.isEmpty {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("\(models.count) models available")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    modelFetchStatusView
 
                     // Test connection button
-                    Button(action: testConnection) {
-                        HStack {
-                            if isTesting {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "checkmark.circle")
-                            }
-                            Text("Test Connection")
-                        }
-                    }
-                    .disabled(settings.currentAPIKey.isEmpty || isTesting)
+                    testConnectionButton
                 } header: {
                     Text("\(settings.selectedProvider.displayName) Configuration")
                 } footer: {
@@ -177,8 +158,8 @@ struct AISettingsView: View {
                 }
             }
 
-            // MARK: - Apple PCC Configuration
-            if settings.selectedProvider == .applePCC {
+            // MARK: - Local Server Configuration (LMStudio / Ollama)
+            if settings.selectedProvider.usesLocalServer {
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
@@ -189,24 +170,148 @@ struct AISettingsView: View {
                                 .fontWeight(.medium)
                         }
 
-                        Text("Shortcuts calls your configured shortcut to process AI requests. You can use any AI provider (Apple Intelligence, ChatGPT, Gemini, etc.) inside your shortcut.")
+                        Text("Runs locally on your machine. Make sure \(settings.selectedProvider.displayName) is running before connecting.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
 
-                    // Shortcut name configuration
+                    // Base URL configuration
                     HStack {
-                        Text("Shortcut Name")
+                        Text("Server URL")
                         Spacer()
-                        TextField("Shortcut Name", text: Binding(
-                            get: { ShortcutsAIService.shared.shortcutName },
-                            set: { ShortcutsAIService.shared.shortcutName = $0 }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 180)
-                        .multilineTextAlignment(.trailing)
+                        TextField("http://localhost:1234", text: localURLBinding)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 220)
+                            .multilineTextAlignment(.trailing)
+                            .autocorrectionDisabled()
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+                            #endif
                     }
 
+                    // Model selection with refresh button
+                    HStack {
+                        modelPicker(for: settings.selectedProvider)
+
+                        Button(action: { fetchModels(for: settings.selectedProvider) }) {
+                            if isFetchingModels {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                        }
+                        .disabled(isFetchingModels)
+                        .buttonStyle(.borderless)
+                    }
+
+                    modelFetchStatusView
+
+                    Toggle(isOn: $settings.disableThinkingForLocalModels) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Disable Thinking")
+                            Text("Skips chain-of-thought reasoning for faster responses. Best for DeepSeek-R1 and other reasoning models.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    // Test connection button
+                    testConnectionButton
+                } header: {
+                    Text("\(settings.selectedProvider.displayName) Configuration")
+                } footer: {
+                    if settings.selectedProvider == .lmstudio {
+                        Text("Default: http://localhost:1234 — Load a model in LM Studio first, then tap refresh.")
+                    } else {
+                        Text("Default: http://localhost:11434 — Run 'ollama serve' and pull a model first.")
+                    }
+                }
+            }
+
+            // MARK: - Apple PCC Configuration
+            if settings.selectedProvider == .applePCC {
+                // Section 1: info
+                Section {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("No API key needed!")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                    Text("Shortcuts calls your configured shortcut to process AI requests. You can use any AI provider (Apple Intelligence, ChatGPT, Gemini, etc.) inside your shortcut.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Shortcut Configuration")
+                }
+
+                // Section 2: shortcut names list — ForEach as direct Section children
+                Section {
+                    ForEach(shortcuts.shortcutNames, id: \.self) { name in
+                        HStack(spacing: 12) {
+                            Image(systemName: shortcuts.shortcutName == name ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(shortcuts.shortcutName == name ? .blue : .secondary)
+                                .font(.system(size: 18))
+                                .animation(.easeInOut(duration: 0.15), value: shortcuts.shortcutName)
+                            Text(name)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if shortcuts.shortcutNames.count > 1 {
+                                Button(role: .destructive) {
+                                    shortcuts.removeShortcutName(name)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.red.opacity(0.7))
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            shortcuts.shortcutName = name
+                        }
+                    }
+
+                    if isAddingShortcut {
+                        HStack(spacing: 10) {
+                            TextField("Shortcut name", text: $newShortcutName)
+                                .textFieldStyle(.plain)
+                                .autocorrectionDisabled()
+                                #if os(iOS)
+                                .textInputAutocapitalization(.never)
+                                .onSubmit { commitAddShortcut() }
+                                #endif
+                            Button("Add") { commitAddShortcut() }
+                                .disabled(newShortcutName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(.blue)
+                            Button("Cancel") {
+                                newShortcutName = ""
+                                isAddingShortcut = false
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Button {
+                            newShortcutName = ""
+                            isAddingShortcut = true
+                        } label: {
+                            Label("Add Shortcut", systemImage: "plus.circle.fill")
+                        }
+                    }
+                } header: {
+                    Text("Shortcuts")
+                } footer: {
+                    Text("Tap a shortcut to make it active. Add as many as you need to switch between providers quickly.")
+                }
+
+                // Section 3: open shortcuts + timeout
+                Section {
                     Button(action: {
                         ShortcutsAIService.shared.openShortcutsApp()
                     }) {
@@ -216,7 +321,6 @@ struct AISettingsView: View {
                         }
                     }
 
-                    // Timeout setting
                     HStack {
                         Text("Timeout")
                         Spacer()
@@ -228,12 +332,11 @@ struct AISettingsView: View {
                         }
                         .pickerStyle(.menu)
                     }
-                } header: {
-                    Text("Shortcut Configuration")
                 } footer: {
                     Text("How long to wait for Shortcuts to return a result before timing out.")
                 }
 
+                // Section 4: setup instructions
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Setup Instructions:")
@@ -463,18 +566,113 @@ struct AISettingsView: View {
             }
     }
 
+    // MARK: - Reusable Subviews
+
+    @ViewBuilder
+    private var modelFetchStatusView: some View {
+        if isFetchingModels {
+            HStack {
+                ProgressView()
+                    .scaleEffect(0.7)
+                Text("Fetching available models...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else if let error = modelFetchError {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        } else if let models = fetchedModels[settings.selectedProvider], !models.isEmpty {
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text("\(models.count) models available")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var testConnectionButton: some View {
+        Button(action: testConnection) {
+            HStack {
+                if isTesting {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: "checkmark.circle")
+                }
+                Text("Test Connection")
+            }
+        }
+        .disabled(
+            (settings.selectedProvider.requiresAPIKey && settings.currentAPIKey.isEmpty)
+            || isTesting
+        )
+    }
+
+    /// Binding for the local server URL text field (LMStudio or Ollama)
+    private var localURLBinding: Binding<String> {
+        switch settings.selectedProvider {
+        case .lmstudio:
+            return Binding(
+                get: { lmstudioURLText },
+                set: { newValue in
+                    lmstudioURLText = newValue
+                    if let url = URL(string: newValue), !newValue.isEmpty {
+                        settings.lmstudioBaseURL = url
+                    }
+                }
+            )
+        case .ollama:
+            return Binding(
+                get: { ollamaURLText },
+                set: { newValue in
+                    ollamaURLText = newValue
+                    if let url = URL(string: newValue), !newValue.isEmpty {
+                        settings.ollamaBaseURL = url
+                    }
+                }
+            )
+        default:
+            return .constant("")
+        }
+    }
+
     // MARK: - Actions
 
     private func onAppearActions() {
-        // Auto-fetch models if API key exists
+        // Initialize local URL text fields
+        lmstudioURLText = settings.lmstudioBaseURL.absoluteString
+        ollamaURLText = settings.ollamaBaseURL.absoluteString
+
+        // Auto-fetch models
         let provider = settings.selectedProvider
-        let apiKey = settings.apiKey(for: provider)
-        if !apiKey.isEmpty && fetchedModels[provider] == nil {
-            fetchModels(for: provider)
+        if provider.usesLocalServer {
+            if fetchedModels[provider] == nil {
+                fetchModels(for: provider)
+            }
+        } else {
+            let apiKey = settings.apiKey(for: provider)
+            if !apiKey.isEmpty && fetchedModels[provider] == nil {
+                fetchModels(for: provider)
+            }
         }
 
         // Check on-device AI availability
         checkOnDeviceAvailability()
+    }
+
+    private func commitAddShortcut() {
+        let name = newShortcutName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        shortcuts.addShortcutName(name)
+        newShortcutName = ""
+        isAddingShortcut = false
     }
 
     // MARK: - Helper Views
@@ -516,15 +714,42 @@ struct AISettingsView: View {
                 return $settings.selectedGroqModel
             case .grok:
                 return $settings.selectedGrokModel
+            case .lmstudio:
+                return $settings.selectedLMStudioModel
+            case .ollama:
+                return $settings.selectedOllamaModel
             }
         }()
 
         // Use fetched models if available, otherwise use hardcoded defaults
         let models = fetchedModels[provider] ?? provider.availableModels
 
-        Picker("Model", selection: binding) {
-            ForEach(models, id: \.self) { model in
-                Text(model).tag(model)
+        if models.isEmpty && provider.usesLocalServer {
+            HStack {
+                Text("Model")
+                Spacer()
+                TextField("e.g. llama3.2", text: binding)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+                    .multilineTextAlignment(.trailing)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+            }
+        } else if models.isEmpty {
+            HStack {
+                Text("Model")
+                Spacer()
+                Text("No models loaded")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+        } else {
+            Picker("Model", selection: binding) {
+                ForEach(models, id: \.self) { model in
+                    Text(model).tag(model)
+                }
             }
         }
     }
@@ -533,7 +758,11 @@ struct AISettingsView: View {
 
     private func fetchModels(for provider: CloudAIProvider) {
         let apiKey = settings.apiKey(for: provider)
-        guard !apiKey.isEmpty else { return }
+
+        // For local providers, don't require API key
+        if provider.requiresAPIKey && apiKey.isEmpty {
+            return
+        }
 
         isFetchingModels = true
         modelFetchError = nil
@@ -543,39 +772,44 @@ struct AISettingsView: View {
                 let service = CloudAIService.shared
                 let models = try await service.fetchAvailableModels(for: provider, apiKey: apiKey)
 
-                await MainActor.run {
-                    fetchedModels[provider] = models
-                    isFetchingModels = false
+                fetchedModels[provider] = models
+                isFetchingModels = false
 
-                    // If current model is not in the list, select the first available
-                    let currentModel: String
+                // If current model is not in the list, select the first available
+                let currentModel: String
+                switch provider {
+                case .applePCC: currentModel = "Shortcuts"
+                case .openai: currentModel = settings.selectedOpenAIModel
+                case .claude: currentModel = settings.selectedClaudeModel
+                case .gemini: currentModel = settings.selectedGeminiModel
+                case .groq: currentModel = settings.selectedGroqModel
+                case .grok: currentModel = settings.selectedGrokModel
+                case .lmstudio: currentModel = settings.selectedLMStudioModel
+                case .ollama: currentModel = settings.selectedOllamaModel
+                }
+
+                if !models.contains(currentModel), let firstModel = models.first {
                     switch provider {
-                    case .applePCC: currentModel = "Shortcuts"
-                    case .openai: currentModel = settings.selectedOpenAIModel
-                    case .claude: currentModel = settings.selectedClaudeModel
-                    case .gemini: currentModel = settings.selectedGeminiModel
-                    case .groq: currentModel = settings.selectedGroqModel
-                    case .grok: currentModel = settings.selectedGrokModel
-                    }
-
-                    if !models.contains(currentModel), let firstModel = models.first {
-                        switch provider {
-                        case .applePCC: break  // No model selection for Apple PCC
-                        case .openai: settings.selectedOpenAIModel = firstModel
-                        case .claude: settings.selectedClaudeModel = firstModel
-                        case .gemini: settings.selectedGeminiModel = firstModel
-                        case .groq: settings.selectedGroqModel = firstModel
-                        case .grok: settings.selectedGrokModel = firstModel
-                        }
+                    case .applePCC: break
+                    case .openai: settings.selectedOpenAIModel = firstModel
+                    case .claude: settings.selectedClaudeModel = firstModel
+                    case .gemini: settings.selectedGeminiModel = firstModel
+                    case .groq: settings.selectedGroqModel = firstModel
+                    case .grok: settings.selectedGrokModel = firstModel
+                    case .lmstudio: settings.selectedLMStudioModel = firstModel
+                    case .ollama: settings.selectedOllamaModel = firstModel
                     }
                 }
             } catch {
-                await MainActor.run {
+                let fallback = provider.availableModels
+                if provider.usesLocalServer {
+                    modelFetchError = "Cannot connect to \(provider.displayName). Is it running?"
+                    fetchedModels[provider] = nil
+                } else {
                     modelFetchError = "Could not fetch models. Using defaults."
-                    isFetchingModels = false
-                    // Keep using hardcoded models
-                    fetchedModels[provider] = provider.availableModels
+                    fetchedModels[provider] = fallback
                 }
+                isFetchingModels = false
             }
         }
     }
@@ -588,19 +822,15 @@ struct AISettingsView: View {
                 let service = CloudAIService.shared
                 _ = try await service.testConnection()
 
-                await MainActor.run {
-                    testResultSuccess = true
-                    testResultMessage = "Connection successful!\n\nProvider: \(settings.selectedProvider.displayName)\nModel: \(settings.currentModel)"
-                    showingTestResult = true
-                    isTesting = false
-                }
+                testResultSuccess = true
+                testResultMessage = "Connection successful!\n\nProvider: \(settings.selectedProvider.displayName)\nModel: \(settings.currentModel)"
+                showingTestResult = true
+                isTesting = false
             } catch {
-                await MainActor.run {
-                    testResultSuccess = false
-                    testResultMessage = "Connection failed: \(error.localizedDescription)"
-                    showingTestResult = true
-                    isTesting = false
-                }
+                testResultSuccess = false
+                testResultMessage = "Connection failed: \(error.localizedDescription)"
+                showingTestResult = true
+                isTesting = false
             }
         }
     }
@@ -661,9 +891,7 @@ struct AISettingsView: View {
                 let service = AppleFoundationModelsService()
                 let availability = await service.checkAvailability()
 
-                await MainActor.run {
-                    onDeviceAvailability = availability
-                }
+                onDeviceAvailability = availability
             }
         } else {
             onDeviceAvailability = .unavailable(reason: "Requires iOS 26+ / macOS 26+")

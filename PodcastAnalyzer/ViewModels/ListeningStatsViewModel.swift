@@ -87,10 +87,11 @@ final class ListeningStatsViewModel {
     do {
       let allModels = try context.fetch(descriptor)
 
-      // Filter: has been played + within time period
+      // Filter: has meaningful playback + within time period
+      // "Meaningful" = completed at least once OR listened more than 60 seconds
       let filtered = allModels.filter { model in
-        let hasBeenPlayed = model.playCount > 0 || model.lastPlayedDate != nil
-        guard hasBeenPlayed else { return false }
+        let hasMeaningfulPlay = model.playCount > 0 || model.lastPlaybackPosition > 60
+        guard hasMeaningfulPlay else { return false }
 
         if let cutoff {
           return (model.lastPlayedDate ?? .distantPast) >= cutoff
@@ -98,29 +99,33 @@ final class ListeningStatsViewModel {
         return true
       }
 
-      // Total episodes played
+      // Total episodes played: distinct episodes with meaningful progress
       totalEpisodesPlayed = filtered.count
 
-      // Total hours listened: sum of min(lastPlaybackPosition, duration) * max(playCount, 1)
+      // Total hours listened:
+      //   completedTime = episodeDuration × completedPlays
+      //   inProgressTime = lastPlaybackPosition (when not currently completed)
+      //
+      // For old data where isCompleted=true but playCount=0 (before playCount tracking),
+      // treat as 1 completed play so legacy history isn't lost.
       var totalSeconds: TimeInterval = 0
       var podcastGroups: [String: (time: TimeInterval, count: Int, imageURL: String?)] = [:]
 
       for model in filtered {
-        let effectiveDuration: TimeInterval
-        if model.duration > 0 {
-          effectiveDuration = min(model.lastPlaybackPosition, model.duration)
-        } else {
-          effectiveDuration = model.lastPlaybackPosition
-        }
-        let listeningTime = effectiveDuration * Double(max(model.playCount, 1))
+        let episodeDuration = model.duration > 0 ? model.duration : model.lastPlaybackPosition
+        // Backward-compat: episodes completed before playCount tracking have playCount=0
+        let completedPlays = model.isCompleted ? max(model.playCount, 1) : model.playCount
+        let completedTime = episodeDuration * Double(completedPlays)
+        let inProgressTime: TimeInterval = model.isCompleted ? 0 : model.lastPlaybackPosition
+        let listeningTime = completedTime + inProgressTime
         totalSeconds += listeningTime
 
-        // Group by podcast title
+        // Group by podcast title — count distinct episodes (not total plays)
         let title = model.podcastTitle
         let existing = podcastGroups[title] ?? (time: 0, count: 0, imageURL: model.imageURL)
         podcastGroups[title] = (
           time: existing.time + listeningTime,
-          count: existing.count + max(model.playCount, 1),
+          count: existing.count + 1,
           imageURL: existing.imageURL ?? model.imageURL
         )
       }

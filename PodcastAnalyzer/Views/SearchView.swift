@@ -8,15 +8,13 @@
 import SwiftData
 import SwiftUI
 
-#if os(iOS)
-import UIKit
-#endif
 
 // MARK: - Search Tab Enum
 
 enum SearchTab: String, CaseIterable {
     case applePodcasts = "Apple Podcasts"
     case library = "Library"
+    case transcripts = "Transcripts"
 }
 
 // MARK: - Main Search View
@@ -34,6 +32,10 @@ struct PodcastSearchView: View {
     // Cached library filter results (updated only when searchText changes)
     @State private var filteredPodcasts: [PodcastInfoModel] = []
     @State private var filteredEpisodes: [(episode: PodcastEpisodeInfo, podcastTitle: String, podcastImageURL: String, podcastLanguage: String)] = []
+    @State private var transcriptSearchVM = TranscriptSearchViewModel()
+    @State private var subscribeTask: Task<Void, Never>?
+    @State private var debounceTask: Task<Void, Never>?
+    @State private var subscribeError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,36 +45,69 @@ struct PodcastSearchView: View {
                 .padding(.top, 8)
 
             // Search results
-            if searchText.isEmpty {
-                emptySearchView
-            } else {
-                switch selectedTab {
-                case .applePodcasts:
+            switch selectedTab {
+            case .transcripts:
+                transcriptResultsView
+            default:
+                if searchText.isEmpty {
+                    emptySearchView
+                } else if selectedTab == .applePodcasts {
                     applePodcastsResultsView
-                case .library:
+                } else {
                     libraryResultsView
                 }
             }
         }
         .navigationTitle("Search")
-        .searchable(text: $searchText, prompt: "Podcasts & Episodes")
+        .searchable(text: $searchText, prompt: searchPrompt)
         .onSubmit(of: .search) {
             if selectedTab == .applePodcasts {
                 viewModel.searchText = searchText
                 viewModel.performSearch()
             }
         }
+        .task(id: TranscriptSearchKey(tab: selectedTab, query: searchText)) {
+            guard selectedTab == .transcripts, !searchText.isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            await transcriptSearchVM.performSearch(query: searchText, podcasts: subscribedPodcasts)
+        }
         .onChange(of: searchText) { _, newValue in
             viewModel.searchText = newValue
-            if selectedTab == .applePodcasts && !newValue.isEmpty {
-                viewModel.performSearch()
+            if selectedTab == .transcripts {
+                // task(id:) handles transcript search re-trigger on text change
+            } else {
+                // Debounce: wait before firing search/filter to avoid lag on every keystroke
+                debounceTask?.cancel()
+                debounceTask = Task {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    guard !Task.isCancelled else { return }
+                    if selectedTab == .applePodcasts && !newValue.isEmpty {
+                        viewModel.performSearch()
+                    }
+                    if selectedTab == .library {
+                        updateLibraryFilters()
+                    }
+                }
             }
-            updateLibraryFilters()
+        }
+        .onDisappear {
+            subscribeTask?.cancel()
+            debounceTask?.cancel()
+        }
+        .alert("Subscription Failed", isPresented: Binding(get: { subscribeError != nil }, set: { if !$0 { subscribeError = nil } })) {
+            Button("OK", role: .cancel) { subscribeError = nil }
+        } message: {
+            Text(subscribeError ?? "")
         }
         .onChange(of: selectedTab) { _, newTab in
             if newTab == .applePodcasts && !searchText.isEmpty {
                 viewModel.searchText = searchText
                 viewModel.performSearch()
+            } else if newTab == .library {
+                updateLibraryFilters()
+            } else if newTab == .transcripts {
+                // task(id:) handles re-trigger when switching to this tab
             }
         }
     }
@@ -138,12 +173,12 @@ struct PodcastSearchView: View {
             } else {
                 List {
                     ForEach(viewModel.podcasts, id: \.collectionId) { podcast in
-                        NavigationLink(destination: EpisodeListView(
+                        NavigationLink(value: PodcastBrowseRoute(
                             podcastName: podcast.collectionName,
-                            podcastArtwork: podcast.artworkUrl100 ?? "",
+                            artworkURL: podcast.artworkUrl100 ?? "",
                             artistName: podcast.artistName,
                             collectionId: String(podcast.collectionId),
-                            applePodcastUrl: nil
+                            applePodcastURL: nil
                         )) {
                             ApplePodcastRow(
                                 podcast: podcast,
@@ -151,7 +186,7 @@ struct PodcastSearchView: View {
                                 onSubscribe: { subscribeToPodcast(podcast) }
                             )
                         }
-                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
                     }
                 }
                 .listStyle(.plain)
@@ -190,7 +225,10 @@ struct PodcastSearchView: View {
                                     episode: item.episode,
                                     podcastTitle: item.podcastTitle,
                                     podcastImageURL: item.podcastImageURL,
-                                    podcastLanguage: item.podcastLanguage
+                                    podcastLanguage: item.podcastLanguage,
+                                    onPlay: {
+                                      playEpisode(item.episode, podcastTitle: item.podcastTitle, imageURL: item.podcastImageURL)
+                                    }
                                 )
                             }
                         }
@@ -199,6 +237,66 @@ struct PodcastSearchView: View {
                 .listStyle(.plain)
                 .scrollDismissesKeyboard(.immediately)
             }
+        }
+    }
+
+    // MARK: - Transcript Results
+
+    private var transcriptResultsView: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Picker("Filter by Podcast", selection: $transcriptSearchVM.selectedPodcastFilter) {
+                    Text("All Podcasts").tag(String?(nil))
+                    ForEach(podcastTitles, id: \.self) { title in
+                        Text(title).tag(String?(title))
+                    }
+                }
+                .pickerStyle(.menu)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+
+            if searchText.isEmpty {
+                Spacer()
+                Image(systemName: "text.magnifyingglass")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.secondary)
+                Text("Search episode transcripts")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+                Spacer()
+            } else if transcriptSearchVM.isSearching {
+                Spacer()
+                ProgressView()
+                Spacer()
+            } else if transcriptSearchVM.results.isEmpty {
+                Spacer()
+                Text("No transcript matches found")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else {
+                List {
+                    ForEach(transcriptSearchVM.results) { result in
+                        TranscriptResultRow(result: result)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollDismissesKeyboard(.immediately)
+            }
+        }
+    }
+
+    private var podcastTitles: [String] {
+        subscribedPodcasts.map { $0.podcastInfo.title }.sorted()
+    }
+
+    private var searchPrompt: LocalizedStringKey {
+        switch selectedTab {
+        case .applePodcasts: "Search Apple Podcasts"
+        case .library: "Search your library"
+        case .transcripts: "Search transcripts"
         }
     }
 
@@ -211,20 +309,60 @@ struct PodcastSearchView: View {
     private func subscribeToPodcast(_ podcast: Podcast) {
         guard let feedUrl = podcast.feedUrl else { return }
 
-        Task {
+        subscribeTask?.cancel()
+        subscribeTask = Task {
             do {
                 let rssService = PodcastRssService()
                 let podcastInfo = try await rssService.fetchPodcast(from: feedUrl)
-                let podcastInfoModel = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date.now)
-
-                await MainActor.run {
+                let title = podcastInfo.title
+                if let existingByRSS = try? modelContext.fetch(FetchDescriptor<PodcastInfoModel>(
+                    predicate: #Predicate { $0.rssUrl == feedUrl }
+                )).first {
+                    existingByRSS.isSubscribed = true
+                    existingByRSS.podcastInfo = podcastInfo
+                    existingByRSS.title = podcastInfo.title
+                    existingByRSS.rssUrl = podcastInfo.rssUrl
+                    existingByRSS.lastUpdated = Date.now
+                } else if let existingByTitle = try? modelContext.fetch(FetchDescriptor<PodcastInfoModel>(
+                    predicate: #Predicate { $0.title == title }
+                )).first {
+                    existingByTitle.isSubscribed = true
+                    existingByTitle.podcastInfo = podcastInfo
+                    existingByTitle.title = podcastInfo.title
+                    existingByTitle.rssUrl = podcastInfo.rssUrl
+                    existingByTitle.lastUpdated = Date.now
+                } else {
+                    let podcastInfoModel = PodcastInfoModel(podcastInfo: podcastInfo, lastUpdated: Date.now)
                     modelContext.insert(podcastInfoModel)
-                    try? modelContext.save()
                 }
+
+                try? modelContext.save()
             } catch {
-                print("Failed to subscribe: \(error)")
+                subscribeError = error.localizedDescription
             }
         }
+    }
+
+    private func playEpisode(_ episode: PodcastEpisodeInfo, podcastTitle: String, imageURL: String) {
+        guard let audioURL = episode.audioURL else { return }
+        let playbackEpisode = PlaybackEpisode(
+            id: "\(podcastTitle)\u{1F}\(episode.title)",
+            title: episode.title,
+            podcastTitle: podcastTitle,
+            audioURL: audioURL,
+            imageURL: episode.imageURL ?? imageURL,
+            episodeDescription: episode.podcastEpisodeDescription,
+            pubDate: episode.pubDate,
+            duration: episode.duration,
+            guid: episode.guid
+        )
+        EnhancedAudioManager.shared.play(
+            episode: playbackEpisode,
+            audioURL: audioURL,
+            startTime: 0,
+            imageURL: episode.imageURL ?? imageURL,
+            useDefaultSpeed: true
+        )
     }
 
     private func updateLibraryFilters() {
@@ -298,7 +436,7 @@ struct ApplePodcastRow: View {
                 ProgressView()
                     .scaleEffect(0.8)
             } else {
-                Button(action: {
+                Button("Subscribe", systemImage: "plus") {
                     isSubscribing = true
                     onSubscribe()
                     // Reset after a delay (subscription will update via @Query)
@@ -306,11 +444,10 @@ struct ApplePodcastRow: View {
                         try? await Task.sleep(for: .seconds(2))
                         isSubscribing = false
                     }
-                }) {
-                    Image(systemName: "plus")
-                        .font(.title3)
-                        .foregroundStyle(.blue)
                 }
+                .labelStyle(.iconOnly)
+                .font(.title3)
+                .foregroundStyle(.blue)
                 .buttonStyle(.plain)
             }
 
@@ -353,6 +490,7 @@ struct LibraryPodcastRow: View {
             }
             .padding(.vertical, 4)
         }
+        .contentShape(Rectangle())
     }
 }
 
@@ -363,8 +501,7 @@ struct LibraryEpisodeRow: View {
     let podcastTitle: String
     let podcastImageURL: String
     let podcastLanguage: String
-
-    private var audioManager: EnhancedAudioManager { EnhancedAudioManager.shared }
+    let onPlay: () -> Void
 
     var body: some View {
         NavigationLink {
@@ -376,11 +513,9 @@ struct LibraryEpisodeRow: View {
             )
         } label: {
             HStack(spacing: 12) {
-                // Artwork - using CachedAsyncImage for better performance
                 CachedArtworkImage(urlString: episode.imageURL ?? podcastImageURL, size: 56, cornerRadius: 8)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    // Date and duration
                     HStack(spacing: 4) {
                         if let date = episode.pubDate {
                             Text(date.formatted(date: .abbreviated, time: .omitted))
@@ -393,7 +528,6 @@ struct LibraryEpisodeRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                    // Title
                     Text(episode.title)
                         .font(.subheadline)
                         .fontWeight(.medium)
@@ -402,11 +536,8 @@ struct LibraryEpisodeRow: View {
 
                 Spacer()
 
-                // Play button
                 if episode.audioURL != nil {
-                    Button(action: {
-                        playEpisode()
-                    }) {
+                    Button(action: onPlay) {
                         Image(systemName: "play.fill")
                             .font(.title3)
                             .foregroundStyle(.white)
@@ -419,30 +550,7 @@ struct LibraryEpisodeRow: View {
             }
             .padding(.vertical, 4)
         }
-    }
-
-    private func playEpisode() {
-        guard let audioURL = episode.audioURL else { return }
-
-        let playbackEpisode = PlaybackEpisode(
-            id: "\(podcastTitle)\u{1F}\(episode.title)",
-            title: episode.title,
-            podcastTitle: podcastTitle,
-            audioURL: audioURL,
-            imageURL: episode.imageURL ?? podcastImageURL,
-            episodeDescription: episode.podcastEpisodeDescription,
-            pubDate: episode.pubDate,
-            duration: episode.duration,
-            guid: episode.guid
-        )
-
-        audioManager.play(
-            episode: playbackEpisode,
-            audioURL: audioURL,
-            startTime: 0,
-            imageURL: episode.imageURL ?? podcastImageURL,
-            useDefaultSpeed: true
-        )
+        .contentShape(Rectangle())
     }
 }
 

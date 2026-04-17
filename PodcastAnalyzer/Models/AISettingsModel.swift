@@ -10,7 +10,7 @@ import SwiftUI
 
 // MARK: - Transcript Format for AI Analysis
 
-enum TranscriptFormatForAI: String, CaseIterable, Codable {
+nonisolated enum TranscriptFormatForAI: String, CaseIterable, Codable {
     case segmentBased = "Segment-Based"
     case sentenceBased = "Sentence-Based"
 
@@ -108,7 +108,7 @@ enum TranscriptFormatForAI: String, CaseIterable, Codable {
 
 // MARK: - Analysis Language Setting
 
-enum AnalysisLanguage: String, CaseIterable, Codable {
+nonisolated enum AnalysisLanguage: String, CaseIterable, Codable {
     case deviceLanguage = "Device Language"
     case english = "English"
     case matchPodcast = "Match Podcast"
@@ -152,17 +152,21 @@ enum AnalysisLanguage: String, CaseIterable, Codable {
 
 // MARK: - Cloud AI Provider
 
-enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
+nonisolated enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
     case applePCC = "Apple PCC"  // Apple Private Cloud Compute via Shortcuts
     case openai = "OpenAI"
     case claude = "Claude"
     case gemini = "Gemini"
     case groq = "Groq"
     case grok = "Grok"
+    case lmstudio = "LMStudio"
+    case ollama = "Ollama"
 
     var displayName: String {
         switch self {
         case .applePCC: return "Shortcuts"
+        case .lmstudio: return "LM Studio"
+        case .ollama: return "Ollama"
         default: return rawValue
         }
     }
@@ -173,14 +177,16 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
         case .openai: return "brain.head.profile"
         case .claude: return "sparkles"
         case .gemini: return "diamond"
-        case .groq: return "hare"          // Fast like a rabbit
+        case .groq: return "hare"
         case .grok: return "bolt"
+        case .lmstudio: return "desktopcomputer"
+        case .ollama: return "server.rack"
         }
     }
 
     var apiKeyURL: URL? {
         switch self {
-        case .applePCC: return nil  // No API key needed
+        case .applePCC, .lmstudio, .ollama: return nil
         case .openai: return URL(string: "https://platform.openai.com/api-keys")
         case .claude: return URL(string: "https://console.anthropic.com/settings/keys")
         case .gemini: return URL(string: "https://aistudio.google.com/app/apikey")
@@ -190,7 +196,15 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
     }
 
     var requiresAPIKey: Bool {
-        self != .applePCC
+        switch self {
+        case .applePCC, .lmstudio, .ollama: return false
+        default: return true
+        }
+    }
+
+    /// Whether this provider runs on a local server with a configurable URL
+    var usesLocalServer: Bool {
+        self == .lmstudio || self == .ollama
     }
 
     var defaultModel: String {
@@ -201,6 +215,8 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
         case .gemini: return "gemini-2.0-flash"
         case .groq: return "llama-3.3-70b-versatile"
         case .grok: return "grok-2-1212"
+        case .lmstudio: return ""  // Populated dynamically
+        case .ollama: return ""    // Populated dynamically
         }
     }
 
@@ -240,9 +256,12 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
         case .grok: return [
             "grok-2-1212",           // Stable, good quality
             "grok-3-mini",           // Faster
-            "grok-3-beta",           // More capable
+            "grok-3-beta",          // More capable
             "grok-4-fast-non-reasoning"  // Latest, 2M context
         ]
+        // Local providers - always fetched dynamically
+        case .lmstudio: return []
+        case .ollama: return []
         }
     }
 
@@ -254,6 +273,8 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
         case .gemini: return 1_000_000
         case .groq: return 128_000      // Varies by model
         case .grok: return 128_000
+        case .lmstudio: return 32_768   // Varies by loaded model
+        case .ollama: return 32_768     // Varies by loaded model
         }
     }
 
@@ -265,6 +286,8 @@ enum CloudAIProvider: String, CaseIterable, Codable, Sendable {
         case .gemini: return "Flash: Free tier available!"
         case .groq: return "Free tier available! Ultra-fast inference"
         case .grok: return "grok-beta: $5/1M input tokens"
+        case .lmstudio: return "Free! Runs locally via LM Studio"
+        case .ollama: return "Free! Runs locally via Ollama"
         }
     }
 
@@ -326,6 +349,18 @@ final class AISettingsManager {
         didSet { saveSettings() }
     }
 
+    var selectedLMStudioModel: String {
+        didSet { saveSettings() }
+    }
+
+    var selectedOllamaModel: String {
+        didSet { saveSettings() }
+    }
+
+    var disableThinkingForLocalModels: Bool {
+        didSet { saveSettings() }
+    }
+
     var analysisLanguage: AnalysisLanguage {
         didSet { saveSettings() }
     }
@@ -336,6 +371,59 @@ final class AISettingsManager {
 
     var shortcutsTimeout: TimeInterval {
         didSet { UserDefaults.standard.set(shortcutsTimeout, forKey: "ai_shortcuts_timeout") }
+    }
+
+    // MARK: - Podcast Format Hints
+
+    /// Returns the saved format hint for a given podcast title, or empty string if none set.
+    func formatHint(for podcastTitle: String) -> String {
+        let hints = loadFormatHints()
+        return hints[podcastTitle] ?? ""
+    }
+
+    /// Saves a format hint for a podcast title.
+    func saveFormatHint(_ hint: String, for podcastTitle: String) {
+        var hints = loadFormatHints()
+        if hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            hints.removeValue(forKey: podcastTitle)
+        } else {
+            hints[podcastTitle] = hint
+        }
+        if let data = try? JSONEncoder().encode(hints) {
+            UserDefaults.standard.set(data, forKey: "ai_podcast_format_hints")
+        }
+    }
+
+    private func loadFormatHints() -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: "ai_podcast_format_hints"),
+              let hints = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return hints
+    }
+
+    // MARK: - Local Server URLs
+
+    var lmstudioBaseURL: URL {
+        get {
+            let str = UserDefaults.standard.string(forKey: "ai_lmstudio_base_url")
+                ?? "http://localhost:1234"
+            return URL(string: str) ?? URL(string: "http://localhost:1234")!
+        }
+        set {
+            UserDefaults.standard.set(newValue.absoluteString, forKey: "ai_lmstudio_base_url")
+        }
+    }
+
+    var ollamaBaseURL: URL {
+        get {
+            let str = UserDefaults.standard.string(forKey: "ai_ollama_base_url")
+                ?? "http://localhost:11434"
+            return URL(string: str) ?? URL(string: "http://localhost:11434")!
+        }
+        set {
+            UserDefaults.standard.set(newValue.absoluteString, forKey: "ai_ollama_base_url")
+        }
     }
 
     // MARK: - Initialization
@@ -355,6 +443,9 @@ final class AISettingsManager {
         self.selectedGeminiModel = UserDefaults.standard.string(forKey: "ai_gemini_model") ?? CloudAIProvider.gemini.defaultModel
         self.selectedGrokModel = UserDefaults.standard.string(forKey: "ai_grok_model") ?? CloudAIProvider.grok.defaultModel
         self.selectedGroqModel = UserDefaults.standard.string(forKey: "ai_groq_model") ?? CloudAIProvider.groq.defaultModel
+        self.selectedLMStudioModel = UserDefaults.standard.string(forKey: "ai_lmstudio_model") ?? ""
+        self.selectedOllamaModel = UserDefaults.standard.string(forKey: "ai_ollama_model") ?? ""
+        self.disableThinkingForLocalModels = UserDefaults.standard.bool(forKey: "ai_disable_thinking")
 
         // Load analysis language setting
         if let languageString = UserDefaults.standard.string(forKey: "ai_analysis_language"),
@@ -386,8 +477,7 @@ final class AISettingsManager {
     // MARK: - Computed Properties
 
     var hasConfiguredProvider: Bool {
-        // Apple PCC doesn't need an API key
-        if selectedProvider == .applePCC {
+        if !selectedProvider.requiresAPIKey {
             return true
         }
         return !currentAPIKey.isEmpty
@@ -395,7 +485,7 @@ final class AISettingsManager {
 
     var currentAPIKey: String {
         switch selectedProvider {
-        case .applePCC: return ""  // No API key needed
+        case .applePCC, .lmstudio, .ollama: return ""
         case .openai: return openAIKey
         case .claude: return claudeKey
         case .gemini: return geminiKey
@@ -412,12 +502,14 @@ final class AISettingsManager {
         case .gemini: return selectedGeminiModel
         case .groq: return selectedGroqModel
         case .grok: return selectedGrokModel
+        case .lmstudio: return selectedLMStudioModel
+        case .ollama: return selectedOllamaModel
         }
     }
 
     func apiKey(for provider: CloudAIProvider) -> String {
         switch provider {
-        case .applePCC: return ""  // No API key needed
+        case .applePCC, .lmstudio, .ollama: return ""
         case .openai: return openAIKey
         case .claude: return claudeKey
         case .gemini: return geminiKey
@@ -428,7 +520,7 @@ final class AISettingsManager {
 
     func setAPIKey(_ key: String, for provider: CloudAIProvider) {
         switch provider {
-        case .applePCC: break  // No API key needed
+        case .applePCC, .lmstudio, .ollama: break
         case .openai: openAIKey = key
         case .claude: claudeKey = key
         case .gemini: geminiKey = key
@@ -446,6 +538,9 @@ final class AISettingsManager {
         UserDefaults.standard.set(selectedGeminiModel, forKey: "ai_gemini_model")
         UserDefaults.standard.set(selectedGrokModel, forKey: "ai_grok_model")
         UserDefaults.standard.set(selectedGroqModel, forKey: "ai_groq_model")
+        UserDefaults.standard.set(selectedLMStudioModel, forKey: "ai_lmstudio_model")
+        UserDefaults.standard.set(selectedOllamaModel, forKey: "ai_ollama_model")
+        UserDefaults.standard.set(disableThinkingForLocalModels, forKey: "ai_disable_thinking")
         UserDefaults.standard.set(analysisLanguage.rawValue, forKey: "ai_analysis_language")
         UserDefaults.standard.set(transcriptFormat.rawValue, forKey: "ai_transcript_format")
     }

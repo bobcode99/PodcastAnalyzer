@@ -76,43 +76,7 @@ final class LibraryViewModel {
   var podcastInfoModelList: [PodcastInfoModel] = []
   var savedEpisodes: [LibraryEpisode] = []
   var downloadedEpisodes: [LibraryEpisode] = []
-  var downloadingEpisodes: [DownloadingEpisode] {
-    var downloading: [DownloadingEpisode] = []
-
-    for (episodeKey, state) in downloadManager.downloadStates {
-      let progressValue: Double
-      let isActive: Bool
-
-      switch state {
-      case .downloading(let progress):
-        progressValue = progress
-        isActive = true
-      case .finishing:
-        progressValue = 1.0
-        isActive = true
-      default:
-        progressValue = 0
-        isActive = false
-      }
-
-      if isActive {
-        if let (podcastTitle, episodeTitle) = parseDownloadEpisodeKey(episodeKey) {
-          let imageURL = podcastTitleMap[podcastTitle]?.podcastInfo.imageURL
-
-          downloading.append(DownloadingEpisode(
-            id: episodeKey,
-            episodeTitle: episodeTitle,
-            podcastTitle: podcastTitle,
-            imageURL: imageURL,
-            progress: progressValue,
-            state: state
-          ))
-        }
-      }
-    }
-
-    return downloading.sorted { $0.progress < $1.progress }
-  }
+  var downloadingEpisodes: [DownloadingEpisode] = []
   var latestEpisodes: [LibraryEpisode] = []
   var isLoading = false
   var error: String?
@@ -127,12 +91,45 @@ final class LibraryViewModel {
     let duration: TimeInterval
   }
 
+  /// Sendable snapshot of all EpisodeDownloadModel fields needed for background LibraryEpisode construction.
+  private struct FullEpisodeSnapshot: Sendable {
+    let id: String
+    let podcastTitle: String
+    let episodeTitle: String
+    let audioURL: String?
+    let imageURL: String?
+    let pubDate: Date?
+    let localAudioPath: String?
+    let isStarred: Bool
+    let isCompleted: Bool
+    let lastPlaybackPosition: TimeInterval
+    let duration: TimeInterval
+
+    init(from model: EpisodeDownloadModel) {
+      self.id = model.id
+      self.podcastTitle = model.podcastTitle
+      self.episodeTitle = model.episodeTitle
+      self.audioURL = model.audioURL
+      self.imageURL = model.imageURL
+      self.pubDate = model.pubDate
+      self.localAudioPath = model.localAudioPath
+      self.isStarred = model.isStarred
+      self.isCompleted = model.isCompleted
+      self.lastPlaybackPosition = model.lastPlaybackPosition
+      self.duration = model.duration
+    }
+  }
+
 
   // Simplified loading state
-  // We only track generally if background operations are happening, 
+  // We only track generally if background operations are happening,
   // but we don't block the UI with specific flags for each section anymore.
   // The UI should show whatever data is available.
   var isRefreshing = false
+
+  /// True once setModelContext has been called and the initial load has been kicked off.
+  /// Views can use this to skip redundant refreshes on re-appearance.
+  var isLoaded: Bool { isAlreadyLoaded }
 
 
   // Search state for subpages
@@ -179,7 +176,12 @@ final class LibraryViewModel {
       guard let podcast = podcastTitleMap[title] else { return nil }
       return (podcast: podcast, downloadCount: count)
     }
-    .sorted { $0.downloadCount > $1.downloadCount }
+    .sorted {
+      if $0.downloadCount != $1.downloadCount {
+        return $0.downloadCount > $1.downloadCount
+      }
+      return $0.podcast.podcastInfo.title.localizedCaseInsensitiveCompare($1.podcast.podcastInfo.title) == .orderedAscending
+    }
   }
 
   /// Podcasts sorted by most recent update (combines lastUpdated and latest episode date)
@@ -193,10 +195,9 @@ final class LibraryViewModel {
   }
 
   private let service = PodcastRssService()
-  private let downloadManager = DownloadManager.shared
+  @ObservationIgnored private let downloadManager = DownloadManager.shared
   private var modelContext: ModelContext?
   private let logger = Logger(subsystem: "com.podcast.analyzer", category: "LibraryViewModel")
-  private var downloadCompletionObserver: NSObjectProtocol?
 
   // All podcasts (subscribed + browsed) for episode lookups
   private var allPodcasts: [PodcastInfoModel] = []
@@ -210,32 +211,160 @@ final class LibraryViewModel {
   // Use Unit Separator (U+001F) as delimiter
   private static let episodeKeyDelimiter = "\u{1F}"
 
+  nonisolated private static func hasLocalAudioFile(_ path: String?) -> Bool {
+    guard let path, !path.isEmpty else { return false }
+    return FileManager.default.fileExists(atPath: path)
+  }
+
+  nonisolated private static func podcastDedupKey(for podcast: PodcastInfoModel) -> String {
+    let rss = podcast.rssUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !rss.isEmpty { return "rss:\(rss.lowercased())" }
+    return "title:\(podcast.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+  }
+
   // Cache for O(1) lookups
   private var podcastTitleMap: [String: PodcastInfoModel] = [:]
 
-  private var syncCompletionObserver: NSObjectProtocol?
+  @ObservationIgnored private var initTask: Task<Void, Never>?
+  /// Tracks the latest unstructured refresh task so it can be cancelled in cleanup().
+  @ObservationIgnored private var refreshTask: Task<Void, Never>?
+  /// Observes episodeDownloadCompleted notifications for optimistic UI updates.
+  @ObservationIgnored private var downloadCompletionTask: Task<Void, Never>?
+  /// Polls inFlightProgress at 500ms intervals while downloads are active.
+  @ObservationIgnored private var progressTimer: Timer?
 
   init(modelContext: ModelContext?) {
     self.modelContext = modelContext
     if modelContext != nil {
-      Task {
+      initTask = Task {
         await loadAll()
       }
     }
-    setupDownloadCompletionObserver()
-    setupSyncCompletionObserver()
+    observeDownloadingEpisodes()
+    manageProgressTimer()
+    observeDownloadCompletions()
   }
 
   /// Clean up resources. Call this from onDisappear.
   func cleanup() {
-    if let observer = downloadCompletionObserver {
-      NotificationCenter.default.removeObserver(observer)
-      downloadCompletionObserver = nil
+    initTask?.cancel()
+    initTask = nil
+    refreshTask?.cancel()
+    refreshTask = nil
+    downloadCompletionTask?.cancel()
+    downloadCompletionTask = nil
+    progressTimer?.invalidate()
+    progressTimer = nil
+  }
+
+  private func observeDownloadCompletions() {
+    downloadCompletionTask = Task { [weak self] in
+      for await notification in NotificationCenter.default.notifications(named: .episodeDownloadCompleted) {
+        guard let self else { return }
+        guard let episodeTitle = notification.userInfo?["episodeTitle"] as? String,
+              let podcastTitle = notification.userInfo?["podcastTitle"] as? String,
+              let localPath = notification.userInfo?["localPath"] as? String else { continue }
+        self.handleDownloadCompletion(
+          episodeTitle: episodeTitle,
+          podcastTitle: podcastTitle,
+          localPath: localPath
+        )
+      }
     }
-    if let observer = syncCompletionObserver {
-      NotificationCenter.default.removeObserver(observer)
-      syncCompletionObserver = nil
+  }
+
+  private func updateDownloadingEpisodes() {
+    var downloading: [DownloadingEpisode] = []
+    for (episodeKey, state) in downloadManager.downloadStates {
+      let isActive: Bool
+      switch state {
+      case .downloading, .finishing:
+        isActive = true
+      default:
+        isActive = false
+      }
+      if isActive {
+        if let (podcastTitle, episodeTitle) = parseDownloadEpisodeKey(episodeKey) {
+          let imageURL = podcastTitleMap[podcastTitle]?.podcastInfo.imageURL
+          let progressValue: Double
+          if case .finishing = state {
+            progressValue = 1.0
+          } else {
+            progressValue = downloadManager.inFlightProgress[episodeKey] ?? 0
+          }
+          downloading.append(DownloadingEpisode(
+            id: episodeKey,
+            episodeTitle: episodeTitle,
+            podcastTitle: podcastTitle,
+            imageURL: imageURL,
+            progress: progressValue,
+            state: state
+          ))
+        }
+      }
     }
+    let sorted = downloading.sorted { $0.progress < $1.progress }
+    // Only assign if the set of active downloads changed
+    if sorted.map(\.id) != downloadingEpisodes.map(\.id) {
+      downloadingEpisodes = sorted
+    }
+  }
+
+  private func observeDownloadingEpisodes() {
+    withObservationTracking {
+      // Only fires on state transitions (start/finish/fail/cancel),
+      // not on progress ticks. Progress is polled by progressTimer.
+      _ = downloadManager.downloadStates
+    } onChange: {
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        self.updateDownloadingEpisodes()
+        self.manageProgressTimer()
+        self.observeDownloadingEpisodes()
+      }
+    }
+  }
+
+  // MARK: - Progress Timer
+
+  private func manageProgressTimer() {
+    if downloadManager.hasActiveDownloads {
+      guard progressTimer == nil else { return }
+      progressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        Task { @MainActor [weak self] in
+          self?.updateDownloadingProgress()
+        }
+      }
+    } else {
+      progressTimer?.invalidate()
+      progressTimer = nil
+    }
+  }
+
+  /// Poll inFlightProgress and update downloadingEpisodes with latest values.
+  private func updateDownloadingProgress() {
+    var changed = false
+    for i in downloadingEpisodes.indices {
+      let ep = downloadingEpisodes[i]
+      if let newProgress = downloadManager.inFlightProgress[ep.id],
+         abs(newProgress - ep.progress) > 0.005 {
+        downloadingEpisodes[i] = DownloadingEpisode(
+          id: ep.id,
+          episodeTitle: ep.episodeTitle,
+          podcastTitle: ep.podcastTitle,
+          imageURL: ep.imageURL,
+          progress: newProgress,
+          state: .downloading(progress: newProgress)
+        )
+        changed = true
+      }
+    }
+    // Stop timer if no more active downloads
+    if !downloadManager.hasActiveDownloads {
+      progressTimer?.invalidate()
+      progressTimer = nil
+    }
+    _ = changed // suppress unused warning
   }
 
   /// Parse episode key for downloading episodes
@@ -255,51 +384,6 @@ final class LibraryViewModel {
     }
 
     return nil
-  }
-
-  private func setupSyncCompletionObserver() {
-    // Listen for background sync completion to reload data
-    syncCompletionObserver = NotificationCenter.default.addObserver(
-      forName: .podcastSyncCompleted,
-      object: nil,
-      queue: .main
-    ) { [weak self] notification in
-      guard let self = self else { return }
-
-      let newCount = notification.userInfo?["newEpisodeCount"] as? Int ?? 0
-      self.logger.info("Sync completed notification received, \(newCount) new episodes")
-
-      Task {
-        // Reload all data sections
-        await self.loadAllPodcasts()
-        await self.loadLatestEpisodes()
-        await self.loadSavedEpisodes()
-        await self.loadDownloadedEpisodesQuick()
-      }
-    }
-  }
-
-  private func setupDownloadCompletionObserver() {
-    // Listen for download completion to update SwiftData and reload
-    downloadCompletionObserver = NotificationCenter.default.addObserver(
-      forName: .episodeDownloadCompleted,
-      object: nil,
-      queue: .main
-    ) { [weak self] notification in
-      guard let self = self,
-            let userInfo = notification.userInfo,
-            let episodeTitle = userInfo["episodeTitle"] as? String,
-            let podcastTitle = userInfo["podcastTitle"] as? String,
-            let localPath = userInfo["localPath"] as? String else { return }
-
-      Task { @MainActor in
-        self.handleDownloadCompletion(
-          episodeTitle: episodeTitle,
-          podcastTitle: podcastTitle,
-          localPath: localPath
-        )
-      }
-    }
   }
 
   private func handleDownloadCompletion(episodeTitle: String, podcastTitle: String, localPath: String) {
@@ -357,10 +441,9 @@ final class LibraryViewModel {
         downloadedEpisodes[idx] = libraryEpisode
       }
 
-      // Full async reload for proper sorting and deduplication
-      Task {
-        await loadDownloadedEpisodesQuick()
-      }
+      // Full async reload for proper sorting and deduplication.
+      refreshTask?.cancel()
+      refreshTask = Task { await loadDownloadedEpisodesQuick() }
     } catch {
       logger.error("Failed to update download model: \(error.localizedDescription)")
     }
@@ -369,70 +452,93 @@ final class LibraryViewModel {
   func setModelContext(_ context: ModelContext) {
     self.modelContext = context
 
-    // Always ensure observers and timer are running (they may have been cleaned up)
-    ensureObserversAndTimerRunning()
-
     // Prevent redundant reloading if data is already loaded
     if isAlreadyLoaded {
       return
     }
 
-    // Start loading in parallel without blocking UI flags
-    // Each section loads independently and updates its own state
+    // Start loading in parallel without blocking UI flags.
+    // Each section loads independently and updates its own state.
     isRefreshing = true
-
-    // Launch loading tasks
-    // Chain podcasts -> latest to ensure dependencies are met without polling
-    Task {
-      await loadPodcastsSection()
-      await loadLatestSection()
-    }
-
-    // Independent sections
-    Task { await loadSavedSection() }
-    Task { await loadDownloadedSection() }
-
     isAlreadyLoaded = true
-    isRefreshing = false
+
+    // Single stored task so cleanup() can cancel it.
+    // Podcasts must complete before latest (dependency), then saved/downloaded run in parallel.
+    refreshTask = Task {
+      // Chain podcasts -> latest to ensure dependencies are met without polling.
+      await loadPodcastsSection()
+      async let savedTask: () = loadSavedSection()
+      async let downloadedTask: () = loadDownloadedSection()
+      async let latestTask: () = loadLatestSection()
+      _ = await (savedTask, downloadedTask, latestTask)
+      isRefreshing = false
+    }
   }
 
-  /// Refresh all data sections - called from notification observers
+  /// Refresh all data sections - called from notification observers.
   func refreshData() {
     guard modelContext != nil else { return }
-    
-    // Reload all sections
-    Task {
+    // Cancel any in-flight refresh before starting a new one.
+    refreshTask?.cancel()
+    refreshTask = Task {
       await loadSavedSection()
       await loadDownloadedSection()
       await loadLatestSection()
     }
   }
 
-  /// Ensure observers are running - safe to call multiple times
-  private func ensureObserversAndTimerRunning() {
-    // Re-setup observers if they were cleaned up
-    if downloadCompletionObserver == nil {
-      setupDownloadCompletionObserver()
-    }
-    if syncCompletionObserver == nil {
-      setupSyncCompletionObserver()
-    }
-  }
-
-  /// Receive updated podcast list from View's @Query
+  /// Receive updated podcast list from View's @Query.
   func setPodcasts(_ podcasts: [PodcastInfoModel]) {
     self.podcastInfoModelList = podcasts
-    // Update dependent sections
-    Task { await loadLatestSection() }
+    // Cancel previous refresh; latest episodes depend on the updated podcast list.
+    refreshTask?.cancel()
+    refreshTask = Task { await loadLatestSection() }
   }
 
   // MARK: - Independent Section Loaders
 
   /// Load podcasts section independently
   private func loadPodcastsSection() async {
+    await deduplicatePodcastModels()
     // We no longer load feeds manually here, they are injected via setPodcasts
     // Just load the full lookup map
     await loadAllPodcasts()
+  }
+
+  private func deduplicatePodcastModels() async {
+    guard let context = modelContext else { return }
+
+    let descriptor = FetchDescriptor<PodcastInfoModel>(
+      sortBy: [SortDescriptor(\.lastUpdated, order: .reverse)]
+    )
+
+    guard let allPodcasts = try? context.fetch(descriptor), allPodcasts.count > 1 else { return }
+
+    var keptByKey: [String: PodcastInfoModel] = [:]
+    var duplicates: [PodcastInfoModel] = []
+
+    for podcast in allPodcasts {
+      let key = Self.podcastDedupKey(for: podcast)
+      if let existing = keptByKey[key] {
+        let keepCurrent = podcast.isSubscribed && !existing.isSubscribed
+        if keepCurrent {
+          duplicates.append(existing)
+          keptByKey[key] = podcast
+        } else {
+          duplicates.append(podcast)
+        }
+      } else {
+        keptByKey[key] = podcast
+      }
+    }
+
+    guard !duplicates.isEmpty else { return }
+
+    for duplicate in duplicates {
+      context.delete(duplicate)
+    }
+    try? context.save()
+    logger.warning("Removed \(duplicates.count) duplicate PodcastInfoModel entries")
   }
 
   /// Load saved episodes section independently
@@ -499,8 +605,22 @@ final class LibraryViewModel {
   }
 
   func refreshDownloadedEpisodes() async {
-    // Always run the full sync when explicitly refreshing
-    // This discovers any downloaded files that exist but aren't tracked in SwiftData
+    // Ensure the podcast title map is populated so that podcastsWithDownloads
+    // can look up PodcastInfoModel by title. This is a no-op if already loaded.
+    if podcastTitleMap.isEmpty {
+      await loadAllPodcasts()
+    }
+
+    // Only run the expensive disk scan once per session.  The scan is already triggered
+    // by loadDownloadedSection() during initial load; calling it again on every
+    // view re-appearance (tab switch) wastes significant I/O and memory.
+    // A pull-to-refresh calls refreshAllPodcasts → loadAll → loadDownloadedSection,
+    // which resets hasSyncedDownloads via loadDownloadedSection's detached task,
+    // so the scan will run again after a forced refresh.
+    guard !hasSyncedDownloads else {
+      await loadDownloadedEpisodesQuick()
+      return
+    }
     await syncDownloadedFilesWithSwiftData()
     await loadDownloadedEpisodesQuick()
   }
@@ -541,22 +661,29 @@ final class LibraryViewModel {
   private func loadSavedEpisodes() async {
     guard let context = modelContext else { return }
 
-    // Fetch ALL and filter in memory to avoid predicate issues with Unicode
+    // Predicate filters to only starred rows — avoids full table scan
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.isStarred == true },
       sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
     )
 
     do {
-      let allModels = try context.fetch(descriptor)
-      // Filter for starred episodes in memory, deduplicate by ID
-      var seenIds = Set<String>()
-      let starredModels = allModels.filter { model in
-        model.isStarred && seenIds.insert(model.id).inserted
-      }
-      // Map to LibraryEpisode - always succeeds due to fallback
-      let results = starredModels.map { model in
-        self.createLibraryEpisode(from: model)
-      }
+      let models = try context.fetch(descriptor)
+      // Extract Sendable snapshots on MainActor (ModelContext boundary)
+      let snapshots = models.map { FullEpisodeSnapshot(from: $0) }
+      // Capture Sendable lookup map
+      let infoMap = self.podcastTitleMap.mapValues { $0.podcastInfo }
+      let delimiter = Self.episodeKeyDelimiter
+
+      // Dedup + map off the MainActor
+      let results = await Task.detached(priority: .userInitiated) { () -> [LibraryEpisode] in
+        var seenIds = Set<String>()
+        return snapshots.compactMap { snap in
+          guard seenIds.insert(snap.id).inserted else { return nil }
+          return Self.makeLibraryEpisode(from: snap, podcastInfoMap: infoMap, delimiter: delimiter)
+        }
+      }.value
+
       self.savedEpisodes = results
       logger.info("Loaded \(self.savedEpisodes.count) saved episodes")
     } catch {
@@ -570,25 +697,30 @@ final class LibraryViewModel {
   private func loadDownloadedEpisodesQuick() async {
     guard let context = modelContext else { return }
 
-    // Fetch ALL EpisodeDownloadModel and filter in memory
+    // Predicate filters to only rows with a local path — avoids full table scan
     let descriptor = FetchDescriptor<EpisodeDownloadModel>(
+      predicate: #Predicate { $0.localAudioPath != nil },
       sortBy: [SortDescriptor(\.pubDate, order: .reverse)]
     )
 
     do {
-      let allModels = try context.fetch(descriptor)
+      let models = try context.fetch(descriptor)
+      // Extract Sendable snapshots on MainActor (ModelContext boundary)
+      let snapshots = models.map { FullEpisodeSnapshot(from: $0) }
+      // Capture Sendable lookup map
+      let infoMap = self.podcastTitleMap.mapValues { $0.podcastInfo }
+      let delimiter = Self.episodeKeyDelimiter
 
-      // Filter for downloaded episodes in memory, deduplicate by ID
-      var seenIds = Set<String>()
-      let downloadedModels = allModels.filter { model in
-        guard let path = model.localAudioPath, !path.isEmpty else { return false }
-        return seenIds.insert(model.id).inserted
-      }
+      // Dedup + map off the MainActor
+      let results = await Task.detached(priority: .userInitiated) { () -> [LibraryEpisode] in
+        var seenIds = Set<String>()
+        return snapshots.compactMap { snap in
+          guard Self.hasLocalAudioFile(snap.localAudioPath) else { return nil }
+          guard seenIds.insert(snap.id).inserted else { return nil }
+          return Self.makeLibraryEpisode(from: snap, podcastInfoMap: infoMap, delimiter: delimiter)
+        }
+      }.value
 
-      // Map to LibraryEpisode
-      let results = downloadedModels.map { model in
-        self.createLibraryEpisode(from: model)
-      }
       self.downloadedEpisodes = results
       logger.info("Quick loaded \(self.downloadedEpisodes.count) downloaded episodes")
     } catch {
@@ -616,8 +748,7 @@ final class LibraryViewModel {
 
       // Filter for downloaded episodes in memory (localAudioPath is not nil and not empty)
       let downloadedModels = allModels.filter { model in
-        guard let path = model.localAudioPath else { return false }
-        return !path.isEmpty
+        return model.hasLocalAudioFile
       }
       logger.info("Found \(downloadedModels.count) models with localAudioPath")
 
@@ -737,7 +868,7 @@ final class LibraryViewModel {
         let episodeKey = "\(podcastTitle)\(delimiter)\(episode.title)"
 
         // Skip if already has localAudioPath
-        if let model = modelsById[episodeKey], model.localAudioPath != nil {
+        if let model = modelsById[episodeKey], model.hasLocalAudioFile {
           continue
         }
 
@@ -784,6 +915,58 @@ final class LibraryViewModel {
       .components(separatedBy: invalidCharacters)
       .joined(separator: "_")
       .trimmingCharacters(in: .whitespaces)
+  }
+
+  /// Construct a LibraryEpisode from a Sendable snapshot; safe to call from any isolation context.
+  nonisolated private static func makeLibraryEpisode(
+    from snap: FullEpisodeSnapshot,
+    podcastInfoMap: [String: PodcastInfo],
+    delimiter: String
+  ) -> LibraryEpisode {
+    // Try to enrich with live podcast info
+    if let delimiterRange = snap.id.range(of: delimiter) {
+      let podcastTitle = String(snap.id[..<delimiterRange.lowerBound])
+      let episodeTitle = String(snap.id[delimiterRange.upperBound...])
+      if podcastTitle == snap.podcastTitle && episodeTitle == snap.episodeTitle,
+         let podcast = podcastInfoMap[podcastTitle],
+         let episode = podcast.episodes.first(where: { $0.title == episodeTitle }) {
+        return LibraryEpisode(
+          id: snap.id,
+          podcastTitle: podcastTitle,
+          imageURL: episode.imageURL ?? podcast.imageURL,
+          language: podcast.language,
+          episodeInfo: episode,
+          isStarred: snap.isStarred,
+          isDownloaded: Self.hasLocalAudioFile(snap.localAudioPath),
+          isCompleted: snap.isCompleted,
+          lastPlaybackPosition: snap.lastPlaybackPosition,
+          savedDuration: snap.duration
+        )
+      }
+    }
+    // Fallback: build from stored data (handles unsubscribed podcasts, special characters, etc.)
+    let durationSeconds: Int? = snap.duration > 0 ? Int(snap.duration) : nil
+    let episodeInfo = PodcastEpisodeInfo(
+      title: snap.episodeTitle,
+      podcastEpisodeDescription: nil,
+      pubDate: snap.pubDate,
+      audioURL: snap.audioURL,
+      imageURL: snap.imageURL,
+      duration: durationSeconds,
+      guid: nil
+    )
+    return LibraryEpisode(
+      id: snap.id,
+      podcastTitle: snap.podcastTitle,
+      imageURL: snap.imageURL,
+      language: "en",
+      episodeInfo: episodeInfo,
+      isStarred: snap.isStarred,
+      isDownloaded: Self.hasLocalAudioFile(snap.localAudioPath),
+      isCompleted: snap.isCompleted,
+      lastPlaybackPosition: snap.lastPlaybackPosition,
+      savedDuration: snap.duration
+    )
   }
 
   // MARK: - Load Latest Episodes
@@ -835,7 +1018,7 @@ final class LibraryViewModel {
             language: podcastInfo.language,
             episodeInfo: episode,
             isStarred: data?.isStarred ?? false,
-            isDownloaded: data?.localAudioPath != nil,
+            isDownloaded: Self.hasLocalAudioFile(data?.localAudioPath),
             isCompleted: data?.isCompleted ?? false,
             lastPlaybackPosition: data?.lastPlaybackPosition ?? 0,
             savedDuration: data?.duration ?? 0
@@ -858,9 +1041,20 @@ final class LibraryViewModel {
     updateAutoPlayCandidates()
   }
 
-  /// Update the audio manager's auto-play candidates with unplayed episodes
+  /// Update the audio manager's auto-play candidates with unplayed episodes.
+  /// Sorted: in-progress first (by saved position desc), then newest by pubDate.
+  /// HomeViewModel will replace this list with the fully-scored Up Next order
+  /// once the Home tab loads; this acts as a sensible fallback.
   private func updateAutoPlayCandidates() {
-    let unplayedEpisodes = latestEpisodes.filter { !$0.isCompleted }
+    let unplayedEpisodes = latestEpisodes
+      .filter { !$0.isCompleted }
+      .sorted { a, b in
+        let aInProgress = a.lastPlaybackPosition > 60
+        let bInProgress = b.lastPlaybackPosition > 60
+        if aInProgress != bInProgress { return aInProgress }
+        if aInProgress && bInProgress { return a.lastPlaybackPosition > b.lastPlaybackPosition }
+        return (a.episodeInfo.pubDate ?? .distantPast) > (b.episodeInfo.pubDate ?? .distantPast)
+      }
     let playbackEpisodes = unplayedEpisodes.compactMap { episode -> PlaybackEpisode? in
       guard let audioURL = episode.episodeInfo.audioURL else { return nil }
       return PlaybackEpisode(
@@ -899,7 +1093,7 @@ final class LibraryViewModel {
             language: podcast.podcastInfo.language,
             episodeInfo: episode,
             isStarred: model.isStarred,
-            isDownloaded: model.localAudioPath != nil,
+            isDownloaded: Self.hasLocalAudioFile(model.localAudioPath),
             isCompleted: model.isCompleted,
             lastPlaybackPosition: model.lastPlaybackPosition,
             savedDuration: model.duration
@@ -928,7 +1122,7 @@ final class LibraryViewModel {
       language: "en",
       episodeInfo: episodeInfo,
       isStarred: model.isStarred,
-      isDownloaded: model.localAudioPath != nil,
+      isDownloaded: Self.hasLocalAudioFile(model.localAudioPath),
       isCompleted: model.isCompleted,
       lastPlaybackPosition: model.lastPlaybackPosition,
       savedDuration: model.duration
@@ -973,7 +1167,7 @@ final class LibraryViewModel {
         language: podcast.podcastInfo.language,
         episodeInfo: episode,
         isStarred: model.isStarred,
-        isDownloaded: model.localAudioPath != nil,
+        isDownloaded: Self.hasLocalAudioFile(model.localAudioPath),
         isCompleted: model.isCompleted,
         lastPlaybackPosition: model.lastPlaybackPosition,
         savedDuration: model.duration
@@ -1006,7 +1200,7 @@ final class LibraryViewModel {
       language: "en",  // Default language when unknown
       episodeInfo: episodeInfo,
       isStarred: model.isStarred,
-      isDownloaded: model.localAudioPath != nil,
+      isDownloaded: Self.hasLocalAudioFile(model.localAudioPath),
       isCompleted: model.isCompleted,
       lastPlaybackPosition: model.lastPlaybackPosition,
       savedDuration: model.duration

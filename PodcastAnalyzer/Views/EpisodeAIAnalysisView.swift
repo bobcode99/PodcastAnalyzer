@@ -28,10 +28,15 @@ struct EpisodeAIAnalysisView: View {
   @Binding var isHeaderVisible: Bool
   @Binding var lastScrollOffset: CGFloat
   @Binding var isUserScrolling: Bool
+  @Binding var scrollToTopTrigger: Bool
 
-  @State private var selectedTab: CloudAnalysisTab = .summary
+  @State private var selectedTab: CloudAnalysisTab = .analysis
   @State private var questionInput: String = ""
   @State private var showSettingsSheet = false
+  @State private var formatHintDraft: String = ""
+  @State private var formatHintSaved: Bool = false
+  @State private var isRegenerating: Bool = false
+  @FocusState private var isFormatFieldFocused: Bool
 
   private let settings = AISettingsManager.shared
 
@@ -56,20 +61,33 @@ struct EpisodeAIAnalysisView: View {
 
       // Content area - conditionally wrap in ScrollView based on embedsOwnScroll
       if embedsOwnScroll {
-        ScrollView {
-          aiContentView
-        }
-        .trackScrollForHeaderCollapse(
-            isHeaderVisible: $isHeaderVisible,
-            lastOffset: $lastScrollOffset,
-            isUserScrolling: isUserScrolling
-        )
-        .onScrollPhaseChange { _, newPhase in
-            isUserScrolling = newPhase == .interacting || newPhase == .decelerating
+        ScrollViewReader { proxy in
+          ScrollView {
+            Color.clear.frame(height: 0).id("aiTop")
+            aiContentView
+          }
+          .trackScrollForHeaderCollapse(
+              isHeaderVisible: $isHeaderVisible,
+              lastOffset: $lastScrollOffset,
+              isUserScrolling: isUserScrolling
+          )
+          .onScrollPhaseChange { _, newPhase in
+              isUserScrolling = newPhase == .interacting || newPhase == .decelerating
+          }
+          .onChange(of: scrollToTopTrigger) { _, _ in
+              withAnimation(.easeInOut(duration: 0.3)) {
+                  proxy.scrollTo("aiTop", anchor: .top)
+              }
+              isHeaderVisible = true
+          }
         }
       } else {
         aiContentView
       }
+    }
+    .onAppear {
+      formatHintDraft = settings.formatHint(for: viewModel.podcastTitle)
+      isRegenerating = false
     }
     #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
@@ -101,10 +119,7 @@ struct EpisodeAIAnalysisView: View {
   private var aiContentView: some View {
     VStack(alignment: .leading, spacing: 16) {
       switch selectedTab {
-      case .summary: summaryTab
-      case .entities: entitiesTab
-      case .highlights: highlightsTab
-      case .fullAnalysis: fullAnalysisTab
+      case .analysis: analysisTab
       case .askQuestion: questionAnswerTab
       }
     }
@@ -158,27 +173,6 @@ struct EpisodeAIAnalysisView: View {
       .padding(.vertical, 12)
       .frame(minHeight: 60)
       .background(Color.blue.opacity(0.1))
-    } else {
-      // Ready to analyze
-      HStack {
-        Image(systemName: settings.selectedProvider.iconName)
-          .foregroundStyle(.green)
-
-        Text("Using \(settings.selectedProvider.displayName) (\(settings.currentModel))")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-
-        Spacer()
-
-        Button(action: { showSettingsSheet = true }) {
-          Text("Change")
-            .font(.caption)
-        }
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 12)
-      .frame(minHeight: 60)
-      .background(Color.green.opacity(0.05))
     }
   }
 
@@ -208,99 +202,225 @@ struct EpisodeAIAnalysisView: View {
   }
 
 
-  // MARK: - Summary Tab
+  // MARK: - Analysis Tab
 
-  private var summaryTab: some View {
+  private var analysisTab: some View {
     VStack(alignment: .leading, spacing: 16) {
       tabHeader(
-        title: "Episode Summary",
-        description: "Get a comprehensive summary with key topics and takeaways"
+        title: "Episode Analysis",
+        description: "One-shot analysis with summary, entities, highlights, quotes, and takeaways"
       )
 
-      if viewModel.isStreaming && viewModel.currentStreamingType == .summary {
+      if viewModel.isStreaming && viewModel.currentStreamingType == .analysis {
+        // Currently streaming — reset regenerating flag and show progress
         streamingResponseView
-      } else if let result = viewModel.cloudAnalysisCache.summary {
-        analysisResultCard(result)
-      } else {
-        generateButton(
-          title: "Generate Summary",
-          action: { viewModel.generateCloudAnalysis(type: .summary) }
-        )
-      }
+          .onAppear { isRegenerating = false }
 
-      analysisStateView(for: viewModel.cloudAnalysisState)
+      } else if isRegenerating, let result = viewModel.cloudAnalysisCache.analysis {
+        // User tapped Regenerate — show hint editor above the existing result
+        shortcutPickerRow
+        formatHintField
+
+        generateButton(
+          title: "Run Analysis",
+          action: {
+            isRegenerating = false
+            isFormatFieldFocused = false
+            viewModel.generateCloudAnalysis(
+              type: .analysis,
+              formatHint: formatHintDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? nil : formatHintDraft
+            )
+          }
+        )
+
+        Button("Cancel") {
+          isRegenerating = false
+          isFormatFieldFocused = false
+        }
+        .font(.subheadline)
+        .frame(maxWidth: .infinity)
+        #if os(macOS)
+        .buttonStyle(.plain)
+        #endif
+        .foregroundStyle(.secondary)
+
+        Divider()
+          .padding(.vertical, 4)
+
+        Text("Current Result")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+
+        analysisResultCard(result)
+
+      } else if case .error(let errorMsg) = viewModel.cloudAnalysisState,
+                let result = viewModel.cloudAnalysisCache.analysis {
+        // Regeneration failed — show inline warning + keep old result
+        HStack(alignment: .top, spacing: 10) {
+          Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundStyle(.orange)
+            .font(.subheadline)
+          VStack(alignment: .leading, spacing: 3) {
+            Text("Analysis failed — showing previous result")
+              .font(.caption)
+              .fontWeight(.semibold)
+              .foregroundStyle(.orange)
+            Text(errorMsg)
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+          }
+          Spacer()
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.1))
+        .clipShape(.rect(cornerRadius: 8))
+
+        analysisResultCard(result)
+
+      } else if let result = viewModel.cloudAnalysisCache.analysis {
+        // Normal completed state
+        analysisResultCard(result)
+
+      } else {
+        // Show analysis error prominently at the top so it's not missed
+        if case .error(let errorMsg) = viewModel.cloudAnalysisState {
+          analysisErrorBanner(message: errorMsg, isRetry: viewModel.cloudAnalysisCache.analysis == nil)
+        }
+
+        // Show progress indicator while analyzing (no previous result to show)
+        if case .analyzing = viewModel.cloudAnalysisState {
+          analysisStateView(for: viewModel.cloudAnalysisState, type: .analysis)
+        } else {
+          // No result yet — show hint field + analyze button
+          shortcutPickerRow
+          formatHintField
+
+          generateButton(
+            title: "Analyze Episode",
+            action: {
+              isFormatFieldFocused = false
+              viewModel.generateCloudAnalysis(
+                type: .analysis,
+                formatHint: formatHintDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                  ? nil : formatHintDraft
+              )
+            }
+          )
+        }
+      }
     }
   }
 
-  // MARK: - Entities Tab
+  // MARK: - Shortcut Picker Row
 
-  private var entitiesTab: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      tabHeader(
-        title: "Named Entities",
-        description: "Extract people, organizations, products, and locations"
-      )
+  /// Quick-switch picker shown only when Shortcuts provider is active with ≥2 saved names.
+  @ViewBuilder
+  private var shortcutPickerRow: some View {
+    let service = ShortcutsAIService.shared
+    if settings.selectedProvider == .applePCC, service.shortcutNames.count > 1 {
+      HStack(spacing: 10) {
+        Label("Shortcut", systemImage: "square.on.square")
+          .font(.caption)
+          .fontWeight(.semibold)
+          .foregroundStyle(.secondary)
 
-      if viewModel.isStreaming && viewModel.currentStreamingType == .entities {
-        streamingResponseView
-      } else if let result = viewModel.cloudAnalysisCache.entities {
-        analysisResultCard(result)
-      } else {
-        generateButton(
-          title: "Extract Entities",
-          action: { viewModel.generateCloudAnalysis(type: .entities) }
-        )
+        Spacer()
+
+        Menu {
+          ForEach(service.shortcutNames, id: \.self) { name in
+            Button {
+              service.shortcutName = name
+            } label: {
+              HStack {
+                Text(name)
+                if service.shortcutName == name {
+                  Image(systemName: "checkmark")
+                }
+              }
+            }
+          }
+        } label: {
+          HStack(spacing: 4) {
+            Text(service.shortcutName)
+              .font(.caption)
+              .fontWeight(.medium)
+            Image(systemName: "chevron.up.chevron.down")
+              .font(.system(size: 10))
+          }
+          .padding(.horizontal, 10)
+          .padding(.vertical, 6)
+          .background(Color.blue.opacity(0.1))
+          .foregroundStyle(.blue)
+          .clipShape(.rect(cornerRadius: 8))
+        }
+        #if os(macOS)
+        .menuStyle(.borderlessButton)
+        #endif
       }
-
-      analysisStateView(for: viewModel.cloudAnalysisState)
     }
   }
 
-  // MARK: - Highlights Tab
+  // MARK: - Format Hint Field
 
-  private var highlightsTab: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      tabHeader(
-        title: "Episode Highlights",
-        description: "Find key moments, quotes, and action items"
-      )
-
-      if viewModel.isStreaming && viewModel.currentStreamingType == .highlights {
-        streamingResponseView
-      } else if let result = viewModel.cloudAnalysisCache.highlights {
-        analysisResultCard(result)
-      } else {
-        generateButton(
-          title: "Generate Highlights",
-          action: { viewModel.generateCloudAnalysis(type: .highlights) }
-        )
+  private var formatHintField: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack {
+        Label("Show Format (optional)", systemImage: "text.alignleft")
+          .font(.caption)
+          .fontWeight(.semibold)
+          .foregroundStyle(.secondary)
+        Spacer()
+        if !formatHintDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+          Button("Save as default") {
+            settings.saveFormatHint(formatHintDraft, for: viewModel.podcastTitle)
+            formatHintSaved = true
+            Task {
+              try? await Task.sleep(for: .seconds(1.5))
+              formatHintSaved = false
+            }
+          }
+          .font(.caption)
+          .foregroundStyle(formatHintSaved ? .green : .blue)
+          #if os(macOS)
+          .buttonStyle(.plain)
+          #endif
+        }
       }
 
-      analysisStateView(for: viewModel.cloudAnalysisState)
-    }
-  }
-
-  // MARK: - Full Analysis Tab
-
-  private var fullAnalysisTab: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      tabHeader(
-        title: "Full Analysis",
-        description: "Comprehensive analysis including summary, topics, quotes, and more"
-      )
-
-      if viewModel.isStreaming && viewModel.currentStreamingType == .fullAnalysis {
-        streamingResponseView
-      } else if let result = viewModel.cloudAnalysisCache.fullAnalysis {
-        analysisResultCard(result)
-      } else {
-        generateButton(
-          title: "Generate Full Analysis",
-          action: { viewModel.generateCloudAnalysis(type: .fullAnalysis) }
+      HStack(alignment: .top, spacing: 0) {
+        TextField(
+          "e.g. Starts with sponsor, then market news, guest interview, listener Q&A, closing",
+          text: $formatHintDraft,
+          axis: .vertical
         )
-      }
+        .font(.caption)
+        .lineLimit(2...4)
+        .textFieldStyle(.plain)
+        .focused($isFormatFieldFocused)
 
-      analysisStateView(for: viewModel.cloudAnalysisState)
+        // Dismiss keyboard button — only visible while the field is focused
+        if isFormatFieldFocused {
+          Button {
+            isFormatFieldFocused = false
+          } label: {
+            Image(systemName: "keyboard.chevron.compact.down")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .padding(4)
+          }
+          #if os(macOS)
+          .buttonStyle(.plain)
+          #endif
+        }
+      }
+      .padding(10)
+      .background(Color.platformSystemGray6)
+      .clipShape(.rect(cornerRadius: 8))
+      .overlay(
+        RoundedRectangle(cornerRadius: 8)
+          .strokeBorder(isFormatFieldFocused ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
+      )
     }
   }
 
@@ -353,6 +473,38 @@ struct EpisodeAIAnalysisView: View {
       .submitLabel(.send)
       #endif
 
+      // Q&A error — show above history so it's immediately visible
+      if case .error(let errorMsg) = viewModel.cloudQuestionState {
+        HStack(alignment: .top, spacing: 10) {
+          Image(systemName: "xmark.circle.fill")
+            .foregroundStyle(.red)
+            .font(.subheadline)
+          VStack(alignment: .leading, spacing: 3) {
+            Text("Question failed")
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .foregroundStyle(.red)
+            Text(errorMsg)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color.red.opacity(0.08))
+        .clipShape(.rect(cornerRadius: 10))
+        .overlay(
+          RoundedRectangle(cornerRadius: 10)
+            .strokeBorder(Color.red.opacity(0.2), lineWidth: 1)
+        )
+      }
+
+      // Progress indicator while waiting for answer
+      if case .analyzing = viewModel.cloudQuestionState {
+        analysisStateView(for: viewModel.cloudQuestionState)
+      }
+
       // Previous Q&A history
       if !viewModel.cloudAnalysisCache.questionAnswers.isEmpty {
         VStack(alignment: .leading, spacing: 12) {
@@ -367,8 +519,6 @@ struct EpisodeAIAnalysisView: View {
           }
         }
       }
-
-      analysisStateView(for: viewModel.cloudQuestionState)
     }
   }
 
@@ -440,13 +590,7 @@ struct EpisodeAIAnalysisView: View {
 
       // Structured content based on type
       switch result.type {
-      case .summary:
-        summaryResultView(result)
-      case .entities:
-        entitiesResultView(result)
-      case .highlights:
-        highlightsResultView(result)
-      case .fullAnalysis:
+      case .analysis:
         fullAnalysisResultView(result)
       }
 
@@ -469,17 +613,30 @@ struct EpisodeAIAnalysisView: View {
           .foregroundStyle(.secondary)
       }
 
-      // Regenerate button
-      Button(action: {
-        if let type = selectedTab.analysisType {
-          viewModel.clearCloudAnalysis(type: type)
-          viewModel.generateCloudAnalysis(type: type)
+      // Share & Regenerate buttons
+      HStack {
+        if let parsed = result.parsedAnalysis {
+          Button(action: {
+            let text = parsed.formatAsShareableText(
+              episodeTitle: viewModel.episode.title,
+              podcastTitle: viewModel.podcastTitle
+            )
+            PlatformShareSheet.share(items: [text])
+          }) {
+            Label("Share", systemImage: "square.and.arrow.up")
+              .font(.caption)
+          }
+          .buttonStyle(.bordered)
         }
-      }) {
-        Label("Regenerate", systemImage: "arrow.clockwise")
-          .font(.caption)
+
+        Button(action: {
+          isRegenerating = true
+        }) {
+          Label("Regenerate", systemImage: "arrow.clockwise")
+            .font(.caption)
+        }
+        .buttonStyle(.bordered)
       }
-      .buttonStyle(.bordered)
     }
     .padding()
     .background(Color.platformSystemGray6)
@@ -487,113 +644,6 @@ struct EpisodeAIAnalysisView: View {
   }
 
   // MARK: - Structured Result Views
-
-  @ViewBuilder
-  private func summaryResultView(_ result: CloudAnalysisResult) -> some View {
-    if let parsed = result.parsedSummary {
-      VStack(alignment: .leading, spacing: 16) {
-        // Summary text
-        Text(parsed.summary)
-          .font(.body)
-          .textSelection(.enabled)
-
-        // Main topics as chips
-        if !parsed.mainTopics.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Main Topics", systemImage: "list.bullet")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.blue)
-
-            FlowLayout(spacing: 8) {
-              ForEach(parsed.mainTopics, id: \.self) { topic in
-                Text(topic)
-                  .font(.caption)
-                  .padding(.horizontal, 10)
-                  .padding(.vertical, 6)
-                  .background(Color.blue.opacity(0.1))
-                  .foregroundStyle(.blue)
-                  .clipShape(.rect(cornerRadius: 16))
-              }
-            }
-          }
-        }
-
-        // Key takeaways
-        if !parsed.keyTakeaways.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Key Takeaways", systemImage: "lightbulb")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.orange)
-
-            ForEach(Array(parsed.keyTakeaways.enumerated()), id: \.offset) { _, takeaway in
-              HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "checkmark.circle.fill")
-                  .foregroundStyle(.green)
-                  .font(.caption)
-                Text(takeaway)
-                  .font(.subheadline)
-              }
-            }
-          }
-        }
-
-        // Target audience & engagement
-        HStack(spacing: 16) {
-          if !parsed.targetAudience.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Target Audience")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              Text(parsed.targetAudience)
-                .font(.caption)
-                .fontWeight(.medium)
-            }
-          }
-
-          if !parsed.engagementLevel.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Engagement")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              HStack(spacing: 4) {
-                engagementIcon(parsed.engagementLevel)
-                Text(parsed.engagementLevel.capitalized)
-                  .font(.caption)
-                  .fontWeight(.medium)
-              }
-            }
-          }
-        }
-      }
-    } else {
-      Text(result.content)
-        .font(.body)
-        .textSelection(.enabled)
-    }
-  }
-
-  @ViewBuilder
-  private func entitiesResultView(_ result: CloudAnalysisResult) -> some View {
-    if let parsed = result.parsedEntities {
-      VStack(alignment: .leading, spacing: 16) {
-        entitySection(title: "People", icon: "person.fill", items: parsed.people, color: .blue)
-        entitySection(
-          title: "Organizations", icon: "building.2.fill", items: parsed.organizations,
-          color: .purple)
-        entitySection(
-          title: "Products", icon: "shippingbox.fill", items: parsed.products, color: .orange)
-        entitySection(
-          title: "Locations", icon: "mappin.circle.fill", items: parsed.locations, color: .green)
-        entitySection(title: "Resources", icon: "book.fill", items: parsed.resources, color: .red)
-      }
-    } else {
-      Text(result.content)
-        .font(.body)
-        .textSelection(.enabled)
-    }
-  }
 
   @ViewBuilder
   private func entitySection(title: String, icon: String, items: [String], color: Color)
@@ -621,126 +671,11 @@ struct EpisodeAIAnalysisView: View {
     }
   }
 
-  @ViewBuilder
-  private func highlightsResultView(_ result: CloudAnalysisResult) -> some View {
-    if let parsed = result.parsedHighlights {
-      VStack(alignment: .leading, spacing: 16) {
-        // Best quote card
-        if !parsed.bestQuote.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Best Quote", systemImage: "quote.opening")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.purple)
-
-            Text("\"\(parsed.bestQuote)\"")
-              .font(.body)
-              .italic()
-              .padding()
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .background(
-                RoundedRectangle(cornerRadius: 8)
-                  .fill(Color.purple.opacity(0.1))
-              )
-              .overlay(
-                Rectangle()
-                  .fill(Color.purple)
-                  .frame(width: 4),
-                alignment: .leading
-              )
-          }
-        }
-
-        // Highlights
-        if !parsed.highlights.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Highlights", systemImage: "star.fill")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.yellow)
-
-            ForEach(Array(parsed.highlights.enumerated()), id: \.offset) { _, highlight in
-              HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "star.fill")
-                  .foregroundStyle(.yellow)
-                  .font(.caption)
-                Text(highlight)
-                  .font(.subheadline)
-              }
-            }
-          }
-        }
-
-        // Action items
-        if !parsed.actionItems.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Action Items", systemImage: "checklist")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.green)
-
-            ForEach(Array(parsed.actionItems.enumerated()), id: \.offset) { _, item in
-              HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "arrow.right.circle.fill")
-                  .foregroundStyle(.green)
-                  .font(.caption)
-                Text(item)
-                  .font(.subheadline)
-              }
-            }
-          }
-        }
-
-        // Controversial points
-        if let controversial = parsed.controversialPoints, !controversial.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Controversial Points", systemImage: "exclamationmark.triangle.fill")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.orange)
-
-            ForEach(Array(controversial.enumerated()), id: \.offset) { _, point in
-              HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                  .foregroundStyle(.orange)
-                  .font(.caption)
-                Text(point)
-                  .font(.subheadline)
-              }
-            }
-          }
-        }
-
-        // Entertaining moments
-        if let entertaining = parsed.entertainingMoments, !entertaining.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Label("Entertaining Moments", systemImage: "face.smiling.fill")
-              .font(.subheadline)
-              .fontWeight(.semibold)
-              .foregroundStyle(.pink)
-
-            ForEach(Array(entertaining.enumerated()), id: \.offset) { _, moment in
-              HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "face.smiling.fill")
-                  .foregroundStyle(.pink)
-                  .font(.caption)
-                Text(moment)
-                  .font(.subheadline)
-              }
-            }
-          }
-        }
-      }
-    } else {
-      selectableText(result.content)
-    }
-  }
-
-  // MARK: - Full Analysis Result View
+  // MARK: - Analysis Result View
 
   @ViewBuilder
   private func fullAnalysisResultView(_ result: CloudAnalysisResult) -> some View {
-    if let parsed = result.parsedFullAnalysis {
+    if let parsed = result.parsedAnalysis {
       VStack(alignment: .leading, spacing: 20) {
         // Overview
         VStack(alignment: .leading, spacing: 8) {
@@ -749,7 +684,54 @@ struct EpisodeAIAnalysisView: View {
             .fontWeight(.semibold)
             .foregroundStyle(.blue)
 
-          selectableText(parsed.overview)
+          timestampAwareText(parsed.overview)
+        }
+
+        if !parsed.keyTakeaways.isEmpty {
+          VStack(alignment: .leading, spacing: 8) {
+            Label("Key Takeaways", systemImage: "lightbulb.fill")
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .foregroundStyle(.orange)
+
+            ForEach(Array(parsed.keyTakeaways.enumerated()), id: \.offset) { _, takeaway in
+              HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                  .foregroundStyle(.green)
+                  .font(.caption)
+                selectableText(takeaway)
+              }
+            }
+          }
+        }
+
+        if !parsed.targetAudience.isEmpty || !parsed.engagementLevel.isEmpty {
+          HStack(spacing: 16) {
+            if !parsed.targetAudience.isEmpty {
+              VStack(alignment: .leading, spacing: 4) {
+                Text("Target Audience")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                Text(parsed.targetAudience)
+                  .font(.caption)
+                  .fontWeight(.medium)
+              }
+            }
+
+            if !parsed.engagementLevel.isEmpty {
+              VStack(alignment: .leading, spacing: 4) {
+                Text("Engagement")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                  engagementIcon(parsed.engagementLevel)
+                  Text(parsed.engagementLevel.capitalized)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                }
+              }
+            }
+          }
         }
 
         // Main Topics
@@ -789,6 +771,32 @@ struct EpisodeAIAnalysisView: View {
           }
         }
 
+        VStack(alignment: .leading, spacing: 16) {
+          entitySection(title: "People", icon: "person.fill", items: parsed.people, color: .blue)
+          entitySection(title: "Organizations", icon: "building.2.fill", items: parsed.organizations, color: .purple)
+          entitySection(title: "Products", icon: "shippingbox.fill", items: parsed.products, color: .orange)
+          entitySection(title: "Locations", icon: "mappin.circle.fill", items: parsed.locations, color: .green)
+          entitySection(title: "Resources", icon: "book.fill", items: parsed.resources, color: .red)
+        }
+
+        if !parsed.highlights.isEmpty {
+          VStack(alignment: .leading, spacing: 8) {
+            Label("Highlights", systemImage: "star.fill")
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .foregroundStyle(.yellow)
+
+            ForEach(Array(parsed.highlights.enumerated()), id: \.offset) { _, highlight in
+              HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "star.fill")
+                  .foregroundStyle(.yellow)
+                  .font(.caption)
+                selectableText(highlight)
+              }
+            }
+          }
+        }
+
         // Key Insights
         if !parsed.keyInsights.isEmpty {
           VStack(alignment: .leading, spacing: 8) {
@@ -817,40 +825,113 @@ struct EpisodeAIAnalysisView: View {
               .foregroundStyle(.green)
 
             ForEach(Array(parsed.notableQuotes.enumerated()), id: \.offset) { _, quote in
-              selectableText("\"\(quote)\"")
-                .font(.subheadline)
-                .italic()
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                  RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.green.opacity(0.1))
-                )
-                .overlay(
-                  Rectangle()
-                    .fill(Color.green)
-                    .frame(width: 4),
-                  alignment: .leading
-                )
+              VStack(alignment: .leading, spacing: 6) {
+                selectableText("\"\(quote.text)\"")
+                  .font(.subheadline)
+                  .italic()
+
+                if let seconds = quote.timeInSeconds {
+                  timestampBadge(quote.timestamp!, seconds: seconds)
+                }
+              }
+              .padding()
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .background(
+                RoundedRectangle(cornerRadius: 8)
+                  .fill(Color.green.opacity(0.1))
+              )
+              .overlay(
+                Rectangle()
+                  .fill(Color.green)
+                  .frame(width: 4),
+                alignment: .leading
+              )
             }
           }
         }
 
-        // Actionable Advice
-        if let advice = parsed.actionableAdvice, !advice.isEmpty {
+        if !parsed.actionItems.isEmpty {
           VStack(alignment: .leading, spacing: 8) {
-            Label("Actionable Advice", systemImage: "checkmark.circle.fill")
+            Label("Action Items", systemImage: "checkmark.circle.fill")
               .font(.subheadline)
               .fontWeight(.semibold)
               .foregroundStyle(.teal)
 
-            ForEach(Array(advice.enumerated()), id: \.offset) { _, item in
+            ForEach(Array(parsed.actionItems.enumerated()), id: \.offset) { _, item in
               HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "arrow.right.circle.fill")
                   .foregroundStyle(.teal)
                   .font(.caption)
                 selectableText(item)
               }
+            }
+          }
+        }
+
+        if let controversial = parsed.controversialPoints, !controversial.isEmpty {
+          VStack(alignment: .leading, spacing: 8) {
+            Label("Controversial Points", systemImage: "exclamationmark.triangle.fill")
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .foregroundStyle(.orange)
+
+            ForEach(Array(controversial.enumerated()), id: \.offset) { _, point in
+              HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                  .foregroundStyle(.orange)
+                  .font(.caption)
+                selectableText(point)
+              }
+            }
+          }
+        }
+
+        if let entertaining = parsed.entertainingMoments, !entertaining.isEmpty {
+          VStack(alignment: .leading, spacing: 8) {
+            Label("Entertaining Moments", systemImage: "face.smiling.fill")
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .foregroundStyle(.pink)
+
+            ForEach(Array(entertaining.enumerated()), id: \.offset) { _, moment in
+              HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "face.smiling.fill")
+                  .foregroundStyle(.pink)
+                  .font(.caption)
+                selectableText(moment)
+              }
+            }
+          }
+        }
+
+        if let qaItems = parsed.qaHighlights, !qaItems.isEmpty {
+          VStack(alignment: .leading, spacing: 8) {
+            Label("Q&A Highlights", systemImage: "bubble.left.and.bubble.right.fill")
+              .font(.subheadline)
+              .fontWeight(.semibold)
+              .foregroundStyle(.cyan)
+
+            ForEach(Array(qaItems.enumerated()), id: \.offset) { _, item in
+              VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                  Image(systemName: "questionmark.circle.fill")
+                    .foregroundStyle(.cyan)
+                    .font(.caption)
+                  selectableText(item.question)
+                    .fontWeight(.medium)
+                }
+                HStack(alignment: .top, spacing: 8) {
+                  Image(systemName: "arrow.turn.down.right")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                    .padding(.leading, 2)
+                  selectableText(item.answer)
+                    .foregroundStyle(.secondary)
+                }
+              }
+              .padding()
+              .background(Color.cyan.opacity(0.05))
+              .clipShape(.rect(cornerRadius: 8))
             }
           }
         }
@@ -862,10 +943,12 @@ struct EpisodeAIAnalysisView: View {
             .fontWeight(.semibold)
             .foregroundStyle(.indigo)
 
-          selectableText(parsed.conclusion)
-            .padding()
-            .background(Color.indigo.opacity(0.1))
-            .clipShape(.rect(cornerRadius: 8))
+          VStack(alignment: .leading, spacing: 4) {
+            timestampAwareText(parsed.conclusion)
+          }
+          .padding()
+          .background(Color.indigo.opacity(0.1))
+          .clipShape(.rect(cornerRadius: 8))
         }
       }
     } else {
@@ -926,6 +1009,34 @@ struct EpisodeAIAnalysisView: View {
           Label("Share", systemImage: "square.and.arrow.up")
         }
       }
+  }
+
+  // MARK: - Timestamp Badge
+
+  /// Tappable timestamp pill with Play and Share actions
+  private func timestampBadge(_ timestamp: String, seconds: TimeInterval) -> some View {
+    TimestampLink(
+      text: timestamp,
+      seconds: seconds,
+      onPlay: { viewModel.seekToTime(seconds) },
+      onShare: { viewModel.shareTimestampedLink(seconds: seconds) }
+    )
+  }
+
+  // MARK: - Timestamp-Aware Text
+
+  /// Text view that detects inline timestamps and shows tappable chips below
+  @ViewBuilder
+  private func timestampAwareText(_ content: String) -> some View {
+    let timestamps = TimestampUtils.findTimestamps(in: content)
+    selectableText(content)
+    if !timestamps.isEmpty {
+      FlowLayout(spacing: 6) {
+        ForEach(timestamps.indices, id: \.self) { i in
+          timestampBadge(timestamps[i].text, seconds: timestamps[i].seconds)
+        }
+      }
+    }
   }
 
   // MARK: - Streaming Response View
@@ -1167,44 +1278,83 @@ struct EpisodeAIAnalysisView: View {
     }
   }
 
-  private func analysisStateView(for state: AnalysisState) -> some View {
+  /// Prominent error banner with optional retry messaging.
+  /// `isRetry` = false means there's no previous result, so label as "Analysis failed".
+  private func analysisErrorBanner(message: String, isRetry: Bool) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: "xmark.circle.fill")
+          .foregroundStyle(.red)
+          .font(.subheadline)
+
+        VStack(alignment: .leading, spacing: 3) {
+          Text(isRetry ? "Analysis failed" : "Regeneration failed")
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .foregroundStyle(.red)
+
+          Text(message)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+
+        Spacer(minLength: 0)
+      }
+
+      Text("Fix the issue above and tap Analyze to retry.")
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+    }
+    .padding(12)
+    .background(Color.red.opacity(0.08))
+    .clipShape(.rect(cornerRadius: 10))
+    .overlay(
+      RoundedRectangle(cornerRadius: 10)
+        .strokeBorder(Color.red.opacity(0.2), lineWidth: 1)
+    )
+  }
+
+  private func analysisStateView(for state: AnalysisState, type: CloudAnalysisType? = nil) -> some View {
     Group {
       switch state {
-      case .idle:
+      case .idle, .completed:
         EmptyView()
 
       case .analyzing(let progress, let message):
-        VStack(spacing: 12) {
-          if progress < 0 {
-            ProgressView()
-              .scaleEffect(1.2)
-          } else {
-            ProgressView(value: progress)
-              .progressViewStyle(.linear)
-          }
+        // Only show progress on the tab that owns the current analysis
+        if let type, let streamingType = viewModel.currentStreamingType, type != streamingType {
+          EmptyView()
+        } else {
+          VStack(spacing: 12) {
+            if progress < 0 {
+              ProgressView()
+                .scaleEffect(1.2)
+            } else {
+              ProgressView(value: progress)
+                .progressViewStyle(.linear)
+            }
 
-          HStack(spacing: 8) {
-            Image(systemName: "sparkles")
-              .foregroundStyle(.blue)
-              .symbolEffect(.pulse)
+            HStack(spacing: 8) {
+              Image(systemName: "sparkles")
+                .foregroundStyle(.blue)
+                .symbolEffect(.pulse)
 
-            Text(message)
-              .font(.subheadline)
-              .foregroundStyle(.primary)
-          }
+              Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            }
 
-          if progress >= 0 {
-            Text("\(Int(progress * 100))% complete")
-              .font(.caption)
-              .foregroundStyle(.secondary)
+            if progress >= 0 {
+              Text("\(Int(progress * 100))% complete")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
           }
+          .padding()
+          .background(Color.blue.opacity(0.05))
+          .clipShape(.rect(cornerRadius: 12))
         }
-        .padding()
-        .background(Color.blue.opacity(0.05))
-        .clipShape(.rect(cornerRadius: 12))
-
-      case .completed:
-        EmptyView()
 
       case .error(let message):
         HStack {

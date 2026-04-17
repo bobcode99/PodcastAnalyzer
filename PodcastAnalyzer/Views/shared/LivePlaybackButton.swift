@@ -12,6 +12,8 @@ import SwiftUI
 /// Falls back to SwiftData values when the episode is not currently playing.
 @MainActor
 struct LivePlaybackButton: View {
+  @Environment(\.locale) private var locale
+
   // MARK: - Episode Identity
   
   /// Episode title for matching with audio manager
@@ -77,6 +79,16 @@ struct LivePlaybackButton: View {
     }
     return playbackProgress
   }
+
+  /// Normalized progress used for UI display. Prefer deriving from actual position
+  /// and duration so stale saved ratios do not show progress when position is 0:00.
+  private var displayProgress: Double {
+    if let totalSeconds = liveDuration, totalSeconds > 0 {
+      let normalized = livePosition / totalSeconds
+      return min(max(normalized, 0), 1)
+    }
+    return min(max(liveProgress, 0), 1)
+  }
   
   /// Live position - from audio manager if playing, otherwise from SwiftData
   private var livePosition: TimeInterval {
@@ -96,13 +108,13 @@ struct LivePlaybackButton: View {
   
   /// Computed duration text for display
   private var durationText: String? {
-    let isInProgress = liveProgress > 0 && liveProgress < 1
+    let isInProgress = showsPlaybackProgress
     
     // If we have duration, use it for precise calculation
     if let totalSeconds = liveDuration, totalSeconds > 0 {
       let secondsToFormat = isInProgress ? (totalSeconds - livePosition) : totalSeconds
       let timeString = formatTimeUnits(Int(secondsToFormat))
-      return isInProgress ? "\(timeString) left" : timeString
+      return isInProgress ? "\(timeString)\(remainingTimeSuffix)" : timeString
     }
     
     // Fallback to formatted duration from episode metadata (for unplayed episodes)
@@ -121,6 +133,33 @@ struct LivePlaybackButton: View {
       iconOnlyButton
     }
   }
+
+  private var showsPlaybackProgress: Bool {
+    displayProgress > 0.01 && displayProgress < 1 && livePosition >= 1
+  }
+
+  private var localeIdentifier: String {
+    locale.identifier.lowercased()
+  }
+
+  private var languageCode: String {
+    locale.language.languageCode?.identifier ?? "en"
+  }
+
+  private var usesChineseUnits: Bool {
+    languageCode.hasPrefix("zh")
+  }
+
+  private var usesSimplifiedChinese: Bool {
+    localeIdentifier.contains("hans")
+  }
+
+  private var remainingTimeSuffix: String {
+    if usesChineseUnits {
+      return usesSimplifiedChinese ? "剩余" : "剩餘"
+    }
+    return " left"
+  }
   
   // MARK: - Compact Style (for list rows)
   
@@ -131,11 +170,8 @@ struct LivePlaybackButton: View {
         playIcon(size: 9)
         
         // Progress bar (only show when partially played)
-        if liveProgress > 0 && liveProgress < 1 {
-          ProgressView(value: liveProgress)
-            .progressViewStyle(.linear)
-            .tint(.white)
-            .frame(width: 24)
+        if showsPlaybackProgress {
+          progressBar(width: 24, height: 3)
         }
         
         // Duration text
@@ -180,11 +216,8 @@ struct LivePlaybackButton: View {
         playIcon(size: 14)
         
         // Progress bar (only show when partially played)
-        if liveProgress > 0 && liveProgress < 1 {
-          ProgressView(value: liveProgress)
-            .progressViewStyle(.linear)
-            .tint(.white)
-            .frame(width: 32)
+        if showsPlaybackProgress {
+          progressBar(width: 32, height: 3)
         }
         
         if let duration = durationText {
@@ -228,6 +261,22 @@ struct LivePlaybackButton: View {
       return "Play"
     }
   }
+
+  @ViewBuilder
+  private func progressBar(width: CGFloat, height: CGFloat) -> some View {
+    let clampedProgress = min(max(displayProgress, 0), 1)
+
+    ZStack(alignment: .leading) {
+      Capsule()
+        .fill(.white.opacity(0.28))
+        .frame(width: width, height: height)
+
+      Capsule()
+        .fill(.white)
+        .frame(width: max(width * clampedProgress, height), height: height)
+    }
+    .accessibilityHidden(true)
+  }
   
   /// Format seconds into human-readable time units
   private func formatTimeUnits(_ totalSeconds: Int) -> String {
@@ -235,15 +284,14 @@ struct LivePlaybackButton: View {
     let h = seconds / 3600
     let m = (seconds % 3600) / 60
     let s = seconds % 60
+    let hourUnit = usesChineseUnits ? (usesSimplifiedChinese ? "时" : "時") : "h"
+    let minuteUnit = "分"
     
     if h > 0 {
-      // "1h 5m"
-      return "\(h)h \(m)m"
+      return usesChineseUnits ? "\(h)\(hourUnit) \(m)\(minuteUnit)" : "\(h)h \(m)m"
     } else if m > 0 {
-      // "50m"
-      return "\(m)m"
+      return usesChineseUnits ? "\(m)\(minuteUnit)" : "\(m)m"
     } else {
-      // "0:44"
       return String(format: "0:%02d", s)
     }
   }

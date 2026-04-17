@@ -42,6 +42,14 @@ enum SubtitleDisplayMode: String, CaseIterable, Codable, Sendable {
     case .dualTranslatedFirst: return "Show translation with original text below"
     }
   }
+
+  /// Whether this mode requires translation to be available
+  var requiresTranslation: Bool {
+    switch self {
+    case .originalOnly: return false
+    case .translatedOnly, .dualOriginalFirst, .dualTranslatedFirst: return true
+    }
+  }
 }
 
 // MARK: - Target Language
@@ -169,6 +177,11 @@ final class SubtitleSettingsManager {
     didSet { saveSettings() }
   }
 
+  /// Per-segment playback highlighting (works with all display modes)
+  var sentenceHighlightEnabled: Bool = true {
+    didSet { saveSettings() }
+  }
+
   // MARK: - UserDefaults Keys
 
   private enum Keys {
@@ -178,6 +191,7 @@ final class SubtitleSettingsManager {
     static let autoDownloadTranscripts = "subtitle_auto_download_transcripts"
     static let groupSegmentsIntoSentences = "subtitle_group_segments_into_sentences"
     static let autoGenerateTranscripts = "subtitle_auto_generate_transcripts"
+    static let sentenceHighlightEnabled = "subtitle_sentence_highlight_enabled"
   }
 
   // MARK: - Initialization
@@ -220,6 +234,13 @@ final class SubtitleSettingsManager {
     if defaults.object(forKey: Keys.autoGenerateTranscripts) != nil {
       autoGenerateTranscripts = defaults.bool(forKey: Keys.autoGenerateTranscripts)
     }
+
+    // Default to true for sentence highlight if not set
+    if defaults.object(forKey: Keys.sentenceHighlightEnabled) == nil {
+      sentenceHighlightEnabled = true
+    } else {
+      sentenceHighlightEnabled = defaults.bool(forKey: Keys.sentenceHighlightEnabled)
+    }
   }
 
   private func saveSettings() {
@@ -230,6 +251,7 @@ final class SubtitleSettingsManager {
     defaults.set(autoDownloadTranscripts, forKey: Keys.autoDownloadTranscripts)
     defaults.set(groupSegmentsIntoSentences, forKey: Keys.groupSegmentsIntoSentences)
     defaults.set(autoGenerateTranscripts, forKey: Keys.autoGenerateTranscripts)
+    defaults.set(sentenceHighlightEnabled, forKey: Keys.sentenceHighlightEnabled)
   }
 
   // MARK: - Translation Availability
@@ -249,6 +271,6 @@ final class SubtitleSettingsManager {
 
   /// Whether translation is needed for current display mode
   var needsTranslation: Bool {
-    displayMode != .originalOnly
+    displayMode.requiresTranslation
   }
 }
