@@ -109,10 +109,19 @@ struct EpisodeTranscriptStatusView: View {
 
                         // Language picker (filtered by engine)
                         Picker("Language", selection: Binding(
-                            get: { resolvedLanguage(viewModel.selectedTranscriptLanguage ?? viewModel.podcastLanguage) },
+                            get: {
+                                if effectiveEngine == .whisper {
+                                    return viewModel.selectedTranscriptLanguage ?? "auto"
+                                }
+                                return resolvedLanguage(viewModel.selectedTranscriptLanguage ?? viewModel.podcastLanguage)
+                            },
                             set: { newValue in
-                                let defaultLocale = resolvedLanguage(viewModel.podcastLanguage)
-                                viewModel.selectedTranscriptLanguage = (newValue == defaultLocale) ? nil : newValue
+                                if effectiveEngine == .whisper {
+                                    viewModel.selectedTranscriptLanguage = (newValue == "auto") ? nil : newValue
+                                } else {
+                                    let defaultLocale = resolvedLanguage(viewModel.podcastLanguage)
+                                    viewModel.selectedTranscriptLanguage = (newValue == defaultLocale) ? nil : newValue
+                                }
                             }
                         )) {
                             ForEach(pickerLocales) { locale in
@@ -123,7 +132,7 @@ struct EpisodeTranscriptStatusView: View {
                         .font(.subheadline)
 
                         if effectiveEngine == .whisper {
-                            Text("Whisper supports 50+ languages with auto-detection")
+                            Text("Auto-detect identifies the language automatically")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)

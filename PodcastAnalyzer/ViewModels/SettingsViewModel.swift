@@ -253,6 +253,7 @@ final class SettingsViewModel {
   /// All locales for Whisper (supports 50+ languages)
 
   static let availableTranscriptLocales: [TranscriptLocaleOption] = [
+    TranscriptLocaleOption(id: "auto", name: "Auto-detect"),
     // East Asian
     TranscriptLocaleOption(id: "zh-tw", name: "繁體中文 (台灣)"),
     TranscriptLocaleOption(id: "zh-cn", name: "简体中文 (中国)"),

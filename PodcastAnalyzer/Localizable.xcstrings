@@ -1221,6 +1221,9 @@
         }
       }
     },
+    "Auto-detect identifies the language automatically" : {
+
+    },
     "Auto-Download New Episodes" : {
       "localizations" : {
         "zh-Hans" : {
@@ -8465,6 +8468,7 @@
       }
     },
     "Whisper supports 50+ languages with auto-detection" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {

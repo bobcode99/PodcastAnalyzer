@@ -1240,7 +1240,8 @@ final class EpisodeDetailViewModel {
     }
 
     // Use TranscriptManager for background processing
-    let language = selectedTranscriptLanguage ?? getPodcastLanguage()
+    // nil language → Whisper auto-detects; explicit selection overrides
+    let language: String? = selectedTranscriptLanguage.flatMap { $0 == "auto" ? nil : $0 }
     TranscriptManager.shared.queueTranscript(
       episodeTitle: episode.title,
       podcastTitle: podcastTitle,

@@ -25,7 +25,7 @@ struct TranscriptJob: Identifiable {
   let episodeTitle: String
   let podcastTitle: String
   let audioPath: String
-  let language: String
+  let language: String?
   let engine: TranscriptEngine?  // nil = use global Settings default
   var status: TranscriptJobStatus = .queued
 }
@@ -76,7 +76,7 @@ class TranscriptManager {
 
   /// Queues a transcript generation job
   func queueTranscript(
-    episodeTitle: String, podcastTitle: String, audioPath: String, language: String,
+    episodeTitle: String, podcastTitle: String, audioPath: String, language: String?,
     engine: TranscriptEngine? = nil
   ) {
     let jobId = makeJobId(podcastTitle: podcastTitle, episodeTitle: episodeTitle)
@@ -236,7 +236,7 @@ class TranscriptManager {
 
         try Task.checkCancellation()
 
-        let transcriptService = TranscriptService(language: job.language)
+        let transcriptService = TranscriptService(language: job.language ?? "en-us")
 
         let modelReady = await transcriptService.isModelReady()
         if !modelReady {
