@@ -41,9 +41,14 @@ final class HomeViewModel {
         // Save to UserDefaults for consistency
         UserDefaults.standard.set(selectedRegion, forKey: "selectedPodcastRegion")
         regionChangeTask?.cancel()
-        regionChangeTask = Task {
-          await loadTopPodcasts(forceRefresh: true)
-          await loadTrendingEpisodes(forceRefresh: true)
+        if isHomeVisible {
+          regionChangeTask = Task { [weak self] in
+            guard let self else { return }
+            await self.refreshDiscoveryContent(forceRefresh: true)
+          }
+        } else {
+          needsDiscoveryRefresh = true
+          invalidateDiscoveryContent()
         }
       }
     }
@@ -84,7 +89,13 @@ final class HomeViewModel {
 
   // Flag to prevent redundant loads
   @ObservationIgnored
-  private var isAlreadyLoaded = false
+  private var hasLoadedInitialContent = false
+
+  @ObservationIgnored
+  private var isHomeVisible = false
+
+  @ObservationIgnored
+  private var needsDiscoveryRefresh = false
 
   // Task for region change observation
   @ObservationIgnored
@@ -140,21 +151,8 @@ final class HomeViewModel {
       topPodcasts = Self.cachedTopPodcasts
     }
 
-    // Listen for region changes from Settings using async sequence
-    regionObserverTask = Task {
-      for await notification in NotificationCenter.default.notifications(named: .podcastRegionChanged) {
-        if let newRegion = notification.object as? String {
-          selectedRegion = newRegion
-        }
-      }
-    }
-
-    // Refresh Up Next when an episode is marked played/unplayed
-    completionObserverTask = Task {
-      for await _ in NotificationCenter.default.notifications(named: .episodeCompletionChanged) {
-        await loadUpNextEpisodes()
-      }
-    }
+    // Observers are started lazily in restartObserversIfNeeded() (called from setModelContext),
+    // so they survive tab-switch cleanup/onAppear cycles without creating duplicates.
 
     // Refresh Up Next when the currently playing episode changes
     startCurrentEpisodeObserver()
@@ -181,11 +179,37 @@ final class HomeViewModel {
 
   func setModelContext(_ context: ModelContext) {
     self.modelContext = context
-    // Only load if we haven't or if we need a fresh start
-    if !isAlreadyLoaded {
-      isAlreadyLoaded = true  // Set immediately to prevent race condition
-      loadTask = Task {
-        await loadAll()
+    isHomeVisible = true
+    // Restart long-lived observers that cleanup() may have cancelled on tab switch.
+    restartObserversIfNeeded()
+    if !hasLoadedInitialContent {
+      startInitialLoadIfNeeded()
+    } else if needsDiscoveryRefresh {
+      regionChangeTask?.cancel()
+      regionChangeTask = Task { [weak self] in
+        guard let self else { return }
+        await self.refreshDiscoveryContent(forceRefresh: true)
+      }
+    }
+  }
+
+  /// Restart notification-observer tasks that are cancelled by cleanup() on tab switch.
+  /// Safe to call multiple times — only creates a new task when the existing one is nil.
+  private func restartObserversIfNeeded() {
+    if regionObserverTask == nil {
+      regionObserverTask = Task {
+        for await notification in NotificationCenter.default.notifications(named: .podcastRegionChanged) {
+          if let newRegion = notification.object as? String {
+            selectedRegion = newRegion
+          }
+        }
+      }
+    }
+    if completionObserverTask == nil {
+      completionObserverTask = Task {
+        for await _ in NotificationCenter.default.notifications(named: .episodeCompletionChanged) {
+          await loadUpNextEpisodes()
+        }
       }
     }
   }
@@ -209,7 +233,45 @@ final class HomeViewModel {
   }
 
   func refresh() async {
+    needsDiscoveryRefresh = false
     await loadAll(forceRefresh: true)
+    hasLoadedInitialContent = true
+  }
+
+  private func startInitialLoadIfNeeded() {
+    guard loadTask == nil else { return }
+
+    loadTask = Task { [weak self] in
+      guard let self else { return }
+      defer { self.loadTask = nil }
+
+      await self.loadAll()
+
+      if !Task.isCancelled {
+        self.hasLoadedInitialContent = true
+        self.needsDiscoveryRefresh = false
+      }
+    }
+  }
+
+  private func refreshDiscoveryContent(forceRefresh: Bool) async {
+    await loadTopPodcasts(forceRefresh: forceRefresh)
+    await loadTrendingEpisodes(forceRefresh: forceRefresh)
+
+    if !Task.isCancelled {
+      needsDiscoveryRefresh = false
+    }
+  }
+
+  private func invalidateDiscoveryContent() {
+    topPodcasts = []
+    trendingEpisodes = []
+    isLoadingTopPodcasts = false
+    isLoadingTrendingEpisodes = false
+    Self.cachedTopPodcasts = []
+    Self.cachedTrendingEpisodes = []
+    Self.cachedRegion = ""
+    Self.cachedTrendingRegion = ""
   }
 
   // MARK: - Load Podcasts
@@ -760,15 +822,15 @@ final class HomeViewModel {
   }
 
   func cleanup() {
+    isHomeVisible = false
+    loadTask?.cancel()
+    loadTask = nil
     regionObserverTask?.cancel()
     regionObserverTask = nil
     regionChangeTask?.cancel()
     regionChangeTask = nil
     recommendationsTask?.cancel()
     recommendationsTask = nil
-    // loadTask intentionally NOT cancelled — it's a one-shot initialization that must
-    // complete regardless of tab switches. Cancelling it with isAlreadyLoaded=true would
-    // leave trendingEpisodes empty forever (no retry path).
     subscribeTask?.cancel()
     subscribeTask = nil
     completionObserverTask?.cancel()

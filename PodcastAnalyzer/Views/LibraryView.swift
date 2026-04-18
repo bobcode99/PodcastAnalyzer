@@ -20,7 +20,7 @@ struct LibraryView: View {
     order: .reverse
   ) private var subscribedPodcasts: [PodcastInfoModel]
 
-  @State private var sortedPodcasts: [PodcastInfoModel] = []
+  @State private var sortedPodcasts: [PodcastGridItem] = []
 
   private let columns = [
     GridItem(.flexible(), spacing: 12),
@@ -94,6 +94,7 @@ struct LibraryView: View {
         }
       }
     }
+
     // Note: Do NOT call viewModel.cleanup() here — LibraryView is a tab root,
     // and pushing a NavigationLink fires onDisappear.  Cleaning up would cancel
     // the download-completion observer while the user is in a sub-page.
@@ -158,7 +159,7 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .glassEffect(.regular, in: .rect(cornerRadius: 12))
+        .background(.regularMaterial, in: .rect(cornerRadius: 12))
       }
       .buttonStyle(.plain)
     }
@@ -184,20 +185,22 @@ struct LibraryView: View {
         emptyPodcastsView
       } else {
         LazyVGrid(columns: columns, spacing: 16) {
-          ForEach(sortedPodcasts) { podcast in
-            NavigationLink(value: PodcastBrowseRoute(podcastModel: podcast)) {
-              PodcastGridCell(podcast: podcast)
-            }
-            .buttonStyle(.plain)
-            .contentShape(Rectangle())
-            .podcastContextMenu(
-              podcast: podcast,
-              modelContext: modelContext,
-              onError: { errorMessage = $0 },
-              onUnsubscribed: {
-                viewModel.setModelContext(modelContext)
+          ForEach(sortedPodcasts) { item in
+            if let model = subscribedPodcasts.first(where: { $0.id == item.id }) {
+              NavigationLink(value: PodcastBrowseRoute(podcastModel: model)) {
+                PodcastGridCell(item: item)
               }
-            )
+              .buttonStyle(.plain)
+              .contentShape(Rectangle())
+              .podcastContextMenu(
+                podcast: model,
+                modelContext: modelContext,
+                onError: { errorMessage = $0 },
+                onUnsubscribed: {
+                  viewModel.setModelContext(modelContext)
+                }
+              )
+            }
           }
         }
       }
@@ -207,11 +210,9 @@ struct LibraryView: View {
   // MARK: - Helper Methods
 
   private func updateSortedPodcasts() {
-    sortedPodcasts = subscribedPodcasts.sorted { p1, p2 in
-      let date1 = p1.podcastInfo.episodes.first?.pubDate ?? .distantPast
-      let date2 = p2.podcastInfo.episodes.first?.pubDate ?? .distantPast
-      return date1 > date2
-    }
+    sortedPodcasts = subscribedPodcasts
+      .sorted { $0.lastUpdated > $1.lastUpdated }
+      .map { PodcastGridItem(from: $0) }
   }
 
   @ViewBuilder

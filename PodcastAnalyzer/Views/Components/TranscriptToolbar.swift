@@ -15,6 +15,7 @@ struct TranscriptToolbar: View {
 
     var onShowTranslationPicker: () -> Void
     var onShowSubtitleSettings: () -> Void
+    var onShowRegenerateOptions: () -> Void
 
     private var subtitleSettings: SubtitleSettingsManager { .shared }
 
@@ -185,7 +186,7 @@ struct TranscriptToolbar: View {
                     Button(
                         role: .destructive,
                         action: {
-                            viewModel.generateTranscript()
+                            onShowRegenerateOptions()
                         }
                     ) {
                         Label("Regenerate", systemImage: "arrow.clockwise")

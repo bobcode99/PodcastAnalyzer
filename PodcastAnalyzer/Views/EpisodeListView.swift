@@ -469,15 +469,20 @@ struct EpisodeListView: View {
   // MARK: - Apple Podcast Lookup
 
   private func lookupApplePodcastURL(title: String) async {
+    let cacheKey = "applePodcastURL_\(title.lowercased())"
+    if let cached = UserDefaults.standard.string(forKey: cacheKey),
+       let url = URL(string: cached) {
+      applePodcastURL = url
+      return
+    }
     do {
       let podcasts = try await applePodcastService.searchPodcasts(term: title, limit: 5)
-      // Find matching podcast by name
       if let match = podcasts.first(where: {
         $0.collectionName.lowercased() == title.lowercased()
       }) ?? podcasts.first {
-        // Construct Apple Podcasts URL
         let urlString = "https://podcasts.apple.com/podcast/id\(match.collectionId)"
         applePodcastURL = URL(string: urlString)
+        UserDefaults.standard.set(urlString, forKey: cacheKey)
       }
     } catch {
       // Silently fail - Apple URL is optional
@@ -642,7 +647,7 @@ struct EpisodeListView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .foregroundStyle(.primary)
-            .glassEffect(Glass.regular.interactive(), in: .rect(cornerRadius: 16))
+            .background(.regularMaterial, in: .rect(cornerRadius: 16))
           }
           .buttonStyle(.plain)
         }
@@ -691,7 +696,7 @@ struct FilterChip: View {
     } else {
       content
         .foregroundStyle(.primary)
-        .glassEffect(Glass.regular.interactive(), in: .rect(cornerRadius: 16))
+        .background(.regularMaterial, in: .rect(cornerRadius: 16))
     }
   }
 }

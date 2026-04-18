@@ -59,6 +59,7 @@ final class EpisodeListViewModel {
   private var parseDescriptionTask: Task<Void, Never>?
   @ObservationIgnored private var isCleaned = false
   @ObservationIgnored private var progressTimer: Timer?
+  @ObservationIgnored private var lastRefreshDate: Date?
 
   // Use Unit Separator (U+001F) as delimiter - same as DownloadManager
   private static let episodeKeyDelimiter = "\u{1F}"
@@ -406,6 +407,11 @@ final class EpisodeListViewModel {
   // MARK: - Podcast Operations
 
   func refreshPodcast() async {
+    // Skip network fetch if refreshed within last 30 minutes
+    let staleAfter: TimeInterval = 30 * 60
+    if let last = lastRefreshDate, Date().timeIntervalSince(last) < staleAfter {
+      return
+    }
     isRefreshing = true
     defer { isRefreshing = false }
 
@@ -415,6 +421,7 @@ final class EpisodeListViewModel {
       podcastModel.podcastInfo = updatedPodcast
       recomputeFilteredEpisodes()
       try? modelContext?.save()
+      lastRefreshDate = Date()
     } catch {
       print("Failed to refresh podcast: \(error)")
     }

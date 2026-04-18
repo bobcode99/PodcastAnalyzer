@@ -56,17 +56,36 @@ struct QuickAccessCard: View {
 
 // MARK: - Podcast Grid Cell
 
+/// Value-type snapshot passed to PodcastGridCell to prevent @Observable observation
+/// storms. LibraryView converts [PodcastInfoModel] → [PodcastGridItem] once in
+/// updateSortedPodcasts(), so SwiftUI only tracks the cheap value array, not the
+/// live model's episode array.
+struct PodcastGridItem: Identifiable, Equatable {
+  let id: UUID
+  let title: String
+  let imageURL: String
+  let episodeCount: Int
+  let lastUpdated: Date
+
+  init(from model: PodcastInfoModel) {
+    self.id = model.id
+    self.title = model.podcastInfo.title
+    self.imageURL = model.podcastInfo.imageURL
+    self.episodeCount = model.podcastInfo.episodes.count
+    self.lastUpdated = model.lastUpdated
+  }
+}
+
 struct PodcastGridCell: View {
-  let podcast: PodcastInfoModel
+  let item: PodcastGridItem
 
   private var latestEpisodeDate: String? {
-    guard let date = podcast.podcastInfo.episodes.first?.pubDate else { return nil }
-    return Formatters.formatRelativeDate(date)
+    Formatters.formatRelativeDate(item.lastUpdated)
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      CachedAsyncImage(url: URL(string: podcast.podcastInfo.imageURL)) { image in
+      CachedAsyncImage(url: URL(string: item.imageURL)) { image in
         image.resizable().aspectRatio(contentMode: .fill)
       } placeholder: {
         Color.gray.opacity(0.2)
@@ -76,7 +95,7 @@ struct PodcastGridCell: View {
       .clipShape(.rect(cornerRadius: 10))
       .clipped()
 
-      Text(podcast.podcastInfo.title)
+      Text(item.title)
         .font(.caption)
         .fontWeight(.medium)
         .lineLimit(2)
