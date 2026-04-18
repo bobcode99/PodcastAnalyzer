@@ -333,18 +333,17 @@ private func handleAudioInterruption(_ notification: Notification) {
       return .success
     }
 
-    // Skip 15 seconds – fixed with NSNumber
     commandCenter.skipForwardCommand.isEnabled = true
-    commandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: 15)]
+    commandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: skipForwardInterval)]
     commandCenter.skipForwardCommand.addTarget { [weak self] _ in
-      Task { @MainActor in self?.skipForward(seconds: 15) }
+      Task { @MainActor in self?.skipForward() }
       return .success
     }
 
     commandCenter.skipBackwardCommand.isEnabled = true
-    commandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: 15)]
+    commandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: skipBackwardInterval)]
     commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
-      Task { @MainActor in self?.skipBackward(seconds: 15) }
+      Task { @MainActor in self?.skipBackward() }
       return .success
     }
 
@@ -482,13 +481,25 @@ private func handleAudioInterruption(_ notification: Notification) {
     }
   }
 
-  func skipForward(seconds: TimeInterval = 15) {
-    let newTime = min(currentTime + seconds, duration)
+  var skipForwardInterval: TimeInterval {
+    let saved = UserDefaults.standard.integer(forKey: "skipForwardInterval")
+    return TimeInterval(saved > 0 ? saved : 30)
+  }
+
+  var skipBackwardInterval: TimeInterval {
+    let saved = UserDefaults.standard.integer(forKey: "skipBackwardInterval")
+    return TimeInterval(saved > 0 ? saved : 15)
+  }
+
+  func skipForward(seconds: TimeInterval? = nil) {
+    let s = seconds ?? skipForwardInterval
+    let newTime = min(currentTime + s, duration)
     seek(to: newTime)
   }
 
-  func skipBackward(seconds: TimeInterval = 15) {
-    let newTime = max(currentTime - seconds, 0)
+  func skipBackward(seconds: TimeInterval? = nil) {
+    let s = seconds ?? skipBackwardInterval
+    let newTime = max(currentTime - s, 0)
     seek(to: newTime)
   }
 

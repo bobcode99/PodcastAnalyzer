@@ -229,7 +229,7 @@ class BackgroundSyncManager {
 
       // Sync all podcasts in parallel (up to 6 at a time) for faster refresh
       let maxConcurrent = 6
-      await withTaskGroup(of: (Int, PodcastInfo?, Error?).self) { group in
+      await withTaskGroup(of: (Int, PodcastInfo?, String?, Error?).self) { group in
         for (index, podcast) in podcasts.enumerated() {
           // Stop enqueuing new work if the task was cancelled (e.g. BGTask expiration)
           guard !Task.isCancelled else {
@@ -250,12 +250,28 @@ class BackgroundSyncManager {
           }
 
           let rssUrl = podcast.podcastInfo.rssUrl
+          let cachedHeader = podcast.httpCacheHeader
+
+          // Adaptive refresh: skip if we predict the feed won't update for at least 2 hours
+          if let predicted = podcast.predictedNextReleaseDate,
+             predicted.timeIntervalSinceNow > 2 * 3600 {
+            logger.info("Skipping \(podcast.podcastInfo.title) — next episode predicted at \(predicted)")
+            syncProgressCurrent += 1
+            continue
+          }
+
           group.addTask {
             do {
-              let updatedPodcast = try await self.rssService.fetchPodcast(from: rssUrl)
-              return (index, updatedPodcast, nil)
+              let result = try await self.rssService.fetchPodcastConditional(
+                from: rssUrl, cacheHeader: cachedHeader)
+              switch result {
+              case .notModified:
+                return (index, nil, nil, nil)  // no new data, no error
+              case .updated(let podcast, let cacheHeader):
+                return (index, podcast, cacheHeader, nil)
+              }
             } catch {
-              return (index, nil, error)
+              return (index, nil, nil, error)
             }
           }
         }
@@ -336,7 +352,7 @@ class BackgroundSyncManager {
 
   /// Process a single parallel sync result and merge into accumulated state
   private func processSyncResult(
-    _ result: (index: Int, podcast: PodcastInfo?, error: Error?),
+    _ result: (index: Int, podcast: PodcastInfo?, cacheHeader: String?, error: Error?),
     podcasts: [PodcastInfoModel],
     totalNewEpisodes: inout Int,
     newEpisodeDetails: inout [(podcastTitle: String, episodeTitle: String, audioURL: String?, imageURL: String?, language: String)]
@@ -348,10 +364,23 @@ class BackgroundSyncManager {
       return
     }
 
-    guard let updatedPodcast = result.podcast else { return }
+    // Save any new ETag/Last-Modified even if no new episodes
+    if let newHeader = result.cacheHeader {
+      podcast.httpCacheHeader = newHeader
+    }
 
-    let existingEpisodeTitles = Set(podcast.podcastInfo.episodes.map { $0.title })
-    let newEpisodes = updatedPodcast.episodes.filter { !existingEpisodeTitles.contains($0.title) }
+    guard let updatedPodcast = result.podcast else {
+      // nil podcast with no error = HTTP 304 Not Modified — feed unchanged
+      return
+    }
+
+    // Prefer GUID for dedup (most reliable), fall back to audioURL, then title
+    let existingKeys = Set(podcast.podcastInfo.episodes.map { ep in
+      ep.guid ?? ep.audioURL ?? ep.title
+    })
+    let newEpisodes = updatedPodcast.episodes.filter { ep in
+      !existingKeys.contains(ep.guid ?? ep.audioURL ?? ep.title)
+    }
 
     if !newEpisodes.isEmpty {
       totalNewEpisodes += newEpisodes.count
@@ -368,6 +397,12 @@ class BackgroundSyncManager {
       // Update the podcast with new episodes
       podcast.podcastInfo = updatedPodcast
       podcast.lastUpdated = Date()
+
+      // Update release schedule prediction from the latest episode pub dates
+      let pubDates = updatedPodcast.episodes.compactMap { $0.pubDate }
+      let (cadence, nextDate) = ReleaseScheduleGuesser.guess(pubDates: pubDates)
+      podcast.detectedCadence = cadence.rawValue
+      podcast.predictedNextReleaseDate = nextDate
 
       logger.info("Found \(newEpisodes.count) new episodes for \(updatedPodcast.title)")
     }

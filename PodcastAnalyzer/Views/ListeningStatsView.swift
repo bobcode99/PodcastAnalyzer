@@ -28,6 +28,16 @@ struct ListeningStatsView: View {
           // Summary cards
           summaryCards
 
+          // Streak card
+          if viewModel.longestStreakDays > 1 {
+            streakCard
+          }
+
+          // Weekly listening chart
+          if viewModel.weeklyBuckets.count > 1 {
+            weeklyChart
+          }
+
           // Top Shows chart
           if !viewModel.topPodcasts.isEmpty {
             topShowsChart
@@ -80,6 +90,53 @@ struct ListeningStatsView: View {
         color: .blue
       )
     }
+  }
+
+  // MARK: - Streak Card
+
+  private var streakCard: some View {
+    HStack {
+      Image(systemName: "flame.fill")
+        .foregroundStyle(.orange)
+      Text("Longest streak: **\(viewModel.longestStreakDays) days**")
+        .font(.subheadline)
+      Spacer()
+    }
+    .padding(12)
+    .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+  }
+
+  // MARK: - Weekly Chart
+
+  private var weeklyChart: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Hours per Week")
+        .font(.headline)
+
+      Chart(viewModel.weeklyBuckets) { bucket in
+        BarMark(
+          x: .value("Week", bucket.weekStart, unit: .weekOfYear),
+          y: .value("Hours", bucket.hours)
+        )
+        .foregroundStyle(Color.indigo.gradient)
+        .cornerRadius(3)
+      }
+      .chartXAxis {
+        AxisMarks(values: .stride(by: .month)) { _ in
+          AxisGridLine()
+          AxisValueLabel(format: .dateTime.month(.abbreviated))
+        }
+      }
+      .chartYAxis {
+        AxisMarks { value in
+          AxisGridLine()
+          AxisValueLabel("\(value.as(Double.self).map { String(format: "%.0fh", $0) } ?? "")")
+        }
+      }
+      .frame(height: 160)
+    }
+    .padding()
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
   }
 
   // MARK: - Top Shows Chart

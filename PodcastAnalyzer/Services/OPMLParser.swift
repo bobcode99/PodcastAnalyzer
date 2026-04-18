@@ -17,6 +17,33 @@ struct OPMLParser {
     parser.parse()
     return delegate.rssURLs
   }
+
+  /// Generates an OPML 2.0 document from a list of podcast subscriptions.
+  static func export(podcasts: [PodcastInfo]) -> String {
+    var lines: [String] = []
+    lines.append(#"<?xml version="1.0" encoding="UTF-8"?>"#)
+    lines.append(#"<opml version="2.0">"#)
+    lines.append("  <head>")
+    lines.append("    <title>Podcast Subscriptions</title>")
+    lines.append("  </head>")
+    lines.append("  <body>")
+    for podcast in podcasts where !podcast.rssUrl.isEmpty {
+      let title = xmlEscape(podcast.title)
+      let url = xmlEscape(podcast.rssUrl)
+      lines.append(#"    <outline type="rss" text="\#(title)" xmlUrl="\#(url)"/>"#)
+    }
+    lines.append("  </body>")
+    lines.append("</opml>")
+    return lines.joined(separator: "\n")
+  }
+
+  private static func xmlEscape(_ string: String) -> String {
+    string
+      .replacingOccurrences(of: "&", with: "&amp;")
+      .replacingOccurrences(of: "\"", with: "&quot;")
+      .replacingOccurrences(of: "<", with: "&lt;")
+      .replacingOccurrences(of: ">", with: "&gt;")
+  }
 }
 
 // MARK: - Private XML delegate

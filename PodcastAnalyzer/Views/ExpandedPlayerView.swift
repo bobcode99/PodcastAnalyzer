@@ -32,6 +32,9 @@ struct ExpandedPlayerView: View {
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
   private let quickSpeeds: [Float] = [0.8, 1.0, 1.3, 1.5, 1.8, 2.0]
 
+  @AppStorage("skipForwardInterval") private var skipForwardInterval: Int = 30
+  @AppStorage("skipBackwardInterval") private var skipBackwardInterval: Int = 15
+
   // Navigation callbacks - dismiss sheet first, then navigate in parent
   var onNavigateToEpisodeDetail: ((PodcastEpisodeInfo, String, String?) -> Void)?
   var onNavigateToPodcast: ((PodcastInfoModel) -> Void)?
@@ -371,12 +374,12 @@ struct ExpandedPlayerView: View {
 
       HStack(spacing: 28) {
         Button(action: { viewModel.skipBackward() }) {
-          Image(systemName: "gobackward.15")
+          Image(systemName: "gobackward.\(skipBackwardInterval)")
             .font(.system(size: 32))
             .foregroundStyle(.primary)
         }
         .frame(width: 60)
-        .accessibilityLabel("Skip back 15 seconds")
+        .accessibilityLabel("Skip back \(skipBackwardInterval) seconds")
 
         Button(action: { viewModel.togglePlayPause() }) {
           Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -387,12 +390,12 @@ struct ExpandedPlayerView: View {
         .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
 
         Button(action: { viewModel.skipForward() }) {
-          Image(systemName: "goforward.30")
+          Image(systemName: "goforward.\(skipForwardInterval)")
             .font(.system(size: 32))
             .foregroundStyle(.primary)
         }
         .frame(width: 60)
-        .accessibilityLabel("Skip forward 30 seconds")
+        .accessibilityLabel("Skip forward \(skipForwardInterval) seconds")
       }
 
       Spacer()
@@ -534,6 +537,8 @@ struct ExpandedPlayerView: View {
 struct TranscriptFullScreenView: View {
   @Environment(\.dismiss) private var dismiss
   @Bindable var viewModel: ExpandedPlayerViewModel
+  @AppStorage("skipForwardInterval") private var skipForwardInterval: Int = 30
+  @AppStorage("skipBackwardInterval") private var skipBackwardInterval: Int = 15
 
   private var toolbarPlacement: ToolbarItemPlacement {
     #if os(iOS)
@@ -604,11 +609,11 @@ struct TranscriptFullScreenView: View {
 
       HStack(spacing: 16) {
         Button(action: { viewModel.skipBackward() }) {
-          Image(systemName: "gobackward.15")
+          Image(systemName: "gobackward.\(skipBackwardInterval)")
             .font(.system(size: 20))
             .foregroundStyle(.primary)
         }
-        .accessibilityLabel("Skip back 15 seconds")
+        .accessibilityLabel("Skip back \(skipBackwardInterval) seconds")
 
         Button(action: { viewModel.togglePlayPause() }) {
           Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
@@ -618,11 +623,11 @@ struct TranscriptFullScreenView: View {
         .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
 
         Button(action: { viewModel.skipForward() }) {
-          Image(systemName: "goforward.30")
+          Image(systemName: "goforward.\(skipForwardInterval)")
             .font(.system(size: 20))
             .foregroundStyle(.primary)
         }
-        .accessibilityLabel("Skip forward 30 seconds")
+        .accessibilityLabel("Skip forward \(skipForwardInterval) seconds")
       }
     }
     .padding(12)

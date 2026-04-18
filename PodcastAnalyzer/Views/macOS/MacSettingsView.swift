@@ -251,6 +251,7 @@ struct SyncSettingsTab: View {
 struct PlaybackSettingsTab: View {
   @State private var viewModel = SettingsViewModel()
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+  private let skipIntervalOptions: [Int] = [5, 10, 15, 20, 30, 45, 60]
 
   var body: some View {
     @Bindable var viewModel = viewModel
@@ -266,6 +267,24 @@ struct PlaybackSettingsTab: View {
           viewModel.setDefaultPlaybackSpeed(newValue)
         }
 
+        Picker("Skip Back", selection: Binding(
+          get: { viewModel.skipBackwardInterval },
+          set: { viewModel.setSkipBackwardInterval($0) }
+        )) {
+          ForEach(skipIntervalOptions, id: \.self) { seconds in
+            Text("\(seconds)s").tag(seconds)
+          }
+        }
+
+        Picker("Skip Forward", selection: Binding(
+          get: { viewModel.skipForwardInterval },
+          set: { viewModel.setSkipForwardInterval($0) }
+        )) {
+          ForEach(skipIntervalOptions, id: \.self) { seconds in
+            Text("\(seconds)s").tag(seconds)
+          }
+        }
+
         Toggle("Auto-Play Next Episode", isOn: $viewModel.autoPlayNextEpisode)
           .onChange(of: viewModel.autoPlayNextEpisode) { _, newValue in
             viewModel.setAutoPlayNextEpisode(newValue)
@@ -273,7 +292,7 @@ struct PlaybackSettingsTab: View {
       } header: {
         Text("Playback")
       } footer: {
-        Text("When enabled, a random unplayed episode will play when the queue is empty.")
+        Text("Skip intervals apply to in-app controls and lock screen/headphone buttons.")
       }
     }
     .formStyle(.grouped)

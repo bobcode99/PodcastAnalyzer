@@ -18,6 +18,8 @@ struct DataManagementView: View {
   @State private var showClearAIAnalysisConfirmation = false
   @State private var isClearingData = false
   @State private var clearingMessage = ""
+  @State private var opmlExportItem: ShareableOPML?
+  @State private var diagnosticExportItem: ShareableOPML?
 
   // Storage info - loaded async
   @State private var imageCacheSize: String = "Calculating..."
@@ -178,6 +180,39 @@ struct DataManagementView: View {
           }
         }
       }
+
+      // MARK: - Export Section
+      Section {
+        Button(action: exportOPML) {
+          HStack {
+            Image(systemName: "square.and.arrow.up")
+              .foregroundStyle(.blue)
+              .frame(width: 24)
+            Text("Export Subscriptions (OPML)")
+          }
+        }
+        .buttonStyle(.plain)
+
+        Button(action: exportDiagnosticReport) {
+          HStack {
+            Image(systemName: "doc.text.magnifyingglass")
+              .foregroundStyle(.purple)
+              .frame(width: 24)
+            Text("Export Diagnostic Report")
+          }
+        }
+        .buttonStyle(.plain)
+      } header: {
+        Text("Export")
+      } footer: {
+        Text("OPML exports your subscriptions for use in other apps. Diagnostic report bundles logs and settings for support.")
+      }
+    }
+    .sheet(item: $opmlExportItem) { item in
+      ShareSheet(items: [item.url])
+    }
+    .sheet(item: $diagnosticExportItem) { item in
+      ShareSheet(items: [item.url])
     }
     .navigationTitle("Data Management")
     #if os(iOS)
@@ -425,4 +460,103 @@ struct DataManagementView: View {
       clearingMessage = ""
     }
   }
+
+  // MARK: - Diagnostic Export
+
+  private func exportDiagnosticReport() {
+    Task {
+      // Gather library stats
+      let podcastDescriptor = FetchDescriptor<PodcastInfoModel>(
+        predicate: #Predicate { $0.isSubscribed == true }
+      )
+      let podcastCount = (try? modelContext.fetch(podcastDescriptor).count) ?? 0
+
+      let episodeDescriptor = FetchDescriptor<EpisodeDownloadModel>()
+      let episodeCount = (try? modelContext.fetch(episodeDescriptor).count) ?? 0
+
+      // Build report
+      var report: [String: Any] = [:]
+      report["appVersion"] = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "unknown"
+      report["build"] = (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "unknown"
+      report["osVersion"] = ProcessInfo.processInfo.operatingSystemVersionString
+      report["date"] = ISO8601DateFormatter().string(from: Date())
+      report["subscribedPodcasts"] = podcastCount
+      report["trackedEpisodes"] = episodeCount
+
+      // Include non-sensitive UserDefaults keys (skip API keys)
+      let safeKeys = [
+        "transcriptEngine", "selectedTranscriptLocale", "defaultPlaybackSpeed",
+        "autoPlayNextEpisode", "autoDownloadNewEpisodes", "showTrendingEpisodes",
+        "skipForwardInterval", "skipBackwardInterval", "selectedPodcastRegion"
+      ]
+      var settingsSnapshot: [String: Any] = [:]
+      for key in safeKeys {
+        settingsSnapshot[key] = UserDefaults.standard.object(forKey: key) ?? "not set"
+      }
+      report["settings"] = settingsSnapshot
+
+      // Serialize
+      guard let jsonData = try? JSONSerialization.data(withJSONObject: report, options: .prettyPrinted),
+            let jsonString = String(data: jsonData, encoding: .utf8) else { return }
+
+      // Append recent log file if available
+      let logURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+        .appendingPathComponent("app_logs.txt")
+      var fullReport = "=== Diagnostic Report ===\n\n" + jsonString
+      if let logURL, let logs = try? String(contentsOf: logURL, encoding: .utf8) {
+        fullReport += "\n\n=== Recent Logs ===\n" + logs.suffix(8000)
+      }
+
+      let tempURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("diagnostic_report.txt")
+      try? fullReport.write(to: tempURL, atomically: true, encoding: .utf8)
+      diagnosticExportItem = ShareableOPML(url: tempURL)
+    }
+  }
+
+  // MARK: - OPML Export
+
+  private func exportOPML() {
+    let descriptor = FetchDescriptor<PodcastInfoModel>(
+      predicate: #Predicate { $0.isSubscribed == true }
+    )
+    guard let models = try? modelContext.fetch(descriptor) else { return }
+    let podcasts = models.map { $0.podcastInfo }
+    let opmlString = OPMLParser.export(podcasts: podcasts)
+
+    // Write to a temp file so ShareSheet/ShareLink can share it
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("subscriptions.opml")
+    try? opmlString.write(to: tempURL, atomically: true, encoding: .utf8)
+    opmlExportItem = ShareableOPML(url: tempURL)
+  }
 }
+
+// MARK: - Helpers
+
+struct ShareableOPML: Identifiable {
+  let id = UUID()
+  let url: URL
+}
+
+#if os(iOS)
+struct ShareSheet: UIViewControllerRepresentable {
+  let items: [Any]
+  func makeUIViewController(context: Context) -> UIActivityViewController {
+    UIActivityViewController(activityItems: items, applicationActivities: nil)
+  }
+  func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+#else
+struct ShareSheet: View {
+  let items: [Any]
+  var body: some View {
+    if let url = items.first as? URL {
+      ShareLink(item: url) {
+        Label("Share OPML", systemImage: "square.and.arrow.up")
+      }
+      .padding()
+    }
+  }
+}
+#endif

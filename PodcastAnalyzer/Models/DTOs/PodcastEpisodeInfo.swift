@@ -24,6 +24,7 @@ public struct PodcastEpisodeInfo: Sendable, Identifiable, Hashable {
   public let guid: String?  // Episode GUID from RSS feed
   public let transcriptURL: String?  // URL to VTT/SRT transcript from podcast:transcript tag
   public let transcriptType: String?  // MIME type of transcript (e.g., "text/vtt", "application/srt")
+  public let chaptersURL: String?  // URL to Podcasting 2.0 JSON chapters file
 
   /// Memberwise initializer with defaults for new fields
   public nonisolated init(
@@ -35,7 +36,8 @@ public struct PodcastEpisodeInfo: Sendable, Identifiable, Hashable {
     duration: Int? = nil,
     guid: String? = nil,
     transcriptURL: String? = nil,
-    transcriptType: String? = nil
+    transcriptType: String? = nil,
+    chaptersURL: String? = nil
   ) {
     self.title = title
     self.podcastEpisodeDescription = podcastEpisodeDescription
@@ -46,6 +48,7 @@ public struct PodcastEpisodeInfo: Sendable, Identifiable, Hashable {
     self.guid = guid
     self.transcriptURL = transcriptURL
     self.transcriptType = transcriptType
+    self.chaptersURL = chaptersURL
   }
 
   /// Unique identifier for this episode (uses audioURL or title+pubDate combo)
@@ -82,7 +85,8 @@ public struct PodcastEpisodeInfo: Sendable, Identifiable, Hashable {
 // Explicit Codable conformance to avoid MainActor isolation issues with SwiftData
 extension PodcastEpisodeInfo: Codable {
   private enum CodingKeys: String, CodingKey {
-    case title, podcastEpisodeDescription, pubDate, audioURL, imageURL, duration, guid, transcriptURL, transcriptType
+    case title, podcastEpisodeDescription, pubDate, audioURL, imageURL, duration, guid
+    case transcriptURL, transcriptType, chaptersURL
   }
 
   public nonisolated init(from decoder: Decoder) throws {
@@ -96,6 +100,7 @@ extension PodcastEpisodeInfo: Codable {
     self.guid = try container.decodeIfPresent(String.self, forKey: .guid)
     self.transcriptURL = try container.decodeIfPresent(String.self, forKey: .transcriptURL)
     self.transcriptType = try container.decodeIfPresent(String.self, forKey: .transcriptType)
+    self.chaptersURL = try container.decodeIfPresent(String.self, forKey: .chaptersURL)
   }
 
   public nonisolated func encode(to encoder: Encoder) throws {
@@ -109,5 +114,6 @@ extension PodcastEpisodeInfo: Codable {
     try container.encodeIfPresent(guid, forKey: .guid)
     try container.encodeIfPresent(transcriptURL, forKey: .transcriptURL)
     try container.encodeIfPresent(transcriptType, forKey: .transcriptType)
+    try container.encodeIfPresent(chaptersURL, forKey: .chaptersURL)
   }
 }

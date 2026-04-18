@@ -13,6 +13,8 @@ struct MacMiniPlayerBar: View {
   private var audioManager: EnhancedAudioManager { .shared }
   @State private var isHoveringProgress = false
   @State private var isDraggingProgress = false
+  @AppStorage("skipForwardInterval") private var skipForwardInterval: Int = 30
+  @AppStorage("skipBackwardInterval") private var skipBackwardInterval: Int = 15
 
   private var progressPercentage: Double {
     guard audioManager.duration > 0 else { return 0 }
@@ -125,29 +127,29 @@ struct MacMiniPlayerBar: View {
     if #available(macOS 26, *) {
       GlassEffectContainer(spacing: 24) {
         HStack(spacing: 24) {
-          Button("Skip back 15 seconds", systemImage: "gobackward.15", action: { audioManager.skipBackward(seconds: 15) })
+          Button("Skip back \(skipBackwardInterval) seconds", systemImage: "gobackward.\(skipBackwardInterval)", action: { audioManager.skipBackward() })
             .buttonStyle(.glass)
-            .help("Skip back 15 seconds")
+            .help("Skip back \(skipBackwardInterval) seconds")
 
           Button(audioManager.isPlaying ? "Pause" : "Play", systemImage: audioManager.isPlaying ? "pause.fill" : "play.fill", action: togglePlayback)
             .buttonStyle(.glassProminent)
             .help(audioManager.isPlaying ? "Pause" : "Play")
             .keyboardShortcut(.space, modifiers: [])
 
-          Button("Skip forward 30 seconds", systemImage: "goforward.30", action: { audioManager.skipForward(seconds: 30) })
+          Button("Skip forward \(skipForwardInterval) seconds", systemImage: "goforward.\(skipForwardInterval)", action: { audioManager.skipForward() })
             .buttonStyle(.glass)
-            .help("Skip forward 30 seconds")
+            .help("Skip forward \(skipForwardInterval) seconds")
         }
       }
     } else {
       HStack(spacing: 24) {
-        Button(action: { audioManager.skipBackward(seconds: 15) }) {
-          Image(systemName: "gobackward.15")
+        Button(action: { audioManager.skipBackward() }) {
+          Image(systemName: "gobackward.\(skipBackwardInterval)")
             .font(.system(size: 18))
             .foregroundStyle(.primary)
         }
         .buttonStyle(.plain)
-        .help("Skip back 15 seconds")
+        .help("Skip back \(skipBackwardInterval) seconds")
 
         Button(action: togglePlayback) {
           Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
@@ -160,13 +162,13 @@ struct MacMiniPlayerBar: View {
         .help(audioManager.isPlaying ? "Pause" : "Play")
         .keyboardShortcut(.space, modifiers: [])
 
-        Button(action: { audioManager.skipForward(seconds: 30) }) {
-          Image(systemName: "goforward.30")
+        Button(action: { audioManager.skipForward() }) {
+          Image(systemName: "goforward.\(skipForwardInterval)")
             .font(.system(size: 18))
             .foregroundStyle(.primary)
         }
         .buttonStyle(.plain)
-        .help("Skip forward 30 seconds")
+        .help("Skip forward \(skipForwardInterval) seconds")
       }
     }
   }

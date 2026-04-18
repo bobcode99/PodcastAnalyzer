@@ -223,11 +223,11 @@ final class ExpandedPlayerViewModel {
   }
 
   func skipForward() {
-    audioManager.skipForward(seconds: 30)
+    audioManager.skipForward()
   }
 
   func skipBackward() {
-    audioManager.skipBackward(seconds: 15)
+    audioManager.skipBackward()
   }
 
   func seekToProgress(_ progress: Double) {

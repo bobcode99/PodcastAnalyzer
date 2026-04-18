@@ -14,6 +14,8 @@ struct MacExpandedPlayerView: View {
   @State private var viewModel = ExpandedPlayerViewModel()
   @State private var isDraggingProgress = false
   @State private var dragProgress: Double = 0
+  @AppStorage("skipForwardInterval") private var skipForwardInterval: Int = 30
+  @AppStorage("skipBackwardInterval") private var skipBackwardInterval: Int = 15
 
   var body: some View {
     ZStack {
@@ -184,7 +186,7 @@ struct MacExpandedPlayerView: View {
           .buttonStyle(.glass)
           .menuStyle(.borderlessButton)
 
-          Button("Skip back 15 seconds", systemImage: "gobackward.15", action: viewModel.skipBackward)
+          Button("Skip back \(skipBackwardInterval) seconds", systemImage: "gobackward.\(skipBackwardInterval)", action: viewModel.skipBackward)
             .font(.title2)
             .buttonStyle(.glass)
 
@@ -197,7 +199,7 @@ struct MacExpandedPlayerView: View {
           .buttonStyle(.glassProminent)
           .keyboardShortcut(.space, modifiers: [])
 
-          Button("Skip forward 30 seconds", systemImage: "goforward.30", action: viewModel.skipForward)
+          Button("Skip forward \(skipForwardInterval) seconds", systemImage: "goforward.\(skipForwardInterval)", action: viewModel.skipForward)
             .font(.title2)
             .buttonStyle(.glass)
         }
@@ -221,7 +223,7 @@ struct MacExpandedPlayerView: View {
         .menuStyle(.borderlessButton)
 
         Button(action: viewModel.skipBackward) {
-          Image(systemName: "gobackward.15")
+          Image(systemName: "gobackward.\(skipBackwardInterval)")
             .font(.title2)
         }
         .buttonStyle(.plain)
@@ -234,7 +236,7 @@ struct MacExpandedPlayerView: View {
         .keyboardShortcut(.space, modifiers: [])
 
         Button(action: viewModel.skipForward) {
-          Image(systemName: "goforward.30")
+          Image(systemName: "goforward.\(skipForwardInterval)")
             .font(.title2)
         }
         .buttonStyle(.plain)

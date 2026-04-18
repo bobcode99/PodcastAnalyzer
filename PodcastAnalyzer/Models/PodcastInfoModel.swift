@@ -24,6 +24,17 @@ class PodcastInfoModel {
   /// RSS URL for predicate queries (mirrors podcastInfo.rssUrl)
   var rssUrl: String = ""
 
+  /// Stores either an ETag token or a Last-Modified date string from the last
+  /// successful RSS fetch (AntennaPod dual-field trick). nil = never fetched.
+  var httpCacheHeader: String?
+
+  /// Predicted date of the next new episode based on release cadence analysis.
+  /// nil = not yet analysed or cadence is irregular.
+  var predictedNextReleaseDate: Date?
+
+  /// Human-readable cadence detected by ReleaseScheduleGuesser (e.g. "weekly").
+  var detectedCadence: String?
+
   init(podcastInfo: PodcastInfo, lastUpdated: Date, isSubscribed: Bool = true) {
     self.id = UUID()
     self.podcastInfo = podcastInfo

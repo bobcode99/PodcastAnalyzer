@@ -57,6 +57,64 @@ public actor PodcastRssService {
     Int(duration)
   }
 
+  // MARK: - Conditional HTTP Result
+
+  /// Result of a conditional fetch. `.notModified` means the feed hasn't changed
+  /// since the last fetch (HTTP 304); `.updated` carries the new content and
+  /// the cache header to store for next time.
+  public enum ConditionalFetchResult: Sendable {
+    case notModified
+    case updated(podcast: PodcastInfo, cacheHeader: String?)
+  }
+
+  /// Fetches an RSS feed with conditional HTTP support (ETag / If-Modified-Since).
+  ///
+  /// - Parameters:
+  ///   - urlString: RSS feed URL.
+  ///   - cacheHeader: The ETag or Last-Modified value stored from the previous fetch, or nil.
+  /// - Returns: `.notModified` when the server returns HTTP 304; `.updated` otherwise.
+  public func fetchPodcastConditional(
+    from urlString: String,
+    cacheHeader: String?
+  ) async throws -> ConditionalFetchResult {
+    guard let url = URL(string: urlString) else {
+      throw PodcastServiceError.invalidURL
+    }
+
+    var request = URLRequest(url: url)
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+
+    if let header = cacheHeader {
+      // AntennaPod dual-field trick: store either ETag or Last-Modified in one field.
+      // ETags start with `"` or `W/"`. Everything else is treated as a date string.
+      if header.hasPrefix("\"") || header.hasPrefix("W/\"") {
+        request.setValue(header, forHTTPHeaderField: "If-None-Match")
+      } else {
+        request.setValue(header, forHTTPHeaderField: "If-Modified-Since")
+      }
+    }
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+
+    if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 304 {
+      return .notModified
+    }
+
+    // Extract the best cache header to store (prefer ETag, fall back to Last-Modified)
+    let newCacheHeader: String? = {
+      guard let http = response as? HTTPURLResponse else { return nil }
+      return http.value(forHTTPHeaderField: "ETag")
+        ?? http.value(forHTTPHeaderField: "Last-Modified")
+    }()
+
+    let feed = try Feed(data: data)
+    guard case .rss(let rssFeed) = feed else { throw PodcastServiceError.notRSS }
+    guard let channel = rssFeed.channel else { throw PodcastServiceError.notRSS }
+
+    let podcast = buildPodcastInfo(from: channel, rssUrl: urlString)
+    return .updated(podcast: podcast, cacheHeader: newCacheHeader)
+  }
+
   /// Parses the given RSS URL and returns a clean model.
   /// - Parameter urlString: any RSS/Atom/JSON feed URL
   /// - Returns: `PodcastInfo` (only RSS data is kept)
@@ -83,21 +141,22 @@ public actor PodcastRssService {
       throw PodcastServiceError.notRSS
     }
 
-    // Create episodes with transcript info from FeedKit's podcast namespace
+    return buildPodcastInfo(from: channel, rssUrl: urlString)
+  }
+
+  // MARK: - Private Helpers
+
+  /// Builds a `PodcastInfo` from a parsed RSS channel.
+  private func buildPodcastInfo(from channel: RSSFeedChannel, rssUrl: String) -> PodcastInfo {
     let items = channel.items ?? []
     let episodes = items.compactMap { item -> PodcastEpisodeInfo? in
       guard let title = item.title else { return nil }
-
-      // Parse duration
       var durationSeconds: Int? = nil
       if let duration = item.iTunes?.duration {
         durationSeconds = parseDuration(duration)
       }
-
-      // Get best transcript from podcast namespace (FeedKit parses this automatically)
-      // item.podcast?.transcripts is [PodcastTranscript]? from FeedKit
       let transcript = selectBestTranscript(from: item.podcast?.transcripts)
-
+      let chaptersURL: String? = nil  // podcast:chapters not exposed by FeedKit; parsed separately if needed
       return PodcastEpisodeInfo(
         title: title,
         podcastEpisodeDescription: item.description,
@@ -107,24 +166,21 @@ public actor PodcastRssService {
         duration: durationSeconds,
         guid: item.guid?.text,
         transcriptURL: transcript?.url,
-        transcriptType: transcript?.type
+        transcriptType: transcript?.type,
+        chaptersURL: chaptersURL
       )
     }
-
     let transcriptCount = episodes.filter { $0.transcriptURL != nil }.count
     logger.info("Parsed \(episodes.count) episodes, \(transcriptCount) with transcripts")
-
     return PodcastInfo(
       title: channel.title ?? "Untitled Podcast",
       description: channel.description,
       episodes: episodes,
-      rssUrl: urlString,
+      rssUrl: rssUrl,
       imageURL: channel.iTunes?.image?.attributes?.href ?? "",
       language: channel.language ?? "en-us"
     )
   }
-
-  // MARK: - Private Helpers
 
   /// Select the best transcript from available options
   /// Prefers VTT and SRT formats as they have timing information

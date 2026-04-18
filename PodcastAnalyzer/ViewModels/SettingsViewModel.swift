@@ -69,6 +69,10 @@ final class SettingsViewModel {
   // Trending episodes
   var showTrendingEpisodes: Bool = true
 
+  // Skip intervals
+  var skipForwardInterval: Int = 30
+  var skipBackwardInterval: Int = 15
+
   private enum Keys {
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
     static let selectedTranscriptLocale = "selectedTranscriptLocale"
@@ -79,6 +83,8 @@ final class SettingsViewModel {
     static let transcriptEngine = "transcriptEngine"
     static let autoDownloadNewEpisodes = "autoDownloadNewEpisodes"
     static let showTrendingEpisodes = "showTrendingEpisodes"
+    static let skipForwardInterval = "skipForwardInterval"
+    static let skipBackwardInterval = "skipBackwardInterval"
   }
 
   // MARK: - Transcript Engine
@@ -116,6 +122,7 @@ final class SettingsViewModel {
     loadTranscriptEngine()
     loadAutoDownloadNewEpisodes()
     loadShowTrendingEpisodes()
+    loadSkipIntervals()
   }
 
   // Tasks are cancelled via cleanup() from onDisappear; deinit removed
@@ -447,6 +454,25 @@ final class SettingsViewModel {
   private func loadDefaultPlaybackSpeed() {
     let savedSpeed = UserDefaults.standard.float(forKey: Keys.defaultPlaybackSpeed)
     defaultPlaybackSpeed = savedSpeed > 0 ? savedSpeed : 1.0
+  }
+
+  // MARK: - Skip Interval Settings
+
+  func setSkipForwardInterval(_ seconds: Int) {
+    skipForwardInterval = seconds
+    UserDefaults.standard.set(seconds, forKey: Keys.skipForwardInterval)
+  }
+
+  func setSkipBackwardInterval(_ seconds: Int) {
+    skipBackwardInterval = seconds
+    UserDefaults.standard.set(seconds, forKey: Keys.skipBackwardInterval)
+  }
+
+  private func loadSkipIntervals() {
+    let fwd = UserDefaults.standard.integer(forKey: Keys.skipForwardInterval)
+    skipForwardInterval = fwd > 0 ? fwd : 30
+    let bwd = UserDefaults.standard.integer(forKey: Keys.skipBackwardInterval)
+    skipBackwardInterval = bwd > 0 ? bwd : 15
   }
 
   // MARK: - Transcript Model Management

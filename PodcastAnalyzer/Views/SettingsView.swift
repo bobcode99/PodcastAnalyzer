@@ -14,6 +14,7 @@ struct SettingsView: View {
   @State private var showAddFeedSheet = false
 
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+  private let skipIntervalOptions: [Int] = [5, 10, 15, 20, 30, 45, 60]
 
   var body: some View {
     List {
@@ -206,6 +207,38 @@ struct SettingsView: View {
             viewModel.setDefaultPlaybackSpeed(newValue)
           }
 
+          Picker(selection: Binding(
+            get: { viewModel.skipBackwardInterval },
+            set: { viewModel.setSkipBackwardInterval($0) }
+          )) {
+            ForEach(skipIntervalOptions, id: \.self) { seconds in
+              Text("\(seconds)s").tag(seconds)
+            }
+          } label: {
+            HStack {
+              Image(systemName: "gobackward")
+                .foregroundStyle(.orange)
+                .frame(width: 24)
+              Text("Skip Back")
+            }
+          }
+
+          Picker(selection: Binding(
+            get: { viewModel.skipForwardInterval },
+            set: { viewModel.setSkipForwardInterval($0) }
+          )) {
+            ForEach(skipIntervalOptions, id: \.self) { seconds in
+              Text("\(seconds)s").tag(seconds)
+            }
+          } label: {
+            HStack {
+              Image(systemName: "goforward")
+                .foregroundStyle(.orange)
+                .frame(width: 24)
+              Text("Skip Forward")
+            }
+          }
+
           Toggle(isOn: Binding(
             get: { viewModel.autoPlayNextEpisode },
             set: { viewModel.setAutoPlayNextEpisode($0) }
@@ -220,7 +253,7 @@ struct SettingsView: View {
         } header: {
           Text("Playback")
         } footer: {
-          Text("When enabled, the top-ranked unplayed episode from Up Next will play when the queue is empty")
+          Text("Skip intervals also apply to lock screen and headphone controls. Auto-play continues from the Up Next queue when it would otherwise stop.")
         }
 
         // MARK: - Region Section
