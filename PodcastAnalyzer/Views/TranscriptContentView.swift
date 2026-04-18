@@ -62,7 +62,8 @@ struct TranscriptContentView: View {
                 searchFocused: $searchFocused,
                 autoScrollEnabled: $autoScrollEnabled,
                 onShowTranslationPicker: onShowTranslationPicker,
-                onShowSubtitleSettings: onShowSubtitleSettings
+                onShowSubtitleSettings: onShowSubtitleSettings,
+                onShowRegenerateOptions: onShowRegenerateConfirmation
             )
             .background(.ultraThinMaterial)
             Divider()

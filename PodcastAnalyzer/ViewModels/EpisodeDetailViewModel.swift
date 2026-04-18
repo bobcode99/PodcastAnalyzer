@@ -143,7 +143,9 @@ final class EpisodeDetailViewModel {
   var transcriptState: TranscriptState = .idle
   var transcriptText: String = ""
   var isModelReady: Bool = false
-  /// Language override for transcript generation (nil = use podcast RSS language)
+  /// Language override for transcript generation.
+  /// `nil` means use the engine default: podcast RSS language for Apple Speech,
+  /// or auto-detect for Whisper.
   var selectedTranscriptLanguage: String?
   /// Engine override for transcript generation (nil = use global Settings default)
   var selectedTranscriptEngine: TranscriptEngine?
@@ -1239,9 +1241,17 @@ final class EpisodeDetailViewModel {
       return
     }
 
-    // Use TranscriptManager for background processing
-    // nil language → Whisper auto-detects; explicit selection overrides
-    let language: String? = selectedTranscriptLanguage.flatMap { $0 == "auto" ? nil : $0 }
+    // Preserve engine-specific defaults when no explicit language override is selected.
+    let effectiveEngine = selectedTranscriptEngine ?? TranscriptEngine(
+      rawValue: UserDefaults.standard.string(forKey: "transcriptEngine") ?? ""
+    ) ?? .appleSpeech
+    let language: String? = switch effectiveEngine {
+    case .whisper:
+      selectedTranscriptLanguage.flatMap { $0 == "auto" ? nil : $0 }
+    case .appleSpeech:
+      selectedTranscriptLanguage ?? getPodcastLanguage()
+    }
+
     TranscriptManager.shared.queueTranscript(
       episodeTitle: episode.title,
       podcastTitle: podcastTitle,

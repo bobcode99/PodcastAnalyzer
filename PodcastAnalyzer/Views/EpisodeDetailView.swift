@@ -171,22 +171,11 @@ struct EpisodeDetailView: View {
                 "Are you sure you want to delete this downloaded episode? You can download it again later."
             )
         }
-        .confirmationDialog(
-            "Regenerate Transcript",
-            isPresented: $showRegenerateConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Regenerate from Audio") {
-                viewModel.regenerateTranscript()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "This will replace the current transcript with one generated from the downloaded audio. The new transcript will have accurate timestamps."
-            )
-        }
         .sheet(isPresented: $showSubtitleSettings) {
             SubtitleSettingsSheet(hasTranslation: viewModel.hasExistingTranslation)
+        }
+        .sheet(isPresented: $showRegenerateConfirmation) {
+            TranscriptRegenerateSheet(viewModel: viewModel)
         }
         .sheet(isPresented: $showTranslationLanguagePicker) {
             TranslationLanguagePickerSheet(
@@ -413,6 +402,151 @@ struct EpisodeDetailView: View {
         }
     }
 
+}
+
+private struct TranscriptRegenerateSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var viewModel: EpisodeDetailViewModel
+
+    private var effectiveEngine: TranscriptEngine {
+        viewModel.selectedTranscriptEngine ?? TranscriptEngine(
+            rawValue: UserDefaults.standard.string(forKey: "transcriptEngine") ?? ""
+        ) ?? .appleSpeech
+    }
+
+    private func resolvedLanguage(_ code: String, for engine: TranscriptEngine) -> String {
+        let locales = SettingsViewModel.locales(for: engine)
+        let lower = code.lowercased()
+
+        if locales.contains(where: { $0.id == lower }) { return lower }
+        if let match = locales.first(where: { $0.id.hasPrefix(lower + "-") }) {
+            return match.id
+        }
+
+        let base = lower.split(separator: "-").first.map(String.init) ?? lower
+        if let match = locales.first(where: { $0.id == base || $0.id.hasPrefix(base + "-") }) {
+            return match.id
+        }
+
+        return lower
+    }
+
+    private var pickerLocales: [SettingsViewModel.TranscriptLocaleOption] {
+        let standard = SettingsViewModel.locales(for: effectiveEngine)
+        let podcastLang = viewModel.podcastLanguage.lowercased()
+        let resolved = resolvedLanguage(podcastLang, for: effectiveEngine)
+
+        if standard.contains(where: { $0.id == resolved }) {
+            return standard
+        }
+
+        let displayName = Locale.current.localizedString(forLanguageCode: podcastLang) ?? podcastLang
+        let dynamic = SettingsViewModel.TranscriptLocaleOption(
+            id: podcastLang,
+            name: "\(displayName) (podcast)"
+        )
+        return [dynamic] + standard
+    }
+
+    private var selectedLanguageBinding: Binding<String> {
+        Binding(
+            get: {
+                if effectiveEngine == .whisper {
+                    return viewModel.selectedTranscriptLanguage ?? "auto"
+                }
+                return resolvedLanguage(
+                    viewModel.selectedTranscriptLanguage ?? viewModel.podcastLanguage,
+                    for: effectiveEngine
+                )
+            },
+            set: { newValue in
+                if effectiveEngine == .whisper {
+                    viewModel.selectedTranscriptLanguage = (newValue == "auto") ? nil : newValue
+                } else {
+                    let defaultLocale = resolvedLanguage(viewModel.podcastLanguage, for: effectiveEngine)
+                    viewModel.selectedTranscriptLanguage = (newValue == defaultLocale) ? nil : newValue
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("This replaces the current transcript with one generated from the downloaded audio and preserves accurate timestamps.")
+                }
+
+                Section {
+                    Picker("Engine", selection: Binding(
+                        get: { effectiveEngine },
+                        set: { newEngine in
+                            viewModel.selectedTranscriptEngine = newEngine
+                            if newEngine == .whisper {
+                                return
+                            }
+
+                            if let selected = viewModel.selectedTranscriptLanguage {
+                                let resolved = resolvedLanguage(selected, for: newEngine)
+                                let isSupported = SettingsViewModel.locales(for: newEngine).contains {
+                                    $0.id == resolved
+                                }
+                                if !isSupported {
+                                    viewModel.selectedTranscriptLanguage = nil
+                                }
+                            }
+                        }
+                    )) {
+                        ForEach(TranscriptEngine.allCases) { engine in
+                            Label(engine.displayName, systemImage: engine.systemImage)
+                                .tag(engine)
+                        }
+                    }
+
+                    Picker("Language", selection: selectedLanguageBinding) {
+                        ForEach(pickerLocales) { locale in
+                            Text(locale.name).tag(locale.id)
+                        }
+                    }
+                } header: {
+                    Text("Generation Settings")
+                } footer: {
+                    if effectiveEngine == .whisper {
+                        Text("Auto-detect identifies the language automatically.")
+                    } else {
+                        Text("Apple Speech uses the podcast language by default and requires a model download per language.")
+                    }
+                }
+
+                Section {
+                    Button("Regenerate from Audio") {
+                        dismiss()
+                        viewModel.regenerateTranscript()
+                    }
+                    .disabled(!viewModel.hasLocalAudio)
+                }
+
+                if !viewModel.hasLocalAudio {
+                    Section {
+                        Text("Download the episode audio before regenerating the transcript.")
+                    }
+                }
+            }
+            .navigationTitle("Regenerate Transcript")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
 }
 
 // MARK: - Scroll Header Collapse Modifier

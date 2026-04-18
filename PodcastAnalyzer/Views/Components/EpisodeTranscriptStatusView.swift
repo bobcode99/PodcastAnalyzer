@@ -45,6 +45,9 @@ struct EpisodeTranscriptStatusView: View {
     }
 
     private var transcriptLanguageName: String {
+        if effectiveEngine == .whisper, viewModel.selectedTranscriptLanguage == nil {
+            return "Auto-detect"
+        }
         let code = viewModel.selectedTranscriptLanguage ?? viewModel.podcastLanguage
         let resolved = resolvedLanguage(code)
         return pickerLocales.first { $0.id == resolved }?.name ?? code
@@ -97,7 +100,22 @@ struct EpisodeTranscriptStatusView: View {
                         // Engine picker
                         Picker("Engine", selection: Binding(
                             get: { effectiveEngine },
-                            set: { viewModel.selectedTranscriptEngine = $0 }
+                            set: { newEngine in
+                                viewModel.selectedTranscriptEngine = newEngine
+                                if newEngine == .whisper {
+                                    return
+                                }
+
+                                if let selected = viewModel.selectedTranscriptLanguage {
+                                    let resolved = resolvedLanguage(selected)
+                                    let isSupported = SettingsViewModel.locales(for: newEngine).contains {
+                                        $0.id == resolved
+                                    }
+                                    if !isSupported {
+                                        viewModel.selectedTranscriptLanguage = nil
+                                    }
+                                }
+                            }
                         )) {
                             ForEach(TranscriptEngine.allCases) { engine in
                                 Label(engine.displayName, systemImage: engine.systemImage)
