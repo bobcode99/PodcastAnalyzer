@@ -374,7 +374,12 @@ final class SettingsViewModel {
 
         // Save to database
         modelContext.insert(podcastInfoModel)
-        try? modelContext.save()
+        do {
+          try modelContext.save()
+        } catch {
+          modelContext.delete(podcastInfoModel)
+          throw error
+        }
 
         podcastInfoModelList.append(podcastInfoModel)
         rssUrlInput = ""

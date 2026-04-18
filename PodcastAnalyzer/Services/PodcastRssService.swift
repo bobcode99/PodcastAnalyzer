@@ -107,11 +107,7 @@ public actor PodcastRssService {
         ?? http.value(forHTTPHeaderField: "Last-Modified")
     }()
 
-    let feed = try Feed(data: data)
-    guard case .rss(let rssFeed) = feed else { throw PodcastServiceError.notRSS }
-    guard let channel = rssFeed.channel else { throw PodcastServiceError.notRSS }
-
-    let podcast = buildPodcastInfo(from: channel, rssUrl: urlString)
+    let podcast = try parseRSSPodcast(from: data, rssUrl: urlString)
     return .updated(podcast: podcast, cacheHeader: newCacheHeader)
   }
 
@@ -129,22 +125,30 @@ public actor PodcastRssService {
       throw PodcastServiceError.invalidURL
     }
 
-    // Fetch and parse with FeedKit (auto-detects format)
+    // Fetch and parse as a dedicated RSS feed. Some podcast feeds are valid RSS but
+    // can fail FeedKit's universal type detection path, so avoid that false negative.
     let (data, _) = try await URLSession.shared.data(from: url)
-    let feed = try Feed(data: data)
-
-    guard case .rss(let rssFeed) = feed else {
-      throw PodcastServiceError.notRSS
-    }
-
-    guard let channel = rssFeed.channel else {
-      throw PodcastServiceError.notRSS
-    }
-
-    return buildPodcastInfo(from: channel, rssUrl: urlString)
+    return try parseRSSPodcast(from: data, rssUrl: urlString)
   }
 
   // MARK: - Private Helpers
+
+  private func parseRSSPodcast(from data: Data, rssUrl: String) throws -> PodcastInfo {
+    do {
+      let rssFeed = try RSSFeed(data: data)
+      guard let channel = rssFeed.channel else {
+        throw PodcastServiceError.notRSS
+      }
+
+      logger.info("Parsed RSS feed bytes: \(data.count) from \(rssUrl, privacy: .public)")
+      return buildPodcastInfo(from: channel, rssUrl: rssUrl)
+    } catch let error as PodcastServiceError {
+      throw error
+    } catch {
+      logger.error("RSS parsing failed for \(rssUrl, privacy: .public): \(error.localizedDescription)")
+      throw PodcastServiceError.parsingFailed(error)
+    }
+  }
 
   /// Builds a `PodcastInfo` from a parsed RSS channel.
   private func buildPodcastInfo(from channel: RSSFeedChannel, rssUrl: String) -> PodcastInfo {

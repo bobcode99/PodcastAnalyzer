@@ -135,7 +135,9 @@ struct LivePlaybackButton: View {
   }
 
   private var showsPlaybackProgress: Bool {
-    displayProgress > 0.01 && displayProgress < 1 && livePosition >= 1
+    // Show progress as soon as playback has meaningfully started instead of
+    // waiting for 1% progress, which hides the bar for ~1 minute on long episodes.
+    displayProgress > 0 && displayProgress < 1 && livePosition > 0
   }
 
   private var localeIdentifier: String {
