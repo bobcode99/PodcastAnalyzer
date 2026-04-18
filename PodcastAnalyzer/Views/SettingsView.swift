@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 import UserNotifications
 
 #if os(iOS)
@@ -12,6 +13,8 @@ struct SettingsView: View {
   @Environment(\.modelContext) private var modelContext
   @Environment(\.openURL) private var openURL
   @State private var showAddFeedSheet = false
+  @State private var showOPMLImporter = false
+  @State private var opmlImportMessage: String?
 
   private let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
   private let skipIntervalOptions: [Int] = [5, 10, 15, 20, 30, 45, 60]
@@ -172,11 +175,32 @@ struct SettingsView: View {
 
           Button(action: triggerImportShortcut) {
             HStack {
-              Image(systemName: "square.and.arrow.down.fill")
+              Image(systemName: "arrow.down.app.fill")
                 .foregroundStyle(.green)
                 .font(.title2)
-              Text("Import Podcasts")
+              Text("Import from Apple Podcasts")
                 .foregroundStyle(.primary)
+              Spacer()
+              Image(systemName: "chevron.right")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+            }
+          }
+
+          Button(action: { showOPMLImporter = true }) {
+            HStack {
+              Image(systemName: "doc.badge.arrow.up")
+                .foregroundStyle(.blue)
+                .font(.title2)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Import OPML File")
+                  .foregroundStyle(.primary)
+                if let msg = opmlImportMessage {
+                  Text(msg)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+              }
               Spacer()
               Image(systemName: "chevron.right")
                 .foregroundStyle(.secondary)
@@ -186,7 +210,7 @@ struct SettingsView: View {
         } header: {
           Text("Subscriptions")
         } footer: {
-          Text("Add by RSS URL or import an OPML file exported from Apple Podcasts")
+          Text("Import from Apple Podcasts uses a Shortcut. Import OPML File picks any OPML or XML subscription export from another app.")
         }
 
         // MARK: - Playback Section
@@ -516,6 +540,13 @@ struct SettingsView: View {
           showAddFeedSheet = false
         }
       }
+      .fileImporter(
+        isPresented: $showOPMLImporter,
+        allowedContentTypes: [.xml, UTType(filenameExtension: "opml") ?? .xml],
+        allowsMultipleSelection: false
+      ) { result in
+        handleOPMLImport(result)
+      }
       .onAppear {
         viewModel.loadFeeds(modelContext: modelContext)
         viewModel.checkTranscriptModelStatus()
@@ -526,6 +557,35 @@ struct SettingsView: View {
   private func triggerImportShortcut() {
     if let url = URL(string: "shortcuts://run-shortcut?name=ApplePodcast%20To%20PodcastAnalyzer") {
       openURL(url)
+    }
+  }
+
+  private func handleOPMLImport(_ result: Result<[URL], Error>) {
+    switch result {
+    case .failure:
+      opmlImportMessage = "Import cancelled"
+    case .success(let urls):
+      guard let fileURL = urls.first else { return }
+      let accessing = fileURL.startAccessingSecurityScopedResource()
+      defer { if accessing { fileURL.stopAccessingSecurityScopedResource() } }
+      guard let data = try? Data(contentsOf: fileURL) else {
+        opmlImportMessage = "Could not read file"
+        return
+      }
+      let feedURLs = OPMLParser.parse(data: data)
+      guard !feedURLs.isEmpty else {
+        opmlImportMessage = "No feeds found in file"
+        return
+      }
+      opmlImportMessage = "Importing \(feedURLs.count) podcast\(feedURLs.count == 1 ? "" : "s")…"
+      let manager = PodcastImportManager.shared
+      manager.setModelContext(modelContext)
+      Task {
+        await manager.importPodcasts(from: feedURLs)
+        await MainActor.run {
+          opmlImportMessage = "Imported \(feedURLs.count) podcast\(feedURLs.count == 1 ? "" : "s")"
+        }
+      }
     }
   }
 
