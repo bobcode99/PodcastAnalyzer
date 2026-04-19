@@ -402,7 +402,11 @@ private func handleAudioInterruption(_ notification: Notification) {
     updateNowPlayingInfo(imageURL: imageURL ?? episode.imageURL)
 
     if startTime > 0 {
-      player?.seek(to: CMTime(seconds: startTime, preferredTimescale: 600))
+      player?.seek(
+        to: CMTime(seconds: startTime, preferredTimescale: 600),
+        toleranceBefore: .zero,
+        toleranceAfter: .zero
+      )
     }
 
     setupTimeObserver()
@@ -471,7 +475,11 @@ private func handleAudioInterruption(_ notification: Notification) {
 
   func seek(to time: TimeInterval) {
     let cmTime = CMTime(seconds: time, preferredTimescale: 600)
-    player?.seek(to: cmTime) { [weak self] _ in
+    // Use zero tolerance so the playhead lands exactly at the requested time.
+    // Without this, AVPlayer defaults to kCMTimePositiveInfinity tolerances and
+    // may snap to a nearby keyframe — causing transcript taps to jump to the
+    // wrong timestamp.
+    player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
       // Dispatch to main actor since completion handler runs on arbitrary queue
       Task { @MainActor in
         self?.updateNowPlayingCurrentTime()
