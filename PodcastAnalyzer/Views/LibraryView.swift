@@ -211,8 +211,15 @@ struct LibraryView: View {
 
   private func updateSortedPodcasts() {
     sortedPodcasts = subscribedPodcasts
-      .sorted { $0.lastUpdated > $1.lastUpdated }
       .map { PodcastGridItem(from: $0) }
+      .sorted {
+        switch ($0.latestEpisodeDate, $1.latestEpisodeDate) {
+        case let (lhs?, rhs?): return lhs > rhs
+        case (_?, nil):        return true   // dated before undated
+        case (nil, _?):        return false
+        case (nil, nil):       return false
+        }
+      }
   }
 
   @ViewBuilder

@@ -180,7 +180,12 @@ struct TranscriptContentView: View {
                             sentenceHighlightEnabled: highlightEnabled,
                             isSearchMatch: searchMatchIdSet.contains(sentence.id),
                             isCurrentSearchMatch: currentSearchMatchId == sentence.id,
-                            onSegmentTap: { viewModel.seekToSegment($0) }
+                            onSegmentTap: { segment in
+                                // Immediately move the highlight to the tapped sentence so
+                                // the view responds before the 250ms polling timer fires.
+                                currentPlaybackTime = segment.startTime
+                                viewModel.seekToSegment(segment)
+                            }
                         )
                         .equatable()
                         .id(sentence.id)

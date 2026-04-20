@@ -279,6 +279,23 @@ nonisolated enum CJKTextUtils {
     }
 }
 
+// MARK: - Transcript Segment Links
+
+nonisolated enum TranscriptSegmentLink {
+    static let urlScheme = "pa-transcript-segment"
+
+    static func url(for segment: TranscriptSegment) -> URL? {
+        URL(string: "\(urlScheme)://\(segment.id)")
+    }
+
+    static func segmentID(from url: URL) -> Int? {
+        guard url.scheme == urlScheme,
+              let host = url.host(),
+              let segmentID = Int(host) else { return nil }
+        return segmentID
+    }
+}
+
 // MARK: - Search Highlighted Text
 
 /// Text view with search term highlighting
@@ -411,6 +428,11 @@ struct SentenceView: View, Equatable {
         return false
     }
 
+    /// Whether the sentence can provide inline per-segment tap targets.
+    private var supportsInlineSegmentLinks: Bool {
+        searchQuery.isEmpty && !primaryIsTranslated
+    }
+
     /// Primary text to display based on subtitle mode
     private var primaryText: String {
         switch subtitleMode {
@@ -444,58 +466,72 @@ struct SentenceView: View, Equatable {
     }
 
     var body: some View {
-        Button(action: {
-            // Tap seeks to the first segment of the sentence
-            if let firstSegment = sentence.segments.first {
-                onSegmentTap(firstSegment)
-            }
-        }) {
-            HStack(alignment: .top, spacing: showTimestamp ? 12 : 0) {
-                // Timestamp (optional)
-                if showTimestamp {
-                    Text(sentence.formattedStartTime)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(isActive ? .blue : .secondary)
-                        .frame(width: 50, alignment: .leading)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    // Primary text with segment-level highlighting
-                    buildSentenceText()
-                        .font(.system(size: 17, weight: .regular))
-                        .lineSpacing(4)
-
-                    // Secondary text for dual subtitle modes
-                    if let secondary = secondaryText {
-                        Text(secondary)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(3)
+        Group {
+            if supportsInlineSegmentLinks {
+                sentenceRow
+                    .environment(\.openURL, OpenURLAction { url in
+                        guard let segmentID = TranscriptSegmentLink.segmentID(from: url),
+                              let segment = sentence.segments.first(where: { $0.id == segmentID }) else {
+                            return .systemAction
+                        }
+                        onSegmentTap(segment)
+                        return .handled
+                    })
+            } else {
+                Button(action: {
+                    if let firstSegment = sentence.segments.first {
+                        onSegmentTap(firstSegment)
                     }
+                }) {
+                    sentenceRow
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.vertical, sentenceHighlightEnabled ? 6 : 10)
-            .padding(.leading, sentenceHighlightEnabled ? 0 : 8)
-            .padding(.trailing, 12)
-            .overlay(alignment: .leading) {
-                // Active sentence accent bar (hidden in sentence highlight mode)
-                if !sentenceHighlightEnabled {
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color.blue)
-                        .frame(width: 3)
-                        .opacity(isActive ? 1 : 0)
-                        .scaleEffect(x: 1, y: isActive ? 1 : 0.5, anchor: .leading)
-                        .animation(.easeInOut(duration: 0.25), value: isActive)
-                }
+                .buttonStyle(.plain)
             }
         }
-        .buttonStyle(.plain)
         .background {
             if sentenceHighlightEnabled && isActive {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color.blue.opacity(0.08))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sentenceRow: some View {
+        HStack(alignment: .top, spacing: showTimestamp ? 12 : 0) {
+            if showTimestamp {
+                Text(sentence.formattedStartTime)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(isActive ? .blue : .secondary)
+                    .frame(width: 50, alignment: .leading)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                buildSentenceText()
+                    .font(.system(size: 17, weight: .regular))
+                    .lineSpacing(4)
+
+                if let secondary = secondaryText {
+                    Text(secondary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(3)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, sentenceHighlightEnabled ? 6 : 10)
+        .padding(.leading, sentenceHighlightEnabled ? 0 : 8)
+        .padding(.trailing, 12)
+        .overlay(alignment: .leading) {
+            if !sentenceHighlightEnabled {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color.blue)
+                    .frame(width: 3)
+                    .opacity(isActive ? 1 : 0)
+                    .scaleEffect(x: 1, y: isActive ? 1 : 0.5, anchor: .leading)
+                    .animation(.easeInOut(duration: 0.25), value: isActive)
             }
         }
     }
@@ -542,6 +578,9 @@ struct SentenceView: View, Equatable {
         for (index, segment) in sentence.segments.enumerated() {
             let segmentText = segment.text.trimmingCharacters(in: .whitespaces)
             var attrText = AttributedString(segmentText)
+            if let url = TranscriptSegmentLink.url(for: segment) {
+                attrText.link = url
+            }
 
             switch highlightState {
             case .active(let activeSegmentIndex):

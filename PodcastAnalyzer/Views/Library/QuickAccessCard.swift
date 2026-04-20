@@ -65,14 +65,14 @@ struct PodcastGridItem: Identifiable, Equatable {
   let title: String
   let imageURL: String
   let episodeCount: Int
-  let lastUpdated: Date
+  let latestEpisodeDate: Date?
 
   init(from model: PodcastInfoModel) {
     self.id = model.id
     self.title = model.podcastInfo.title
     self.imageURL = model.podcastInfo.imageURL
     self.episodeCount = model.podcastInfo.episodes.count
-    self.lastUpdated = model.lastUpdated
+    self.latestEpisodeDate = model.podcastInfo.episodes.lazy.compactMap(\.pubDate).max()
   }
 }
 
@@ -80,7 +80,8 @@ struct PodcastGridCell: View {
   let item: PodcastGridItem
 
   private var latestEpisodeDate: String? {
-    Formatters.formatRelativeDate(item.lastUpdated)
+    guard let date = item.latestEpisodeDate else { return nil }
+    return Formatters.formatRelativeDate(date)
   }
 
   var body: some View {
