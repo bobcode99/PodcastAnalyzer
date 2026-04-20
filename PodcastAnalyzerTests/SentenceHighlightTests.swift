@@ -218,3 +218,25 @@ struct SentenceTextJoiningTests {
         #expect(sentence.text == "이것은테스트입니다.")
     }
 }
+
+// MARK: - Segment Link Tests
+
+@MainActor
+struct TranscriptSegmentLinkTests {
+
+    @Test func segmentURLRoundTripsSegmentID() throws {
+        let segment = makeSegment(id: 42, start: 12.34, end: 15.67, text: "jump here")
+
+        let url = try #require(TranscriptSegmentLink.url(for: segment))
+        let segmentID = TranscriptSegmentLink.segmentID(from: url)
+
+        #expect(url.absoluteString == "pa-transcript-segment://42")
+        #expect(segmentID == 42)
+    }
+
+    @Test func rejectsOtherURLSchemes() throws {
+        let url = try #require(URL(string: "https://example.com/42"))
+
+        #expect(TranscriptSegmentLink.segmentID(from: url) == nil)
+    }
+}

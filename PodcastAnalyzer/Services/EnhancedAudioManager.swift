@@ -482,6 +482,10 @@ private func handleAudioInterruption(_ notification: Notification) {
     player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
       // Dispatch to main actor since completion handler runs on arbitrary queue
       Task { @MainActor in
+        // Update currentTime immediately so observers (e.g. TranscriptContentView
+        // polling timer) see the seeked position rather than the stale value that
+        // the periodic time observer hasn't flushed yet.
+        self?.currentTime = time
         self?.updateNowPlayingCurrentTime()
         self?.savePlaybackState()
         self?.postPlaybackPositionUpdate()
